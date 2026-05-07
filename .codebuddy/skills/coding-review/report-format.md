@@ -8,10 +8,10 @@
 
 ### 1.1 目录命名规则
 
-评审结果统一输出到 `code_review/` 根目录下，按分支名创建子目录：
+评审结果统一输出到 `coding/code_review/` 根目录下，按分支名创建子目录：
 
 ```
-code_review/
+coding/code_review/
 └── code_review_{分支名}/                    # 分支名中非字母数字字符转为下划线
     ├── .checkpoint.json                     # 统一检查点（所有工程的 commit hash）
     ├── summary.md                           # 汇总评审报告 + 问题清单
@@ -90,7 +90,7 @@ code_review/
 }
 ```
 
-### 1.3 汇总报告格式
+## 2 汇总报告格式
 
 `summary.md` 文件结构：
 
@@ -218,156 +218,6 @@ code_review/
 - 已失效：X 个
 ```
 
-### 1.4 问题状态定义
-
-| 状态 | 符号 | 含义 | 触发条件 |
-|------|------|------|----------|
-| **未修复** | ❌ | 问题存在，需要修复 | 默认状态 |
-| **已修复** | ✅ | 问题已被正确修复 | AI 检测到问题代码被修改且问题消除 |
-| **需人工确认** | ⚠️ | AI 无法确定问题状态 | 问题代码被修改，但不确定是否修复 |
-| **已失效** | ⛔ | 问题代码/文件被删除 | 文件删除或代码块消失 |
-| **已知风险** | 🔵 | 用户接受该风险，暂不处理 | 用户手动标记 |
-
----
-
-## 2. 问题详情增强格式（Step 7.6）
-
-### 2.1 精确行号定位
-
-**强制要求**：必须读取原始文件获取精确行号，禁止使用估算行号。
-
-实现方法：
-```bash
-# 方法1: 使用 Grep 搜索问题代码片段
-grep -n "问题代码片段" 文件路径
-
-# 方法2: 读取原始文件定位
-# 先从 Diff 解析大致位置，再读取文件确认精确行号
-```
-
-### 2.2 问题报告格式
-
-每个问题必须包含以下结构：
-
-```markdown
-## #N [工程名] 文件名:行号
-
-- **严重级别**: ❌ 严重问题 / ⚠️ 建议优化
-- **状态**: 未修复
-- **发现轮次**: 第X轮
-
-### 问题描述
-{问题的详细说明，包括潜在风险和影响}
-
-### 问题代码位置
-`完整文件路径:行号`
-
-### 代码上下文
-```java
-{行号-5}  // 上下文代码
-{行号-4}  // 上下文代码
-{行号-3}  // 上下文代码
-{行号-2}  // 上下文代码
-{行号-1}  // 上下文代码
-{行号}    问题代码行  // ← 问题所在
-{行号+1}  // 上下文代码
-{行号+2}  // 上下文代码
-{行号+3}  // 上下文代码
-```
-
-### Diff 片段
-```diff
-{从 Diff 文件中提取的相关变更片段}
-+ 新增代码行
-- 删除代码行
-```
-
-### 修改建议
-{具体的修改建议说明}
-
-```java
-// 建议修改为:
-{修改后的代码示例}
-```
-
-### 2.3 代码上下文要求
-
-- **展示范围**：问题行前后各 3-5 行（共 7-11 行）
-- **行号标注**：每行开头标注实际行号
-- **问题标记**：在问题行末尾添加 `// ← 问题所在` 注释
-- **语法高亮**：使用正确的代码块语言标识（java、xml、sql 等）
-
-### 2.4 Diff 片段提取规则
-
-- 从已生成的 Diff 文件中提取与问题相关的片段
-- 使用 `diff` 语法高亮
-- 片段长度：不超过 20 行
-- 必须包含问题代码行
-- 可适当精简，但需保持变更语义完整
-
-### 2.5 完整示例
-
-```markdown
-## #1 [opp-api] ClearPgcMaterialCacheAspect.java:39
-
-- **严重级别**: ❌ 严重问题
-- **状态**: 未修复
-- **发现轮次**: 第1轮
-
-### 问题描述
-AOP 切面中同步调用 Feign 接口清理缓存，存在性能和稳定性风险。
-Feign 调用是同步阻塞的，若被调用服务不可用会导致主流程超时，影响用户体验。
-
-### 问题代码位置
-`opp-material-api/src/main/java/com/infinitus/opp/material/aspect/ClearPgcMaterialCacheAspect.java:39`
-
-### 代码上下文
-```java
-32  @Around("clearPgcMaterialCachePointCut()")
-33  public Object around(ProceedingJoinPoint joinPoint) throws Throwable {
-34      log.info("[AOP删除]-查询pgc素材列表(分页)-执行接口原有逻辑");
-35      Object result = joinPoint.proceed();
-36      //异步删除查询pgc素材列表缓存
-37      log.info("[AOP删除]-查询pgc素材列表(分页)缓存开始异步执行");
-38      // 注意：注释说"异步"但实际是同步调用
-39      feignClient.cleanupPgcMaterialCache();  // ← 问题所在：同步调用
-40      return result;
-41  }
-```
-
-### Diff 片段
-```diff
-+    @Around("clearPgcMaterialCachePointCut()")
-+    public Object around(ProceedingJoinPoint joinPoint) throws Throwable {
-+        Object result = joinPoint.proceed();
-+        log.info("[AOP删除]-查询pgc素材列表(分页)缓存开始异步执行");
-+        feignClient.cleanupPgcMaterialCache();  // 同步调用风险
-+        return result;
-+    }
-```
-
-### 修改建议
-改为异步调用，避免阻塞主流程。建议使用 @Async 注解或线程池，并添加超时熔断机制。
-
-```java
-// 建议修改为:
-@Async
-protected void cleanupCacheAsync() {
-    try {
-        feignClient.cleanupPgcMaterialCache();
-    } catch (Exception e) {
-        log.error("[AOP删除]-清理PGC缓存失败", e);
-    }
-}
-
-@Around("clearPgcMaterialCachePointCut()")
-public Object around(ProceedingJoinPoint joinPoint) throws Throwable {
-    Object result = joinPoint.proceed();
-    cleanupCacheAsync();  // 异步调用
-    return result;
-}
-```
-
 ---
 
 ## 3. 评审结果文件格式（详细报告）
@@ -455,6 +305,7 @@ public Object around(ProceedingJoinPoint joinPoint) throws Throwable {
 - 数据库脚本同步：已同步 / 未同步
 
 【七】外部文档约束核对（如有）
+    ```
 ┌─────────────────────────────────────────────────────────────────┐
 │ 文档来源：design.md                                             │
 ├─────────────────────────────────────────────────────────────────┤
@@ -478,7 +329,7 @@ public Object around(ProceedingJoinPoint joinPoint) throws Throwable {
 │ 状态：✅ 已满足                                                  │
 │ 验证：ProductMapper.xml:78 实现了 LIKE 查询                     │
 └─────────────────────────────────────────────────────────────────┘
-
+    ```
 约束满足统计：
 - 总约束数：5
 - 已满足：4
@@ -504,3 +355,155 @@ public Object around(ProceedingJoinPoint joinPoint) throws Throwable {
 【十】一句话总结
 [一句话概括分支质量、跨工程协调风险及合并建议]
 ```
+---
+
+## 4. 问题详情增强格式
+
+### 4.1 精确行号定位
+
+**强制要求**：必须读取原始文件获取精确行号，禁止使用估算行号。
+
+实现方法：
+```bash
+# 方法1: 使用 Grep 搜索问题代码片段
+grep -n "问题代码片段" 文件路径
+
+# 方法2: 读取原始文件定位
+# 先从 Diff 解析大致位置，再读取文件确认精确行号
+```
+
+### 4.2 问题报告格式
+
+每个问题必须包含以下结构：
+
+```markdown
+## #N [工程名] 文件名:行号
+
+- **严重级别**: ❌ 严重问题 / ⚠️ 建议优化
+- **状态**: 未修复
+- **发现轮次**: 第X轮
+
+### 问题描述
+{问题的详细说明，包括潜在风险和影响}
+
+### 问题代码位置
+`完整文件路径:行号`
+
+### 代码上下文
+    ```java
+{行号-5}  // 上下文代码
+{行号-4}  // 上下文代码
+{行号-3}  // 上下文代码
+{行号-2}  // 上下文代码
+{行号-1}  // 上下文代码
+{行号}    问题代码行  // ← 问题所在
+{行号+1}  // 上下文代码
+{行号+2}  // 上下文代码
+{行号+3}  // 上下文代码
+    ```
+
+### Diff 片段
+    ```diff
+{从 Diff 文件中提取的相关变更片段}
++ 新增代码行
+- 删除代码行
+    ```
+
+### 修改建议
+{具体的修改建议说明}
+
+    ```java
+// 建议修改为:
+{修改后的代码示例}
+    ```
+```
+
+### 4.3 代码上下文要求
+
+- **展示范围**：问题行前后各 3-5 行（共 7-11 行）
+- **行号标注**：每行开头标注实际行号
+- **问题标记**：在问题行末尾添加 `// ← 问题所在` 注释
+- **语法高亮**：使用正确的代码块语言标识（java、xml、sql 等）
+
+### 4.4 Diff 片段提取规则
+
+- 从已生成的 Diff 文件中提取与问题相关的片段
+- 使用 `diff` 语法高亮
+- 片段长度：不超过 20 行
+- 必须包含问题代码行
+- 可适当精简，但需保持变更语义完整
+
+### 4.5 完整示例
+
+```markdown
+## #1 [opp-api] ClearPgcMaterialCacheAspect.java:39
+
+- **严重级别**: ❌ 严重问题
+- **状态**: 未修复
+- **发现轮次**: 第1轮
+
+### 问题描述
+AOP 切面中同步调用 Feign 接口清理缓存，存在性能和稳定性风险。
+Feign 调用是同步阻塞的，若被调用服务不可用会导致主流程超时，影响用户体验。
+
+### 问题代码位置
+`opp-material-api/src/main/java/com/infinitus/opp/material/aspect/ClearPgcMaterialCacheAspect.java:39`
+
+### 代码上下文
+    ```java
+32  @Around("clearPgcMaterialCachePointCut()")
+33  public Object around(ProceedingJoinPoint joinPoint) throws Throwable {
+34      log.info("[AOP删除]-查询pgc素材列表(分页)-执行接口原有逻辑");
+35      Object result = joinPoint.proceed();
+36      //异步删除查询pgc素材列表缓存
+37      log.info("[AOP删除]-查询pgc素材列表(分页)缓存开始异步执行");
+38      // 注意：注释说"异步"但实际是同步调用
+39      feignClient.cleanupPgcMaterialCache();  // ← 问题所在：同步调用
+40      return result;
+41  }
+    ```
+
+
+### Diff 片段
+    ```diff
++    @Around("clearPgcMaterialCachePointCut()")
++    public Object around(ProceedingJoinPoint joinPoint) throws Throwable {
++        Object result = joinPoint.proceed();
++        log.info("[AOP删除]-查询pgc素材列表(分页)缓存开始异步执行");
++        feignClient.cleanupPgcMaterialCache();  // 同步调用风险
++        return result;
++    }
+    ```
+
+### 修改建议
+改为异步调用，避免阻塞主流程。建议使用 @Async 注解或线程池，并添加超时熔断机制。
+
+    ```java
+// 建议修改为:
+@Async
+protected void cleanupCacheAsync() {
+    try {
+        feignClient.cleanupPgcMaterialCache();
+    } catch (Exception e) {
+        log.error("[AOP删除]-清理PGC缓存失败", e);
+    }
+}
+
+@Around("clearPgcMaterialCachePointCut()")
+public Object around(ProceedingJoinPoint joinPoint) throws Throwable {
+    Object result = joinPoint.proceed();
+    cleanupCacheAsync();  // 异步调用
+    return result;
+}
+    ```
+```
+---
+## 5 问题状态定义
+
+| 状态 | 符号 | 含义 | 触发条件 |
+|------|------|------|----------|
+| **未修复** | ❌ | 问题存在，需要修复 | 默认状态 |
+| **已修复** | ✅ | 问题已被正确修复 | AI 检测到问题代码被修改且问题消除 |
+| **需人工确认** | ⚠️ | AI 无法确定问题状态 | 问题代码被修改，但不确定是否修复 |
+| **已失效** | ⛔ | 问题代码/文件被删除 | 文件删除或代码块消失 |
+| **已知风险** | 🔵 | 用户接受该风险，暂不处理 | 用户手动标记 |

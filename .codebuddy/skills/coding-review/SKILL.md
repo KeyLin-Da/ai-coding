@@ -1,5 +1,5 @@
 ---
-name: code-review
+name: coding-review
 description: "资深 Java 架构师 + 严格代码评审官，聚焦高并发、分布式、企业级 Java 系统的 PR 审核，支持多工程联合评审和增量评审，核心目标是基于事实判断分支是否可合并"
 license: MIT
 compatibility: CodeBuddy Code with git, Read, Write tools.
@@ -8,7 +8,7 @@ metadata:
    version: "1.0"
 ---
 
-**输入**: `/code-review` 之后的参数：
+**输入**: `/coding-review` 之后的参数：
 - `b=yyy`（分支名）- 必填
 - `d=file1.md,file2.docx,https://xxx.feishu.cn/xxx/xxx`（外部文档）- 选填，逗号分隔多个路径或飞书链接
 
@@ -25,10 +25,10 @@ metadata:
 
 # 一、目录结构与文件规范（精简）
 
-评审结果统一输出到 `code_review/` 根目录下，按分支名创建子目录：
+评审结果统一输出到 `coding/code_review/` 根目录下，按分支名创建子目录：
 
 ```
-code_review/
+coding/code_review/
 └── code_review_{分支名}/
     ├── .checkpoint.json
     ├── summary.md
@@ -51,7 +51,7 @@ code_review/
 | 已失效 | ⛔ | 问题代码/文件被删除 |
 | 已知风险 | 🔵 | 用户接受该风险，暂不处理 |
 ```
-完整的目录结构规范、检查点文件格式、汇总报告格式，请在需要时读取本目录下的 `/code-review-format.md`。
+完整的目录结构规范、检查点文件格式、汇总报告格式，请在需要时读取本目录下的 `/report-format.md`。
 
 ---
 
@@ -119,7 +119,7 @@ else:
 
 ### 2.1 检查是否存在历史评审记录
 
-检查目录 `code_review/code_review_{分支名}/` 是否存在：
+检查目录 `coding/code_review/code_review_{分支名}/` 是否存在：
 - **不存在**：首次评审，执行全量评审流程
 - **存在**：读取 `.checkpoint.json` 和 `summary.md`，加载历史检查点数据
 
@@ -213,7 +213,7 @@ git diff master...HEAD --color=never $EXCLUDE_ARGS >> branch_diff_xxx.md
 
 ## Step 6：执行代码评审
 
-> **格式参考**：当需要输出详细评审报告时，读取本目录下的 `code-review-format.md` 获取完整格式规范（问题详情格式、评审结果文件模板等）。
+> **格式参考**：当需要输出详细评审报告时，读取本目录下的 `report-format.md` 获取完整格式规范（问题详情格式、评审结果文件模板等）。
 
 ### 6.0 约束核对（如有外部文档约束）
 
@@ -255,7 +255,7 @@ Diff 文件总数 ≥ 100 时：全量评审 或 分工程输出 + 中止。
 
 ### 7.2 更新 summary.md
 
-> **格式参考**：读取本目录下的 `code-review-format.md` 获取汇总报告完整格式模板。
+> **格式参考**：读取本目录下的 `report-format.md` 获取汇总报告完整格式模板。
 
 重新生成 `summary.md`，包含：评审历史、工程状态、问题清单、需关注项、外部约束核对历史、总体评审结论。
 
