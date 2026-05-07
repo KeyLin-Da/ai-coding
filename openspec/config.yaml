@@ -1,0 +1,125 @@
+schema: spec-driven
+
+# Project context (optional)
+# This is shown to AI when creating artifacts.
+# Add your tech stack, conventions, style guides, domain knowledge, etc.
+context: |
+  ## 项目概述
+  OPP（展业平台）是一个基于 Spring Boot + Macula Boot 框架开发的微服务多模块 Maven 项目。
+  采用领域驱动设计（DDD）思想，按业务领域划分为多个独立服务模块。
+  
+  ## 技术栈
+  
+  ### 后端技术栈
+  - **基础框架**: Spring Boot 2.x + Macula Boot 5.0.17
+  - **微服务架构**: Spring Cloud Alibaba（Nacos 服务注册与配置中心）
+  - **网关**: Spring Cloud Gateway
+  - **数据访问**: MyBatis-Plus + 动态数据源 + JPA（部分服务）
+  - **缓存**: Redis + Spring Cache
+  - **消息队列**: RocketMQ
+  - **安全**: Spring Security + JWT
+  - **工具库**: Hutool, Lombok, MapStruct, FastJSON
+  - **Excel 处理**: EasyExcel, POI
+  - **Java 版本**: Java 11+（大部分服务），Java 1.8（opp-survey）
+  
+  ### 前端技术栈
+  - **管理后台（新版）**: Vue 3.2 + Vite 4 + TypeScript 4.9 + Element Plus 2.7 + Pinia 2.0
+  - **管理后台（旧版）**: Vue 2.6 + Webpack + Element UI 2.15 + Vuex 3
+  - **问卷前端**: React 18 + Umi Max 4 + Ant Design 5 + TypeScript 4.1
+  - **小程序**: Uni-app (Vue 2) 编译到微信小程序
+  
+  ### 构建工具
+  - **后端**: Maven 3.x（多模块聚合项目）
+  - **前端**: npm/pnpm（Vue 项目用 npm，React 项目用 pnpm@10.6.3）
+  
+  ## 项目结构
+  
+  ### 核心模块
+  - **opp-parent**: 父 POM，统一定义依赖版本和插件配置
+  - **opp-gateway**: 网关服务（Spring Cloud Gateway，端口 8000）
+  - **opp-common**: 公共模块（基础公共类、日志模块）
+  - **opp-api**: API 接口定义模块（Feign 客户端接口、DTO）
+  
+  ### 领域服务（端口 9110-9121）
+  - opp-learn (9110): 学习服务
+  - opp-clock-in (9111): 打卡服务（混合数据访问：JPA + MyBatis-Plus + JDBC）
+  - opp-order (9112): 订单服务
+  - opp-user (9113): 用户服务
+  - opp-material (9114): 素材服务（含 AI 功能、双云存储 OSS/COS）
+  - opp-meeting (9115): 会议服务
+  - opp-test (9116): 考试服务
+  - opp-diy (9117): DIY 服务
+  - opp-task (9118): 任务服务
+  - opp-triparty (9119): 三方服务
+  - opp-news-websocket (9120): 资讯 WebSocket
+  - opp-openapi (9121): OpenAPI 服务
+  - opp-survey: 问卷服务（基于 SurveyKing 框架，Java 1.8）
+  
+  ### BFF 层
+  - opp-learn-bff: 学习 BFF
+  - opp-meeting-bff: 会议 BFF
+  - opp-news-bff: 资讯 BFF
+  - opp-test-bff: 考试 BFF
+  - opp-admin-bff: 管理后台 BFF
+  - opp-wellness-bff: wellness BFF
+  
+  ### 前端项目
+  - opp-admin-vue: Vue 3 管理后台（主后台）
+  - opp-admin-learn-vue: Vue 2 学习管理后台
+  - opp-admin-news-vue: Vue 2 资讯管理后台
+  - opp-admin-survey-react: React 问卷管理后台
+  - opp-learn-uniapp: Uni-app 小程序
+  
+  ## 开发规范
+  ### 代码规范
+  - 遵循《阿里巴巴 Java 开发手册》
+  - 使用 Lombok 简化代码
+  - 使用 MapStruct 进行对象转换
+  - 错误码统一在 `{Service}Code.java` 中定义（格式：模块前缀 + 数字编码，如 l10000、u1001）
+  - Feign 客户端命名格式：`*Client.java`
+  
+  ### 数据访问规范
+  - **简单 CRUD**: 使用 MyBatis-Plus 的 `ServiceImpl` 和 `BaseMapper`
+  - **复杂查询**: 使用 `repository` 包下的自定义实现
+  - **多表关联**: 使用 `mybatis-plus-join` 库
+  - **特殊服务**: opp-clock-in 采用混合模式（JPA + MyBatis-Plus + JDBC + Fenix 动态查询）
+  
+  ### 前端规范
+  - Vue 3 项目使用 Composition API + `<script setup>`
+  - Vue 2 项目使用 Options API
+  - React 项目使用函数组件 + Hooks
+  - 使用 ESLint + Prettier 进行代码格式化
+
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+rules:
+  proposal:
+    - 提案内容控制在 800 字以内
+    - 必须包含"非目标（Non-goals）"章节
+    - 清晰说明要解决的问题及其原因
+    - 包含成功指标或验收标准
+    - 引用项目上下文中的相关技术约束
+  
+  specs:
+    - 使用面向用户的语言编写需求（避免实现细节）
+    - 使用"必须（SHALL）"表示强制性要求，使用"应该（SHOULD）"表示建议性要求
+    - 每个需求必须是可测试和可验证的
+    - 将相关需求分组到逻辑章节中
+    - 包含边界情况和异常处理场景
+  
+  design:
+    - 聚焦架构决策和权衡分析
+    - 在需要时包含图表（优先使用 Mermaid 格式）
+    - 记录 API 契约，包含请求/响应示例
+    - 如涉及数据库变更，需说明 schema 改动
+    - 考虑向后兼容性和迁移策略
+    - 引用代码库中的现有模式
+  
+  tasks:
+    - 将任务拆分为每个最多 2-4 小时的工作块
+    - 按逻辑顺序排列任务（依赖项优先）
+    - 每个任务应该是独立可验证的
+    - 包含文件路径和具体实现细节
+    - 标记需要跨模块协调的任务
+    - 引用相关的规格说明和设计决策
