@@ -14,12 +14,13 @@ metadata:
 
 ## 输入格式
 
-`/prd [id=<requirement-id>] [n=<requirement-name>] <source1>,<source2>,...`
+`/prd [id=<requirement-id>] [n=<requirement-name>] [c=<clarification-desc>] [<source1>,<source2>,...]`
 
 参数说明：
 - `id=<requirement-id>`: （可选）需求ID，用于组织同一需求的多个 MVP 版本。支持数字、字母、连字符、下划线，特殊字符将自动过滤
 - `n=<requirement-name>`: （可选）需求名，用于组织同一需求的多个 MVP 版本。支持中文字符，特殊字符将自动规范化
-- `<source1>,<source2>,...`: 逗号分隔的 PRD 来源列表
+- `c=<clarification-desc>`: （可选）需求澄清描述，用于补充分析时的业务前提、范围边界和已确认约束
+- `<source1>,<source2>,...`: （可选）逗号分隔的 PRD 来源列表
 
 每个 source 可以是：
 - **飞书文档**: `https://*.feishu.cn/docx/*` 或 `https://*.larksuite.com/docx/*`
@@ -29,13 +30,18 @@ metadata:
 - **本地图片**: `/path/to/mockup.png`, `.jpg`, `.jpeg`
 - **本地 PDF**: `/path/to/prd.pdf`
 
-参数位置灵活：`id=` 和 `n=` 参数可以在源列表之前或之后。例如：
-- `/prd id=167023 n=用户登录 飞书链接,蓝湖链接`
-- `/prd 飞书链接,蓝湖链接 id=167023 n=用户登录`
-- `/prd id=167023 飞书链接,蓝湖链接`
-- `/prd n=用户登录 飞书链接,蓝湖链接`
+参数位置灵活：`id=`、`n=` 和 `c=` 参数可以在源列表之前或之后。例如：
+- `/prd id=167023 n=用户登录 c=本期只覆盖B端管理端 飞书链接,蓝湖链接`
+- `/prd 飞书链接,蓝湖链接 id=167023 n=用户登录 c=暂不包含移动端`
+- `/prd id=167023 飞书链接,蓝湖链接 c=仅保留MVP核心流程`
+- `/prd n=用户登录 c=短信验证码登录不支持国际区号 飞书链接,蓝湖链接`
 
 多个来源用逗号（`,`）分隔。skill 会处理所有来源并将结果合并为一份功能点清单。
+
+当未提供 `source` 时：
+- 若提供 `id=` 或 `n=`，优先定位对应目录下的 `analysis.md`，基于现有需求文档执行需求澄清
+- 若未提供 `id=` 和 `n=`，尝试使用 `coding/prd/default/analysis.md` 执行需求澄清
+- 若目标 `analysis.md` 不存在，提示用户补充 `source` 或指定正确的 `id=`/`n=`
 
 ---
 
@@ -60,14 +66,31 @@ metadata:
 
 ---
 
+## 需求澄清描述参数规则
+
+当提供 `c=<clarification-desc>` 参数时，系统将其作为分析上下文进行处理，并写入输出文件元数据：
+
+### 验证规则
+- **空值处理**: `c=` 后无内容将被忽略，视为未提供澄清描述
+- **长度限制**: 建议不超过 500 字符，超长内容可截断后写入
+- **安全处理**: 移除文件系统危险字符和无效控制字符
+
+### 使用规则
+- 仅用于补充分析语义，不参与目录命名
+- 可描述范围边界、排除项、业务前提、术语定义
+- 会在功能点分析中优先用于约束功能范围判断
+
+---
+
 ## 参数优先级
 
-当同时提供 `id=` 和 `n=` 参数时，需求ID优先级高于需求名，用于目录命名。但两者都会记录在输出文件的元数据中。
+当同时提供 `id=`、`n=` 和 `c=` 参数时，目录命名优先级为 `id > n > default`，其中 `c=` 不参与目录命名，但会记录到输出文件元数据中。
 
 - **仅提供 `id=`**: 使用需求ID作为目录名
 - **仅提供 `n=`**: 使用规范化后的需求名作为目录名  
 - **两者都提供**: 使用需求ID作为目录名，需求名记录在元数据中
-- **两者都不提供**: 使用默认时间戳目录结构
+- **两者都不提供**: 使用 `default` 目录名
+- **提供 `c=`**: 不改变目录名，仅补充分析上下文
 
 ---
 
@@ -109,6 +132,15 @@ metadata:
 ---
 
 ## 内容提取策略
+
+### 无 source 的澄清模式
+
+1. 按参数优先级定位既有需求文档：`id > n > default`。
+2. 读取目标 `analysis.md` 与同目录 `files/` 中的缓存资料（截图、HTML、副本文件等），将 `files/` 资料作为澄清证明依据。
+3. 若 `analysis.md` 中存在需求来源链接（如 frontmatter 的 `prd_sources` 或正文中的可识别 URL），尝试重新获取最新资料并写入 `files/`，用于与历史资料交叉验证。
+4. 若重新获取失败，则回退使用本地 `files/` 缓存继续澄清，并在结果中标注“已尝试刷新来源但失败”。
+5. 结合 `c=<clarification-desc>`、`analysis.md`、`files/` 缓存和可用的最新资料执行需求澄清分析。
+6. 将澄清结果写回同一需求目录的 `analysis.md`（单需求单文档维护），并在澄清结论中引用证据来源（`files` 文件名/来源链接）。
 
 ### 飞书文档
 
@@ -154,6 +186,8 @@ metadata:
 - **页面加载失败（蓝湖/墨刀）**: "无法加载设计稿页面，请检查链接是否有效，或保存为本地图片后重试。"
 - **文件不存在（本地）**: "文件不存在: `<path>`"
 - **无法识别的来源类型**: "无法识别的 PRD 来源: `<source>`。支持的格式: 飞书文档链接、蓝湖/墨刀公开链接、本地图片(.png/.jpg/.jpeg)、本地PDF(.pdf)"
+- **未提供 source 且未找到需求文档**: "未提供 PRD 来源，且未找到可用于澄清的需求文档（analysis.md）。请提供 source，或指定正确的 id=/n=。"
+- **来源链接刷新失败（澄清模式）**: "已定位到需求文档，但从历史需求链接刷新最新资料失败，将基于本地 files 缓存继续澄清。"
 
 ---
 
@@ -189,46 +223,43 @@ metadata:
 
 ### 文件位置
 
-根据是否提供需求ID或需求名，输出目录结构不同：
+根据是否提供需求ID或需求名，输出目录结构如下（单需求单文档，不再创建时间戳目录）：
 
-*注意：每次生成的<timestamp>都是不一样的，不要沿用之前的<timestamp>*
-
-#### 无需求ID和需求名（向后兼容）
-`coding/prd/<timestamp>-prd-analysis/`
+#### 无需求ID和需求名
+`coding/prd/default/`
 ├── analysis.md
 └── files/
     └── (中间文件缓存)
 
 #### 仅提供需求ID
-`coding/prd/{requirement-id}/<timestamp>-prd-analysis/`
+`coding/prd/{requirement-id}/`
 ├── analysis.md
 └── files/
     └── (中间文件缓存)
 
 #### 仅提供需求名
-`coding/prd/{requirement-name}/<timestamp>-prd-analysis/`
+`coding/prd/{requirement-name}/`
 ├── analysis.md
 └── files/
     └── (中间文件缓存)
 
 #### 同时提供需求ID和需求名
-`coding/prd/{requirement-id}/<timestamp>-prd-analysis/`
+`coding/prd/{requirement-id}/`
 ├── analysis.md
 └── files/
     └── (中间文件缓存)
 
 其中：
-- `<timestamp>` 格式为 `YYYYMMDD-HHMMSS`
 - `{requirement-id}` 是规范化后的需求ID
 - `{requirement-name}` 是规范化后的需求名
 
 示例：
-- 无需求ID/名：`coding/prd/20250427-151500-prd-analysis/`（输出文件：`analysis.md`）
-- 需求ID "167023"：`coding/prd/167023/20250427-151500-prd-analysis/`（输出文件：`analysis.md`）
-- 需求名 "用户登录"：`coding/prd/用户登录/20250427-151500-prd-analysis/`（输出文件：`analysis.md`）
-- 两者都提供：`coding/prd/167023/20250427-151500-prd-analysis/`（使用需求ID，输出文件：`analysis.md`）
+- 无需求ID/名：`coding/prd/default/`（输出文件：`analysis.md`）
+- 需求ID "167023"：`coding/prd/167023/`（输出文件：`analysis.md`）
+- 需求名 "用户登录"：`coding/prd/用户登录/`（输出文件：`analysis.md`）
+- 两者都提供：`coding/prd/167023/`（使用需求ID，输出文件：`analysis.md`）
 
-**目录创建**：skill 会自动创建所需的多级目录（如果不存在）。如果目录已存在，不会重复创建，允许在同一需求目录下新增分析版本。如果目录创建失败（如权限问题），将回退到默认输出路径并提示用户。
+**目录创建**：skill 会自动创建所需的多级目录（如果不存在）。如果目录已存在，直接维护同一个 `analysis.md`。如果目录创建失败（如权限问题），将回退到默认输出路径并提示用户。
 
 **中间文件存储**：`files/` 子目录用于存储分析过程中产生的中间文件（设计稿截图、文档HTML、本地文件副本等），便于后续重用和版本管理。
 
@@ -239,17 +270,17 @@ metadata:
 ```
 PRD 分析完成 ✓
 
-功能点清单: coding/prd/[需求ID|需求名]/<timestamp>-prd-analysis/analysis.md
+功能点清单: coding/prd/[需求ID|需求名|default]/analysis.md
 共识别 <N> 个模块，<M> 个功能点。
-中间文件缓存: coding/prd/[需求ID|需求名]/<timestamp>-prd-analysis/files/
+中间文件缓存: coding/prd/[需求ID|需求名|default]/files/
 ```
 示例：
 ```
 PRD 分析完成 ✓
 
-功能点清单: coding/prd/167023/20250427-151500-prd-analysis/analysis.md
+功能点清单: coding/prd/167023/analysis.md
 共识别 3 个模块，12 个功能点。
-中间文件缓存: coding/prd/167023/20250427-151500-prd-analysis/files/
+中间文件缓存: coding/prd/167023/files/
 ```
 
 ---
@@ -286,6 +317,16 @@ PRD 分析完成 ✓
 /prd id=167023 飞书链接,蓝湖链接
 ```
 
+### 示例 7：带需求澄清描述
+```
+/prd id=167023 c=本期仅交付管理后台，暂不包含移动端和消息推送 飞书链接,蓝湖链接
+```
+
+### 示例 8：不提供 source，直接澄清现有需求
+```
+/prd id=167023 c=补充登录异常场景：连续输错5次后锁定10分钟
+```
+
 ---
 
 ## 实现说明
@@ -299,10 +340,10 @@ PRD 分析完成 ✓
 ### 参数支持
 - 继续支持 `n=` 参数（需求名）
 - 新增 `id=` 参数（需求ID），优先级高于需求名
+- 新增 `c=` 参数（需求澄清描述），用于补充分析上下文
 
 ### 兼容性保证
 1. **无参数命令**：`/prd 飞书链接,蓝湖链接` 仍能正常工作，输出到新目录结构
 2. **仅需求名命令**：`/prd n=用户登录 飞书链接` 仍能正常工作，输出到新目录结构
-3. **现有文件访问**：已存在的扁平文件（`coding/prd/<timestamp>-prd-analysis.md`）仍然可访问，不会被修改或移动
-4. **新分析任务**：所有新分析任务都使用分层目录结构
-
+3. **现有文件访问**：历史时间戳目录文件仍可访问，不会被自动移动或删除
+4. **新分析任务**：所有新分析任务统一写入单需求目录下的 `analysis.md`

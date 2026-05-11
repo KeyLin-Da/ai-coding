@@ -2,8 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(ls *)",
-      "Bash(git ls-remote *)"
+      "Bash(git ls-remote *)",
+      "Bash(find *)",
+      "Bash(which *)",
+      "Bash(cloc *)"
     ]
   },
-  "$version": 3
+  "$version": 4
 }
