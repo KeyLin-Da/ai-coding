@@ -1,0 +1,65 @@
+{
+  "cases": [
+    {
+      "caseId": "all-members-complete",
+      "scenario": "All checked team members are complete",
+      "method": "POST",
+      "path": "/meeting/api/v1/activity-director/team-inspire/has-permission",
+      "query": {
+        "teamId": 2026032916117105,
+        "thirdActivityId": 2025050822000306
+      },
+      "body": {
+        "teamId": 2026032916117105,
+        "activityId": 2025050822000306,
+        "teamInfos": []
+      },
+      "sortArraysBy": [
+        {
+          "path": "$.teamInfos",
+          "keys": [
+            "userNo",
+            "teamIdentity"
+          ]
+        },
+        {
+          "path": "$.data.teamInfos",
+          "keys": [
+            "userNo",
+            "teamIdentity"
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "partial-members-incomplete",
+      "scenario": "Some team members are incomplete",
+      "method": "POST",
+      "path": "/meeting/api/v1/activity-director/team-inspire/has-permission",
+      "query": {
+        "teamId": 2026032916117105,
+        "thirdActivityId": 2025050822000306
+      },
+      "body": {
+        "teamId": 2026032916117105,
+        "activityId": 2025050822000306,
+        "teamInfos": []
+      }
+    },
+    {
+      "caseId": "large-team",
+      "scenario": "Large team for response consistency and timing observation",
+      "method": "POST",
+      "path": "/meeting/api/v1/activity-director/team-inspire/has-permission",
+      "query": {
+        "teamId": 2026032916117105,
+        "thirdActivityId": 2025050822000306
+      },
+      "body": {
+        "teamId": 2026032916117105,
+        "activityId": 2025050822000306,
+        "teamInfos": []
+      }
+    }
+  ]
+}
