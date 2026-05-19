@@ -1,2 +1,26 @@
 .idea
 *iml
+
+# 排除的工程目录
+opp-admin-bff/
+opp-admin-learn-vue/
+opp-admin-news-vue/
+opp-admin-survey-react/
+opp-admin-vue/
+opp-api/
+opp-clock-in/
+opp-common/
+opp-diy/
+opp-gateway/
+opp-learn/
+opp-learn-bff/
+opp-material/
+opp-news-bff/
+opp-news-websocket/
+opp-openapi/
+opp-order/
+opp-parent/
+opp-survey/
+opp-task/
+opp-triparty/
+opp-user/
