@@ -25,10 +25,10 @@ metadata:
 
 # 一、目录结构与文件规范（精简）
 
-评审结果统一输出到 `coding/code_review/` 根目录下，按分支名创建子目录：
+评审结果统一输出到 `docs/code_review/` 根目录下，按分支名创建子目录：
 
 ```
-coding/code_review/
+docs/code_review/
 └── code_review_{分支名}/
     ├── .checkpoint.json
     ├── summary.md
@@ -119,7 +119,7 @@ else:
 
 ### 2.1 检查是否存在历史评审记录
 
-检查目录 `coding/code_review/code_review_{分支名}/` 是否存在：
+检查目录 `docs/code_review/code_review_{分支名}/` 是否存在：
 - **不存在**：首次评审，执行全量评审流程
 - **存在**：读取 `.checkpoint.json` 和 `summary.md`，加载历史检查点数据
 

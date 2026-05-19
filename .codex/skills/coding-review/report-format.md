@@ -8,10 +8,10 @@
 
 ### 1.1 目录命名规则
 
-评审结果统一输出到 `coding/code_review/` 根目录下，按分支名创建子目录：
+评审结果统一输出到 `docs/code_review/` 根目录下，按分支名创建子目录：
 
 ```
-coding/code_review/
+docs/code_review/
 └── code_review_{分支名}/                    # 分支名中非字母数字字符转为下划线
     ├── .checkpoint.json                     # 统一检查点（所有工程的 commit hash）
     ├── summary.md                           # 汇总评审报告 + 问题清单

@@ -1,0 +1,31 @@
+---
+name: coding-design-yaml-format
+description: 技术方案评审格式规范
+version: "1.0"
+
+# 技术方案必须包含以下章节
+required_sections:
+  - api_scope          # 涉及接口范围
+  - file_changes       # 改动文件清单
+  - code_changes       # 代码改动说明
+  - impact_analysis    # 影响范围评估
+  - performance        # 性能考量
+  - concurrency        # 并发问题处理
+  - sql_changes        # SQL改动内容
+  - index_suggestions  # 索引优化建议
+
+# 各章节说明（可根据需要扩展）
+section_descriptions:
+  api_scope: "列出新增或修改的接口，包含接口路径、方法、影响级别"
+  file_changes: "列出所有修改的文件及变更类型（新增/修改/删除）"
+  code_changes: "说明核心代码修改点和修改原因"
+  impact_analysis: "评估受影响的模块、系统和风险等级"
+  performance: "性能指标要求和优化策略"
+  concurrency: "并发场景分析和锁策略设计"
+  sql_changes: "DDL和DML变更内容"
+  index_suggestions: "新增或优化的索引建议"
+
+# 扩展说明
+# - 新增章节：在此文件末尾添加新章节名到 required_sections 列表
+# - 新增字段：在 section_descriptions 中说明该章节需要包含的字段
+# - 删除章节：从 required_sections 列表中移除对应章节名

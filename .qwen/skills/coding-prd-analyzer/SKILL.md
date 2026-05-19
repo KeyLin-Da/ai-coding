@@ -40,7 +40,7 @@ metadata:
 
 当未提供 `source` 时：
 - 若提供 `id=` 或 `n=`，优先定位对应目录下的 `analysis.md`，基于现有需求文档执行需求澄清
-- 若未提供 `id=` 和 `n=`，尝试使用 `coding/prd/default/analysis.md` 执行需求澄清
+- 若未提供 `id=` 和 `n=`，尝试使用 `docs/prd/default/analysis.md` 执行需求澄清
 - 若目标 `analysis.md` 不存在，提示用户补充 `source` 或指定正确的 `id=`/`n=`
 
 ---
@@ -226,25 +226,25 @@ metadata:
 根据是否提供需求ID或需求名，输出目录结构如下（单需求单文档，不再创建时间戳目录）：
 
 #### 无需求ID和需求名
-`coding/prd/default/`
+`docs/prd/default/`
 ├── analysis.md
 └── files/
     └── (中间文件缓存)
 
 #### 仅提供需求ID
-`coding/prd/{requirement-id}/`
+`docs/prd/{requirement-id}/`
 ├── analysis.md
 └── files/
     └── (中间文件缓存)
 
 #### 仅提供需求名
-`coding/prd/{requirement-name}/`
+`docs/prd/{requirement-name}/`
 ├── analysis.md
 └── files/
     └── (中间文件缓存)
 
 #### 同时提供需求ID和需求名
-`coding/prd/{requirement-id}/`
+`docs/prd/{requirement-id}/`
 ├── analysis.md
 └── files/
     └── (中间文件缓存)
@@ -254,10 +254,10 @@ metadata:
 - `{requirement-name}` 是规范化后的需求名
 
 示例：
-- 无需求ID/名：`coding/prd/default/`（输出文件：`analysis.md`）
-- 需求ID "167023"：`coding/prd/167023/`（输出文件：`analysis.md`）
-- 需求名 "用户登录"：`coding/prd/用户登录/`（输出文件：`analysis.md`）
-- 两者都提供：`coding/prd/167023/`（使用需求ID，输出文件：`analysis.md`）
+- 无需求ID/名：`docs/prd/default/`（输出文件：`analysis.md`）
+- 需求ID "167023"：`docs/prd/167023/`（输出文件：`analysis.md`）
+- 需求名 "用户登录"：`docs/prd/用户登录/`（输出文件：`analysis.md`）
+- 两者都提供：`docs/prd/167023/`（使用需求ID，输出文件：`analysis.md`）
 
 **目录创建**：skill 会自动创建所需的多级目录（如果不存在）。如果目录已存在，直接维护同一个 `analysis.md`。如果目录创建失败（如权限问题），将回退到默认输出路径并提示用户。
 
@@ -270,17 +270,17 @@ metadata:
 ```
 PRD 分析完成 ✓
 
-功能点清单: coding/prd/[需求ID|需求名|default]/analysis.md
+功能点清单: docs/prd/[需求ID|需求名|default]/analysis.md
 共识别 <N> 个模块，<M> 个功能点。
-中间文件缓存: coding/prd/[需求ID|需求名|default]/files/
+中间文件缓存: docs/prd/[需求ID|需求名|default]/files/
 ```
 示例：
 ```
 PRD 分析完成 ✓
 
-功能点清单: coding/prd/167023/analysis.md
+功能点清单: docs/prd/167023/analysis.md
 共识别 3 个模块，12 个功能点。
-中间文件缓存: coding/prd/167023/files/
+中间文件缓存: docs/prd/167023/files/
 ```
 
 ---
