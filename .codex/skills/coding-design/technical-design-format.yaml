@@ -3,27 +3,28 @@ name: coding-design-yaml-format
 description: 技术方案评审格式规范
 version: "1.0"
 
-# 技术方案必须包含以下章节
+# 技术方案必须包含以下章节（带上中文描述）
 required_sections:
   - api_scope          # 涉及接口范围
-  - file_changes       # 改动文件清单
-  - code_changes       # 代码改动说明
-  - impact_analysis    # 影响范围评估
+  - sql_changes        # SQL改动内容
   - performance        # 性能考量
   - concurrency        # 并发问题处理
-  - sql_changes        # SQL改动内容
-  - index_suggestions  # 索引优化建议
+  - impact_analysis    # 影响范围评估
+  - unit_test          # 单元测试设计
 
 # 各章节说明（可根据需要扩展）
 section_descriptions:
-  api_scope: "列出新增或修改的接口，包含接口路径、方法、影响级别"
-  file_changes: "列出所有修改的文件及变更类型（新增/修改/删除）"
-  code_changes: "说明核心代码修改点和修改原因"
+  api_scope:
+    - "列出新增或修改的接口,包含接口路径、方法、影响级别,以及接口描述"
+    - "提供详细变更时序流程图，要求流程图包含序号，标识哪些是变更点、接口参数、返回值、异常处理、涉及表（包含sql）、redis、MQ"
+    - "罗列功能点及描述，以及变更原因"
   impact_analysis: "评估受影响的模块、系统和风险等级"
   performance: "性能指标要求和优化策略"
   concurrency: "并发场景分析和锁策略设计"
-  sql_changes: "DDL和DML变更内容"
-  index_suggestions: "新增或优化的索引建议"
+  sql_changes: "提供DDL变更内容、索引优化建议、ER图"
+  unit_test:
+    - "单元测试用例设计,包括测试类名、测试方法、覆盖场景、Mock对象、预期结果"
+    - "如果是查询接口性能优化，需要增加新旧接口性能对比，返回值对比，使用 `coding-junit` 技能"
 
 # 扩展说明
 # - 新增章节：在此文件末尾添加新章节名到 required_sections 列表
