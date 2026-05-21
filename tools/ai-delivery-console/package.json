@@ -1,0 +1,39 @@
+{
+  "name": "ai-delivery-console",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 5178",
+    "server:dev": "tsx server/index.ts",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 4178",
+    "lint": "eslint . --ext .ts,.vue --max-warnings=0",
+    "test:unit": "vitest run",
+    "test:report": "vitest run --reporter=json --outputFile=coverage/vitest-results.json && node scripts/write-test-report.mjs"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.1.0",
+    "element-plus": "2.7.6",
+    "markdown-it": "^14.1.0",
+    "pinia": "2.0.33",
+    "vue": "^3.2.47",
+    "vue-router": "^4.1.6"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^4.0.0",
+    "@vue/eslint-config-prettier": "^7.0.0",
+    "@vue/test-utils": "^2.0.2",
+    "@types/markdown-it": "^13.0.9",
+    "@types/node": "^18.19.0",
+    "@typescript-eslint/eslint-plugin": "^5.62.0",
+    "@typescript-eslint/parser": "^5.62.0",
+    "eslint": "^8.57.0",
+    "eslint-plugin-vue": "^9.3.0",
+    "jsdom": "^20.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^4.9.4",
+    "vite": "^4.1.0",
+    "vitest": "^0.29.2"
+  }
+}

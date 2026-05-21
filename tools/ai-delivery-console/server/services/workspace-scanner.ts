@@ -1,0 +1,81 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import type { ArtifactRef, WorkflowStage } from '../../shared/workflow';
+import { hashContent, normalizeRequirementId, sanitizeBranchName } from './workspace';
+
+async function fileArtifact(workspaceRoot: string, id: string, stage: WorkflowStage, label: string, relativePath: string, kind: ArtifactRef['kind']): Promise<ArtifactRef> {
+  const absolutePath = path.join(workspaceRoot, relativePath);
+  try {
+    const stat = await fs.stat(absolutePath);
+    const hash = stat.isFile() ? hashContent(await fs.readFile(absolutePath)) : undefined;
+    return {
+      id,
+      stage,
+      label,
+      path: relativePath,
+      kind,
+      exists: true,
+      hash,
+      updatedAt: stat.mtime.toISOString()
+    };
+  } catch (error: any) {
+    if (error.code !== 'ENOENT') {
+      throw error;
+    }
+    return { id, stage, label, path: relativePath, kind, exists: false };
+  }
+}
+
+async function listFiles(dir: string, maxDepth = 2): Promise<string[]> {
+  async function walk(current: string, depth: number): Promise<string[]> {
+    if (depth > maxDepth) {
+      return [];
+    }
+    try {
+      const entries = await fs.readdir(current, { withFileTypes: true });
+      const children = await Promise.all(
+        entries.flatMap((entry) => {
+          const child = path.join(current, entry.name);
+          if (entry.isDirectory()) {
+            return [walk(child, depth + 1)];
+          }
+          return [[child]];
+        })
+      );
+      return children.flat();
+    } catch (error: any) {
+      if (error.code === 'ENOENT') {
+        return [];
+      }
+      throw error;
+    }
+  }
+  return walk(dir, 0);
+}
+
+export async function scanRequirementArtifacts(workspaceRoot: string, requirementId: string, branchName?: string): Promise<ArtifactRef[]> {
+  const id = normalizeRequirementId(requirementId);
+  const artifacts: ArtifactRef[] = [];
+  artifacts.push(await fileArtifact(workspaceRoot, 'prd-analysis', 'PRD', 'PRD 分析文档', `docs/${id}/prd/analysis.md`, 'markdown'));
+  artifacts.push(await fileArtifact(workspaceRoot, 'technical-design', 'TECH_DESIGN', '技术方案评审文档', `docs/${id}/technical-design/design_review.md`, 'markdown'));
+  artifacts.push(await fileArtifact(workspaceRoot, 'openspec-change', 'IMPLEMENTATION', 'OpenSpec Change', `openspec/changes/req-${id}`, 'directory'));
+
+  const junitFiles = await listFiles(path.join(workspaceRoot, 'docs', id, 'junit'), 3);
+  for (const file of junitFiles.filter((item) => /\.(md|html)$/i.test(item))) {
+    const relative = path.relative(workspaceRoot, file);
+    artifacts.push(await fileArtifact(workspaceRoot, `junit-${artifacts.length}`, 'IMPLEMENTATION', path.basename(file), relative, file.endsWith('.html') ? 'html' : 'markdown'));
+  }
+
+  const reviewDirs = await fs.readdir(path.join(workspaceRoot, 'docs', 'code_review'), { withFileTypes: true }).catch(() => []);
+  const safeBranch = sanitizeBranchName(branchName);
+  const matchedReviewDirs = reviewDirs
+    .filter((entry) => entry.isDirectory())
+    .filter((entry) => (safeBranch ? entry.name === `code_review_${safeBranch}` : entry.name.includes(id)));
+
+  for (const entry of matchedReviewDirs) {
+    const summaryPath = `docs/code_review/${entry.name}/summary.md`;
+    artifacts.push(await fileArtifact(workspaceRoot, `code-review-${entry.name}`, 'CODE_REVIEW', `代码评审 ${entry.name}`, summaryPath, 'markdown'));
+  }
+
+  return artifacts;
+}
