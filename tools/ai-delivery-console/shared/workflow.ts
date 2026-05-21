@@ -118,6 +118,8 @@ export interface RequirementWorkflow {
   title: string;
   branchName?: string;
   prdClarification?: string;
+  techDesignDocument?: string;
+  techDesignClarification?: string;
   sources: string[];
   currentStage: WorkflowStage | 'DONE';
   status: WorkflowStatus;
@@ -135,6 +137,8 @@ export interface RequirementInput {
   title?: string;
   branchName?: string;
   prdClarification?: string;
+  techDesignDocument?: string;
+  techDesignClarification?: string;
   sources?: string[];
 }
 

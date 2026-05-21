@@ -52,6 +52,22 @@
 
             <div v-else-if="activeStage === 'TECH_DESIGN'" class="stage-actions">
               <el-alert v-if="!prdApproved" type="warning" show-icon title="需要先通过 PRD 审核" />
+              <el-input
+                v-model="designDocument"
+                type="textarea"
+                :rows="2"
+                maxlength="1000"
+                show-word-limit
+                placeholder="填写需求描述或 PRD 文档路径，对应 coding-design 的 d 参数（必填），例如 PRD 文件路径或需求描述文本"
+              />
+              <el-input
+                v-model="designClarification"
+                type="textarea"
+                :rows="2"
+                maxlength="500"
+                show-word-limit
+                placeholder="填写评审意见或补充说明，对应 coding-design 的 c 参数（可选），用于二次评审时提供修改建议"
+              />
               <el-button type="primary" :disabled="!prdApproved" :icon="Operation" @click="runDesign">生成技术方案</el-button>
               <MarkdownEditor title="技术方案" :artifact-path="stageArtifactPath('TECH_DESIGN')" @saved="reload" />
             </div>
@@ -118,7 +134,9 @@ const prdClarification = ref('');
 const changeName = ref('');
 const moduleName = ref('');
 const branchName = ref('');
-const selectedAgentId = ref('manual');
+const selectedAgentId = ref('codex');
+const designDocument = ref('');
+const designClarification = ref('');
 
 const workflow = computed(() => store.current);
 const latestRun = computed<RunRecord | undefined>(() => workflow.value?.runs[0]);
@@ -177,7 +195,18 @@ async function runPrd() {
 }
 
 async function runDesign() {
-  await store.runAction({ actionType: 'DESIGN_GENERATE', params: { agentId: selectedAgentId.value, documentPath: stageArtifactPath('PRD') } });
+  if (!designDocument.value.trim()) {
+    ElMessage.warning('请填写需求描述或文档路径（d 参数）');
+    return;
+  }
+  await store.runAction({
+    actionType: 'DESIGN_GENERATE',
+    params: {
+      agentId: selectedAgentId.value,
+      documentPath: designDocument.value.trim(),
+      clarification: designClarification.value.trim()
+    }
+  });
 }
 
 async function runOpenSpecStatus() {
@@ -232,6 +261,8 @@ watch(
     changeName.value = value.stages.IMPLEMENTATION.changeName || `req-${value.requirementId}`;
     moduleName.value = moduleName.value || '';
     branchName.value = value.branchName || '';
+    designDocument.value = value.techDesignDocument || '';
+    designClarification.value = value.techDesignClarification || '';
     if (value.currentStage !== 'DONE') {
       activeStage.value = value.currentStage;
     }

@@ -5,7 +5,7 @@ import { normalizePrdClarification, WorkflowRepository } from './services/workfl
 import { scanRequirementArtifacts } from './services/workspace-scanner';
 import { WorkflowLock } from './services/workflow-lock';
 import { executeAction } from './services/action-adapters';
-import { readRunEvents } from './services/run-log';
+import { readRunEvents, appendStageCommandLog } from './services/run-log';
 import { readArtifact, saveArtifact } from './services/markdown-service';
 import { applyReview, refreshCodeReviewIssues, returnToImplementation } from './services/review-service';
 import { cancelAgentRun, listAgentProviders } from './services/agent-providers';
@@ -99,6 +99,14 @@ export function createRouter(workspaceRoot: string) {
               prdClarification: normalizePrdClarification(typeof params.description === 'string' ? params.description : workflow.prdClarification)
             };
           }
+          if (action.actionType === 'DESIGN_GENERATE') {
+            const params = action.params || {};
+            workflow = {
+              ...workflow,
+              techDesignDocument: typeof params.documentPath === 'string' ? params.documentPath : workflow.techDesignDocument,
+              techDesignClarification: typeof params.clarification === 'string' ? params.clarification : workflow.techDesignClarification
+            };
+          }
           const run = await executeAction(workspaceRoot, workflow, action, async (updatedRun) => {
             const latest = await repository.load(requirementId);
             if (!latest) {
@@ -112,6 +120,30 @@ export function createRouter(workspaceRoot: string) {
             }
             await repository.save(latest);
           });
+          
+          // 为每个流程阶段记录命令日志
+          const stageMap: Record<string, 'PRD' | 'TECH_DESIGN' | 'IMPLEMENTATION' | 'CODE_REVIEW'> = {
+            PRD_ANALYZE: 'PRD',
+            DESIGN_GENERATE: 'TECH_DESIGN',
+            OPENSPEC_STATUS: 'IMPLEMENTATION',
+            OPENSPEC_VERIFY: 'IMPLEMENTATION',
+            JUNIT_GENERATE: 'IMPLEMENTATION',
+            CODE_REVIEW_GENERATE: 'CODE_REVIEW'
+          };
+          const stage = stageMap[action.actionType];
+          if (stage && run.commandText) {
+            await appendStageCommandLog(
+              workspaceRoot,
+              requirementId,
+              stage,
+              run.commandText,
+              {
+                runId: run.id,
+                agentId: run.agentId,
+                status: run.status
+              }
+            );
+          }
           workflow.runs.unshift(run);
           if (action.actionType === 'REFRESH_ARTIFACTS') {
             workflow.artifacts = await scanRequirementArtifacts(workspaceRoot, workflow.requirementId, workflow.branchName);
@@ -195,6 +227,53 @@ export function createRouter(workspaceRoot: string) {
           return;
         }
         send(response, 200, { data: await readArtifact(workspaceRoot, filePath) });
+        return;
+      }
+
+      // 读取图片等二进制文件
+      if (request.method === 'GET' && pathname === '/api/artifacts/read') {
+        const filePath = url.searchParams.get('path');
+        if (!filePath) {
+          response.writeHead(400, { 'Content-Type': 'application/json' });
+          response.end(JSON.stringify({ message: '缺少 path 参数' }));
+          return;
+        }
+        try {
+          const fs = await import('node:fs/promises');
+          const pathModule = await import('node:path');
+          const absolutePath = pathModule.resolve(workspaceRoot, filePath);
+          
+          // 安全检查：确保文件在工作区内
+          if (!absolutePath.startsWith(workspaceRoot)) {
+            response.writeHead(403, { 'Content-Type': 'application/json' });
+            response.end(JSON.stringify({ message: '不允许访问工作区外的文件' }));
+            return;
+          }
+          
+          const fileBuffer = await fs.readFile(absolutePath);
+          
+          // 根据文件扩展名设置 Content-Type
+          const ext = pathModule.extname(filePath).toLowerCase();
+          const mimeTypes: Record<string, string> = {
+            '.png': 'image/png',
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.gif': 'image/gif',
+            '.webp': 'image/webp',
+            '.svg': 'image/svg+xml'
+          };
+          const contentType = mimeTypes[ext] || 'application/octet-stream';
+          
+          response.writeHead(200, {
+            'Content-Type': contentType,
+            'Cache-Control': 'public, max-age=3600',
+            'Access-Control-Allow-Origin': '*'
+          });
+          response.end(fileBuffer);
+        } catch (error: any) {
+          response.writeHead(404, { 'Content-Type': 'application/json' });
+          response.end(JSON.stringify({ message: error.code === 'ENOENT' ? '文件不存在' : error.message }));
+        }
         return;
       }
 

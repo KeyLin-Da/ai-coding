@@ -87,4 +87,44 @@ describe('action-adapters', () => {
     });
     expect(run.commandText).toBe('generate-unit-test opp-diy');
   });
+
+  it('技术方案生成支持 d 和 c 参数', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-action-'));
+    const run = await executeAction(root, workflow(), {
+      actionType: 'DESIGN_GENERATE',
+      params: {
+        documentPath: 'docs/172014/prd/analysis.md',
+        clarification: '补充接口性能要求'
+      }
+    });
+    expect(run.commandText).toContain('/coding-design');
+    expect(run.commandText).toContain('d=docs/172014/prd/analysis.md');
+    expect(run.commandText).toContain('r=172014');
+    expect(run.commandText).toContain('c=补充接口性能要求');
+  });
+
+  it('技术方案生成未填写 c 参数时不添加 c', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-action-'));
+    const run = await executeAction(root, workflow(), {
+      actionType: 'DESIGN_GENERATE',
+      params: {
+        documentPath: 'docs/172014/prd/analysis.md'
+      }
+    });
+    expect(run.commandText).toContain('/coding-design');
+    expect(run.commandText).toContain('d=docs/172014/prd/analysis.md');
+    expect(run.commandText).toContain('r=172014');
+    expect(run.commandText).not.toContain(' c=');
+  });
+
+  it('技术方案生成使用默认文档路径', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-action-'));
+    const run = await executeAction(root, workflow(), {
+      actionType: 'DESIGN_GENERATE',
+      params: {}
+    });
+    expect(run.commandText).toContain('/coding-design');
+    expect(run.commandText).toContain('d=定位菜单');
+    expect(run.commandText).toContain('r=172014');
+  });
 });

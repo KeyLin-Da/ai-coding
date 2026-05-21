@@ -16,6 +16,8 @@
     "@element-plus/icons-vue": "^2.1.0",
     "element-plus": "2.7.6",
     "markdown-it": "^14.1.0",
+    "markdown-it-mermaid": "^0.2.5",
+    "mermaid": "^11.15.0",
     "pinia": "2.0.33",
     "vue": "^3.2.47",
     "vue-router": "^4.1.6"

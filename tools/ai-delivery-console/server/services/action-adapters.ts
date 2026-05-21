@@ -36,12 +36,13 @@ function buildSkillCommand(workflow: RequirementWorkflow, action: ActionInput): 
   const moduleName = asString(params.moduleName);
   const branchName = asString(params.branchName, workflow.branchName || '');
   const changeName = asString(params.changeName, `req-${requirementId}`);
+  const clarification = asString(params.clarification);
 
   switch (action.actionType) {
     case 'PRD_ANALYZE':
       return `/coding-prd-analyzer id=${requirementId}${prdClarification ? ` c=${prdClarification}` : ''}${sources ? ` ${sources}` : ''}`;
     case 'DESIGN_GENERATE':
-      return `/coding-design d=${params.documentPath || workflow.title} r=${requirementId}`;
+      return `/coding-design d=${params.documentPath || workflow.title} r=${requirementId}${clarification ? ` c=${clarification}` : ''}`;
     case 'JUNIT_GENERATE':
       return `generate-unit-test ${moduleName || '<module-name>'}${description ? ` "${description}"` : ''}`;
     case 'CODE_REVIEW':

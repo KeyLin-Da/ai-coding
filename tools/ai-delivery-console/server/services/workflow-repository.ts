@@ -68,11 +68,19 @@ export class WorkflowRepository {
       const prdClarification = hasInputField(input, 'prdClarification')
         ? normalizePrdClarification(input.prdClarification)
         : existing.prdClarification;
+      const techDesignDocument = hasInputField(input, 'techDesignDocument')
+        ? input.techDesignDocument
+        : existing.techDesignDocument;
+      const techDesignClarification = hasInputField(input, 'techDesignClarification')
+        ? input.techDesignClarification
+        : existing.techDesignClarification;
       return this.save({
         ...existing,
         title: input.title || existing.title,
         branchName: input.branchName ?? existing.branchName,
         prdClarification,
+        techDesignDocument,
+        techDesignClarification,
         sources: input.sources?.length ? input.sources : existing.sources
       });
     }
@@ -82,6 +90,8 @@ export class WorkflowRepository {
       title: input.title || `需求 ${requirementId}`,
       branchName: input.branchName,
       prdClarification: normalizePrdClarification(input.prdClarification),
+      techDesignDocument: input.techDesignDocument,
+      techDesignClarification: input.techDesignClarification,
       sources: input.sources || [],
       currentStage: 'PRD',
       status: 'DRAFT',
