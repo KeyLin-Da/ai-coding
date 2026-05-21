@@ -12,6 +12,8 @@
     ├── code-review/              # 代码评审技能
     ├── prd-analyzer/             # PRD 分析器技能
     └── openspec-*/               # OpenSpec 相关技能集合
+tools/
+└── ai-delivery-console/        # AI 需求交付控制台（可视化工具）
 ```
 
 ## Commands（命令）
@@ -37,48 +39,84 @@
 
 ## Skills（技能）
 
-### 核心技能
+### Coding 系列技能（支持 AI 需求交付控制台可视化执行）
 
-#### 📋 [code-review](skills/code-review/)
-**资深 Java 架构师代码评审官**
+以下技能均可通过 [AI 需求交付控制台](tools/ai-delivery-console/) 进行可视化管理和执行。
 
-专注于高并发、分布式、企业级 Java 系统的 PR 审核，支持多工程联合评审和增量评审。
+#### 🏗️ coding-design - 技术方案设计专家
+基于 OpenSpec 体系进行需求分析、技术探索和技术方案设计输出。支持首次设计和二次评审模式，可查询数据库表结构和参考设计规范。
 
-**主要特性：**
-- ✅ 增量评审：自动检测历史检查点，仅评审新增变更
-- ✅ 问题追踪：自动检测历史问题是否已修复
-- ✅ 分支归集：按分支名归集评审历史
-- ✅ 外部文档约束：支持飞书文档、设计文档等外部约束条款核对
-- ✅ 多工程联合评审：支持 Maven 多模块工程的依赖关系分析
-
-**使用方式：** `/code-review b=<分支名> d=<外部文档>`
-
-**输出位置：** `code_review/code_review_<分支名>/`
+**输入参数：** `d=需求描述`（必填）、`r=需求编号`（必填）、`c=评审意见`（可选）  
+**输出位置：** `docs/{需求编号}/technical-design/design_review.md`
 
 ---
 
-#### 📊 [prd-analyzer](skills/prd-analyzer/)
-**产品需求文档分析器**
+#### 👨‍💻 coding-review - 代码评审官
+资深 Java 架构师代码评审，聚焦高并发、分布式系统。支持增量评审、问题追踪、多工程联合评审和外部文档约束核对。
 
-读取多种来源的 PRD（飞书文档、蓝湖/墨刀/Axure、本地图片/PDF），批量梳理并输出结构化功能点清单。
+**输入参数：** `b=分支名`（必填）、`d=外部文档`（选填）  
+**输出位置：** `docs/code_review/code_review_{分支名}/`
 
-**支持的来源：**
-- 飞书文档：`https://*.feishu.cn/docx/*`
-- 蓝湖设计稿：`https://*.lanhu.app/*`
-- 墨刀原型：`https://*.modao.cc/*`
-- Axure 原型：`http://axure*/*`
-- 本地图片：`.png`, `.jpg`, `.jpeg`
-- 本地 PDF：`.pdf`
+---
 
-**主要功能：**
-- 🔍 多来源内容提取（文本/视觉理解）
-- 📝 结构化功能点清单（类型、交互步骤、输入数据、异常场景等）
-- 📦 模块分组与关联分析
-- 🎯 OpenSpec 变更草稿生成（需手动创建）
+#### 📋 coding-prd-analyzer - PRD 分析器
+读取多种来源的 PRD（飞书文档、蓝湖/墨刀/Axure、本地图片/PDF），批量梳理并输出结构化功能点清单。支持需求澄清模式。
 
-**使用方式：** `/prd <source1>,<source2>,...`
+**输入参数：** `id=需求ID`（必填）、`c=澄清描述`（可选）、`source列表`（可选）  
+**输出位置：** `docs/{需求编号}/prd/analysis.md`
 
-**输出位置：** `./prd-output/<timestamp>-prd-analysis.md`
+---
+
+#### 🧪 coding-junit - 单元测试生成专家
+根据 Git commit 变更自动生成 Java 单元测试代码。智能判断测试策略（新增接口/修改接口/性能优化），支持新旧返参对比测试和异常重跑。
+
+**输入参数：** `模块名`（必填）、`描述说明`（可选）  
+**输出位置：** `docs/{需求号}/junit/`
+
+---
+
+#### 💾 coding-database-query - 数据库查询工具
+安全连接多种数据库（MySQL/PostgreSQL/SQLite/Oracle/SQL Server）执行只读查询。被 coding-design 用于数据库表结构探索。
+
+**使用方式：** YAML 配置文件或命令行直接指定  
+**安全限制：** 仅支持 SELECT/SHOW/DESCRIBE 等只读操作，禁止任何数据修改
+
+---
+
+### 🎯 [AI 需求交付控制台](tools/ai-delivery-console/)
+**OpenSpec + 自定义技能可视化交付台**
+
+面向本地工作区的可视化工具，用于按需求号聚合 PRD、技术方案、OpenSpec 实施验证、单元测试报告和代码评审报告。
+
+**主要特性：**
+- 📊 **需求级聚合**：按需求号自动索引所有相关产物
+- 🔄 **Agent Provider 支持**：支持 Codex CLI 自动化执行或手动模式
+- 📝 **实时终端输出**：通过 SSE 实时展示 Agent 执行日志
+- 🔒 **安全边界**：只允许读写当前工作区内的文件路径
+- ⚡ **并发控制**：修改型动作使用需求级锁文件
+
+**支持的技能：**
+- `coding-prd-analyzer` - PRD 分析与澄清
+- `coding-design` - 技术方案设计
+- `coding-junit` - 单元测试生成与执行
+- `coding-review` - 代码评审
+
+**产物约定：**
+- PRD：`docs/{需求号}/prd/analysis.md`
+- 技术方案：`docs/{需求号}/technical-design/design_review.md`
+- OpenSpec：`openspec/changes/req-{需求号}`
+- 单元测试报告：`docs/{需求号}/junit/**`
+- 代码评审：`docs/code_review/code_review_{分支名}/summary.md`
+- 工作流元数据：`docs/{需求号}/workflow/state.json`
+- 运行日志：`docs/{需求号}/workflow/runs/{runId}.jsonl`
+
+**启动方式：**
+```bash
+cd tools/ai-delivery-console
+npm install
+npm run server:dev  # 后端服务 (http://127.0.0.1:8718)
+npm run dev         # 前端服务 (http://127.0.0.1:5178)
+```
 
 ---
 
