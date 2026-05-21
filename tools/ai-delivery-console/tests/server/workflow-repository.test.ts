@@ -37,4 +37,40 @@ describe('WorkflowRepository', () => {
     expect(updated.runs).toHaveLength(1);
     expect(updated.title).toBe('新标题');
   });
+
+  it('持久化并清洗 PRD 澄清描述', async () => {
+    const workspace = await tmpWorkspace();
+    const repository = new WorkflowRepository(workspace);
+    const workflow = await repository.upsert({
+      requirementId: '172014',
+      title: '定位菜单',
+      prdClarification: '  仅覆盖后台端\n\t暂不包含用户端  '
+    });
+    expect(workflow.prdClarification).toBe('仅覆盖后台端 暂不包含用户端');
+
+    const loaded = await repository.load('172014');
+    expect(loaded?.prdClarification).toBe('仅覆盖后台端 暂不包含用户端');
+  });
+
+  it('更新 workflow 时可保留、截断和清空 PRD 澄清描述', async () => {
+    const workspace = await tmpWorkspace();
+    const repository = new WorkflowRepository(workspace);
+    await repository.upsert({
+      requirementId: '172014',
+      title: '定位菜单',
+      prdClarification: '初始澄清'
+    });
+
+    const preserved = await repository.upsert({ requirementId: '172014', title: '新标题' });
+    expect(preserved.prdClarification).toBe('初始澄清');
+
+    const truncated = await repository.upsert({
+      requirementId: '172014',
+      prdClarification: 'a'.repeat(520)
+    });
+    expect(truncated.prdClarification).toHaveLength(500);
+
+    const cleared = await repository.upsert({ requirementId: '172014', prdClarification: '   ' });
+    expect(cleared.prdClarification).toBeUndefined();
+  });
 });

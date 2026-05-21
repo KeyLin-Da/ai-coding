@@ -41,6 +41,16 @@
       <el-form-item label="分支名">
         <el-input v-model="form.branchName" placeholder="feature/opp-172014" />
       </el-form-item>
+      <el-form-item label="PRD 澄清描述">
+        <el-input
+          v-model="form.prdClarification"
+          type="textarea"
+          :rows="3"
+          maxlength="500"
+          show-word-limit
+          placeholder="对应 /coding-prd-analyzer 的 c 参数，可填写范围边界、排除项、业务前提或术语定义"
+        />
+      </el-form-item>
       <el-form-item label="PRD 来源">
         <el-input v-model="sourcesText" type="textarea" :rows="3" placeholder="每行一个飞书、设计稿或本地文件来源" />
       </el-form-item>
@@ -69,6 +79,7 @@ const form = reactive<RequirementInput>({
   requirementId: '',
   title: '',
   branchName: '',
+  prdClarification: '',
   sources: []
 });
 

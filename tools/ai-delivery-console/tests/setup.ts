@@ -12,5 +12,20 @@ config.global.stubs = {
   },
   ElTag: {
     template: '<span><slot /></span>'
+  },
+  ElSelect: {
+    template: '<select><slot /></select>'
+  },
+  ElOption: {
+    template: '<option><slot /></option>'
+  },
+  ElDrawer: {
+    template: '<div><slot /></div>'
+  },
+  ElTimeline: {
+    template: '<div><slot /></div>'
+  },
+  ElTimelineItem: {
+    template: '<div><slot /></div>'
   }
 };

@@ -14,7 +14,7 @@ metadata:
 
 ## 输入格式
 
-`/prd id=<requirement-id> [c=<clarification-desc>] [<source1>,<source2>,...]`
+`/coding-prd-analyzer id=<requirement-id> [c=<clarification-desc>] [<source1>,<source2>,...]`
 
 参数说明：
 - `id=<requirement-id>`: （必填）需求ID，用于组织需求文档和输出目录。支持数字、字母、连字符、下划线，特殊字符将自动过滤
@@ -30,10 +30,10 @@ metadata:
 - **本地 PDF**: `/path/to/prd.pdf`
 
 参数位置灵活：`id=` 和 `c=` 参数可以在源列表之前或之后。例如：
-- `/prd id=167023 c=本期只覆盖B端管理端 飞书链接,蓝湖链接`
-- `/prd 飞书链接,蓝湖链接 id=167023 c=暂不包含移动端`
-- `/prd id=167023 飞书链接,蓝湖链接 c=仅保留MVP核心流程`
-- `/prd c=短信验证码登录不支持国际区号 飞书链接,蓝湖链接 id=167023`
+- `/coding-prd-analyzer id=167023 c=本期只覆盖B端管理端 飞书链接,蓝湖链接`
+- `/coding-prd-analyzer 飞书链接,蓝湖链接 id=167023 c=暂不包含移动端`
+- `/coding-prd-analyzer id=167023 飞书链接,蓝湖链接 c=仅保留MVP核心流程`
+- `/coding-prd-analyzer c=短信验证码登录不支持国际区号 飞书链接,蓝湖链接 id=167023`
 
 多个来源用逗号（`,`）分隔。skill 会处理所有来源并将结果合并为一份功能点清单。
 
@@ -99,7 +99,7 @@ metadata:
   ❌ 错误：缺少必填参数「需求编号」
   
   请提供需求编号，例如：
-  /prd id=167023 飞书链接,蓝湖链接
+  /coding-prd-analyzer id=167023 飞书链接,蓝湖链接
   ```
 - 只有在校验通过后，才继续执行后续步骤
 
@@ -320,32 +320,32 @@ PRD 分析完成 ✓
 
 ### 示例 1：单个飞书文档
 ```
-/prd id=167023 https://example.feishu.cn/docx/AbCdEfGh
+/coding-prd-analyzer id=167023 https://example.feishu.cn/docx/AbCdEfGh
 ```
 
 ### 示例 2：多个设计稿页面
 ```
-/prd id=167023 https://lanhu.app/xyz123,https://lanhu.app/abc456
+/coding-prd-analyzer id=167023 https://lanhu.app/xyz123,https://lanhu.app/abc456
 ```
 
 ### 示例 3：混合来源
 ```
-/prd id=167023 https://example.feishu.cn/docx/abc,https://modao.cc/xyz,./mockups/login.png
+/coding-prd-analyzer id=167023 https://example.feishu.cn/docx/abc,https://modao.cc/xyz,./mockups/login.png
 ```
 
 ### 示例 4：本地 PDF
 ```
-/prd id=167023 ./docs/requirements-v1.2.pdf
+/coding-prd-analyzer id=167023 ./docs/requirements-v1.2.pdf
 ```
 
 ### 示例 5：带需求澄清描述
 ```
-/prd id=167023 c=本期仅交付管理后台，暂不包含移动端和消息推送 飞书链接,蓝湖链接
+/coding-prd-analyzer id=167023 c=本期仅交付管理后台，暂不包含移动端和消息推送 飞书链接,蓝湖链接
 ```
 
 ### 示例 6：不提供 source，直接澄清现有需求
 ```
-/prd id=167023 c=补充登录异常场景：连续输错5次后锁定10分钟
+/coding-prd-analyzer id=167023 c=补充登录异常场景：连续输错5次后锁定10分钟
 ```
 
 ---

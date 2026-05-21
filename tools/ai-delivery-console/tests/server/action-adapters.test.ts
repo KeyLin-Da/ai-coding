@@ -40,6 +40,51 @@ describe('action-adapters', () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-action-'));
     const run = await executeAction(root, workflow(), { actionType: 'PRD_ANALYZE', params: {} });
     expect(run.status).toBe('WAITING_FOR_AGENT');
-    expect(run.commandText).toContain('/prd id=172014');
+    expect(run.commandText).toContain('/coding-prd-analyzer id=172014');
+    expect(run.commandText).not.toContain(' c=');
+  });
+
+  it('PRD 分析显式填写描述时传递 c 参数', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-action-'));
+    const run = await executeAction(root, workflow(), {
+      actionType: 'PRD_ANALYZE',
+      params: { description: '  仅覆盖后台端\n暂不包含用户端  ', sources: [] }
+    });
+    expect(run.commandText).toContain('c=仅覆盖后台端 暂不包含用户端');
+  });
+
+  it('PRD 分析未填写描述时不使用标题兜底', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-action-'));
+    const run = await executeAction(root, workflow(), {
+      actionType: 'PRD_ANALYZE',
+      params: { description: '', sources: [] }
+    });
+    expect(run.commandText).toBe('/coding-prd-analyzer id=172014');
+  });
+
+  it('PRD 分析可复用 workflow 中已保存的澄清描述', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-action-'));
+    const current = {
+      ...workflow(),
+      prdClarification: '本期只覆盖后台配置'
+    };
+    const run = await executeAction(root, current, {
+      actionType: 'PRD_ANALYZE',
+      params: { sources: [] }
+    });
+    expect(run.commandText).toBe('/coding-prd-analyzer id=172014 c=本期只覆盖后台配置');
+  });
+
+  it('单元测试生成不会复用 PRD 澄清描述', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-action-'));
+    const current = {
+      ...workflow(),
+      prdClarification: '本期只覆盖后台配置'
+    };
+    const run = await executeAction(root, current, {
+      actionType: 'JUNIT_GENERATE',
+      params: { moduleName: 'opp-diy' }
+    });
+    expect(run.commandText).toBe('generate-unit-test opp-diy');
   });
 });

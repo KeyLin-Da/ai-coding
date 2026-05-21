@@ -22,14 +22,29 @@
               <strong>{{ stageLabels[activeStage] }}</strong>
               <p class="muted">{{ stageHint }}</p>
             </div>
-            <div>
+            <div class="stage-toolbar-actions">
+              <el-select v-model="selectedAgentId" style="width: 180px" placeholder="选择 Agent">
+                <el-option v-for="agent in store.agents" :key="agent.id" :label="agent.name" :value="agent.id">
+                  <span>{{ agent.name }}</span>
+                  <span class="muted" style="float: right">{{ agent.available ? '可用' : '不可用' }}</span>
+                </el-option>
+              </el-select>
               <el-button :icon="DocumentChecked" @click="openReview">审核</el-button>
               <el-button v-if="latestRun" :icon="Tickets" @click="openRunLog(latestRun.id)">日志</el-button>
+              <el-button v-if="latestRun?.status === 'RUNNING'" type="danger" @click="cancelRun(latestRun.id)">取消</el-button>
             </div>
           </div>
 
           <div class="stage-content">
             <div v-if="activeStage === 'PRD'" class="stage-actions">
+              <el-input
+                v-model="prdClarification"
+                type="textarea"
+                :rows="3"
+                maxlength="500"
+                show-word-limit
+                placeholder="填写 PRD 澄清描述，对应 coding-prd-analyzer 的 c 参数，例如范围边界、排除项、业务前提"
+              />
               <el-input v-model="sourceText" type="textarea" :rows="3" placeholder="填写 PRD 来源，每行一个" />
               <el-button type="primary" :icon="Operation" @click="runPrd">生成 PRD</el-button>
               <MarkdownEditor title="PRD 文档" :artifact-path="stageArtifactPath('PRD')" @saved="reload" />
@@ -99,9 +114,11 @@ const reviewDialog = ref<InstanceType<typeof ReviewDialog>>();
 const runLogDrawer = ref<InstanceType<typeof RunLogDrawer>>();
 const selectedArtifactPath = ref('');
 const sourceText = ref('');
+const prdClarification = ref('');
 const changeName = ref('');
 const moduleName = ref('');
 const branchName = ref('');
+const selectedAgentId = ref('manual');
 
 const workflow = computed(() => store.current);
 const latestRun = computed<RunRecord | undefined>(() => workflow.value?.runs[0]);
@@ -148,12 +165,19 @@ async function runRefresh() {
 async function runPrd() {
   await store.runAction({
     actionType: 'PRD_ANALYZE',
-    params: { sources: sourceText.value.split('\n').map((item) => item.trim()).filter(Boolean) }
+    params: {
+      agentId: selectedAgentId.value,
+      description: prdClarification.value,
+      sources: sourceText.value
+        .split('\n')
+        .map((item) => item.trim())
+        .filter(Boolean)
+    }
   });
 }
 
 async function runDesign() {
-  await store.runAction({ actionType: 'DESIGN_GENERATE', params: { documentPath: stageArtifactPath('PRD') } });
+  await store.runAction({ actionType: 'DESIGN_GENERATE', params: { agentId: selectedAgentId.value, documentPath: stageArtifactPath('PRD') } });
 }
 
 async function runOpenSpecStatus() {
@@ -161,15 +185,15 @@ async function runOpenSpecStatus() {
 }
 
 async function runOpenSpecVerify() {
-  await store.runAction({ actionType: 'OPENSPEC_VERIFY', params: { changeName: changeName.value } });
+  await store.runAction({ actionType: 'OPENSPEC_VERIFY', params: { agentId: selectedAgentId.value, changeName: changeName.value } });
 }
 
 async function runJunit() {
-  await store.runAction({ actionType: 'JUNIT_GENERATE', params: { moduleName: moduleName.value } });
+  await store.runAction({ actionType: 'JUNIT_GENERATE', params: { agentId: selectedAgentId.value, moduleName: moduleName.value } });
 }
 
 async function runCodeReview() {
-  await store.runAction({ actionType: 'CODE_REVIEW', params: { branchName: branchName.value } });
+  await store.runAction({ actionType: 'CODE_REVIEW', params: { agentId: selectedAgentId.value, branchName: branchName.value } });
 }
 
 async function returnToImplementation() {
@@ -188,7 +212,13 @@ async function submitReview(input: { stage: WorkflowStage; decision: 'APPROVED' 
 
 async function openRunLog(runId: string) {
   await store.loadRunEvents(runId);
+  store.streamRunEvents(runId);
   runLogDrawer.value?.open();
+}
+
+async function cancelRun(runId: string) {
+  await store.cancelRun(runId);
+  ElMessage.success('已发送取消请求');
 }
 
 watch(
@@ -198,6 +228,7 @@ watch(
       return;
     }
     sourceText.value = value.sources.join('\n');
+    prdClarification.value = value.prdClarification || '';
     changeName.value = value.stages.IMPLEMENTATION.changeName || `req-${value.requirementId}`;
     moduleName.value = moduleName.value || '';
     branchName.value = value.branchName || '';
@@ -209,6 +240,7 @@ watch(
 );
 
 onMounted(async () => {
+  await store.loadAgents();
   await reload();
 });
 </script>
@@ -238,6 +270,13 @@ onMounted(async () => {
   max-width: 360px;
 }
 
+.stage-toolbar-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 @media (max-width: 760px) {
   .action-line {
     align-items: stretch;
@@ -246,6 +285,12 @@ onMounted(async () => {
 
   .action-line .el-input {
     max-width: none;
+  }
+
+  .stage-toolbar-actions {
+    align-items: stretch;
+    flex-direction: column;
+    width: 100%;
   }
 }
 </style>

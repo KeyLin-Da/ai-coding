@@ -3,8 +3,8 @@ import type { ActionInput, RunRecord, RunStatus } from '../../shared/workflow';
 import type { RequirementWorkflow } from '../../shared/workflow';
 import { createRunId, appendRunEvent } from './run-log';
 import { assertInsideWorkspace } from './workspace';
-import { executeWithCodex, isCodexAvailable } from './codex-bridge';
-import { serverConfig } from '../config';
+import { getAgentProvider, startAgentProcess } from './agent-providers';
+import { normalizePrdClarification } from './workflow-repository';
 
 const cliActionMap: Partial<Record<ActionInput['actionType'], string[]>> = {
   OPENSPEC_STATUS: ['openspec', 'status'],
@@ -16,20 +16,32 @@ function asString(value: unknown, fallback = ''): string {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
 }
 
+function hasParam(params: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(params, key);
+}
+
+function prdDescription(workflow: RequirementWorkflow, params: Record<string, unknown>): string {
+  if (hasParam(params, 'description')) {
+    return normalizePrdClarification(typeof params.description === 'string' ? params.description : '') || '';
+  }
+  return workflow.prdClarification || '';
+}
+
 function buildSkillCommand(workflow: RequirementWorkflow, action: ActionInput): string {
   const params = action.params || {};
   const requirementId = workflow.requirementId;
   const sources = Array.isArray(params.sources) ? params.sources.join(',') : workflow.sources.join(',');
-  const description = asString(params.description, workflow.title);
+  const description = normalizePrdClarification(asString(params.description)) || '';
+  const prdClarification = prdDescription(workflow, params);
   const moduleName = asString(params.moduleName);
   const branchName = asString(params.branchName, workflow.branchName || '');
   const changeName = asString(params.changeName, `req-${requirementId}`);
 
   switch (action.actionType) {
     case 'PRD_ANALYZE':
-      return `/prd id=${requirementId}${description ? ` c=${description}` : ''}${sources ? ` ${sources}` : ''}`;
+      return `/coding-prd-analyzer id=${requirementId}${prdClarification ? ` c=${prdClarification}` : ''}${sources ? ` ${sources}` : ''}`;
     case 'DESIGN_GENERATE':
-      return `/coding-design d=${params.documentPath || description} r=${requirementId}`;
+      return `/coding-design d=${params.documentPath || workflow.title} r=${requirementId}`;
     case 'JUNIT_GENERATE':
       return `generate-unit-test ${moduleName || '<module-name>'}${description ? ` "${description}"` : ''}`;
     case 'CODE_REVIEW':
@@ -43,6 +55,10 @@ function buildSkillCommand(workflow: RequirementWorkflow, action: ActionInput): 
     default:
       return '';
   }
+}
+
+function isAgentAction(actionType: ActionInput['actionType']): boolean {
+  return ['PRD_ANALYZE', 'DESIGN_GENERATE', 'OPENSPEC_FF', 'OPENSPEC_APPLY', 'OPENSPEC_VERIFY', 'JUNIT_GENERATE', 'CODE_REVIEW'].includes(actionType);
 }
 
 function runCli(workspaceRoot: string, args: string[]): Promise<{ status: RunStatus; output: string; error?: string }> {
@@ -100,7 +116,12 @@ export function validateActionInput(workspaceRoot: string, action: ActionInput):
   }
 }
 
-export async function executeAction(workspaceRoot: string, workflow: RequirementWorkflow, action: ActionInput): Promise<RunRecord> {
+export async function executeAction(
+  workspaceRoot: string,
+  workflow: RequirementWorkflow,
+  action: ActionInput,
+  onRunUpdate: (run: RunRecord) => Promise<void> = async () => undefined
+): Promise<RunRecord> {
   validateActionInput(workspaceRoot, action);
   const runId = createRunId();
   const params = action.params || {};
@@ -115,6 +136,7 @@ export async function executeAction(workspaceRoot: string, workflow: Requirement
   };
 
   await appendRunEvent(workspaceRoot, workflow.requirementId, runId, {
+    type: 'START',
     level: 'INFO',
     message: `开始执行 ${action.actionType}`
   });
@@ -123,6 +145,7 @@ export async function executeAction(workspaceRoot: string, workflow: Requirement
     run.status = 'SUCCEEDED';
     run.finishedAt = new Date().toISOString();
     await appendRunEvent(workspaceRoot, workflow.requirementId, runId, {
+      type: 'INFO',
       level: 'INFO',
       message: '本地状态动作已完成'
     });
@@ -140,6 +163,7 @@ export async function executeAction(workspaceRoot: string, workflow: Requirement
           ? [...cliBase, changeName]
           : [...cliBase, artifactId, '--change', changeName, '--json'];
     await appendRunEvent(workspaceRoot, workflow.requirementId, runId, {
+      type: 'INFO',
       level: 'INFO',
       message: `执行命令: ${args.join(' ')}`
     });
@@ -148,6 +172,7 @@ export async function executeAction(workspaceRoot: string, workflow: Requirement
     run.error = result.error;
     run.finishedAt = new Date().toISOString();
     await appendRunEvent(workspaceRoot, workflow.requirementId, runId, {
+      type: result.status === 'SUCCEEDED' ? 'EXIT' : 'ERROR',
       level: result.status === 'SUCCEEDED' ? 'INFO' : 'ERROR',
       message: result.status === 'SUCCEEDED' ? 'OpenSpec 命令执行完成' : 'OpenSpec 命令执行失败',
       data: { output: result.output, error: result.error }
@@ -155,45 +180,36 @@ export async function executeAction(workspaceRoot: string, workflow: Requirement
     return run;
   }
 
-  const commandText = buildSkillCommand(workflow, action);
-  
-  // 检查是否启用 Codex 自动化
-  if (serverConfig.codex.enabled) {
-    const codexAvailable = await isCodexAvailable();
-    if (codexAvailable) {
-      await appendRunEvent(workspaceRoot, workflow.requirementId, runId, {
-        level: 'INFO',
-        message: '使用 Codex 自动执行命令'
-      });
-      
-      const result = await executeWithCodex(workspaceRoot, commandText, workflow.requirementId);
-      run.status = result.status;
-      run.error = result.error;
-      run.finishedAt = new Date().toISOString();
-      
-      await appendRunEvent(workspaceRoot, workflow.requirementId, runId, {
-        level: result.status === 'SUCCEEDED' ? 'INFO' : 'ERROR',
-        message: result.status === 'SUCCEEDED' ? 'Codex 执行完成' : 'Codex 执行失败',
-        data: { output: result.output, error: result.error }
-      });
-      
-      return run;
-    } else {
-      await appendRunEvent(workspaceRoot, workflow.requirementId, runId, {
-        level: 'WARN',
-        message: 'Codex 不可用，回退到手动模式'
-      });
-    }
+  if (!isAgentAction(action.actionType)) {
+    run.status = 'FAILED';
+    run.error = `动作未实现: ${action.actionType}`;
+    run.finishedAt = new Date().toISOString();
+    return run;
   }
-  
-  // 回退到手动模式
-  run.status = 'WAITING_FOR_AGENT';
-  run.commandText = commandText;
-  run.finishedAt = new Date().toISOString();
-  await appendRunEvent(workspaceRoot, workflow.requirementId, runId, {
-    level: 'WARN',
-    message: '当前环境没有配置 Agent Bridge，请复制标准调用文本到 Agent 执行',
-    data: { commandText }
-  });
-  return run;
+
+  const commandText = buildSkillCommand(workflow, action);
+  const agentId = asString(params.agentId, 'manual');
+  run.agentId = agentId;
+
+  const provider = await getAgentProvider(agentId);
+  if (!provider) {
+    run.status = 'WAITING_FOR_AGENT';
+    run.commandText = commandText;
+    run.finishedAt = new Date().toISOString();
+    await appendRunEvent(workspaceRoot, workflow.requirementId, runId, {
+      type: 'WARN',
+      level: 'WARN',
+      message: `未找到 Agent Provider: ${agentId}`,
+      agentId,
+      data: { commandText }
+    });
+    return run;
+  }
+
+  return startAgentProcess(workspaceRoot, workflow, run, provider, commandText, onRunUpdate);
 }
+
+export const internalForTests = {
+  buildSkillCommand,
+  isAgentAction
+};

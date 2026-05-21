@@ -13,7 +13,7 @@ export type WorkflowStatus =
   | 'BLOCKED'
   | 'DONE';
 
-export type RunStatus = 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'WAITING_FOR_AGENT';
+export type RunStatus = 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED' | 'WAITING_FOR_AGENT';
 
 export type ReviewDecision = 'APPROVED' | 'REJECTED' | 'RISK_ACCEPTED';
 
@@ -66,8 +66,11 @@ export interface ReviewRecord {
 
 export interface RunEvent {
   time: string;
+  type?: 'START' | 'STDOUT' | 'STDERR' | 'INFO' | 'WARN' | 'ERROR' | 'ARTIFACT' | 'EXIT' | 'CANCELLED';
   level: 'INFO' | 'WARN' | 'ERROR';
   message: string;
+  text?: string;
+  agentId?: string;
   data?: unknown;
 }
 
@@ -80,8 +83,23 @@ export interface RunRecord {
   finishedAt?: string;
   params: Record<string, unknown>;
   commandText?: string;
+  agentId?: string;
+  pid?: number;
+  promptPath?: string;
   outputPath?: string;
   error?: string;
+}
+
+export type AgentInputMode = 'PROMPT_FILE' | 'STDIN' | 'ARGUMENTS' | 'MANUAL';
+
+export interface AgentProvider {
+  id: string;
+  name: string;
+  description?: string;
+  inputMode: AgentInputMode;
+  command?: string[];
+  available: boolean;
+  supportsStreaming: boolean;
 }
 
 export interface StageState {
@@ -99,6 +117,7 @@ export interface RequirementWorkflow {
   requirementId: string;
   title: string;
   branchName?: string;
+  prdClarification?: string;
   sources: string[];
   currentStage: WorkflowStage | 'DONE';
   status: WorkflowStatus;
@@ -115,6 +134,7 @@ export interface RequirementInput {
   requirementId: string;
   title?: string;
   branchName?: string;
+  prdClarification?: string;
   sources?: string[];
 }
 
@@ -153,7 +173,8 @@ export const statusLabels: Record<WorkflowStatus | RunStatus, string> = {
   RUNNING: '运行中',
   SUCCEEDED: '成功',
   FAILED: '失败',
-  WAITING_FOR_AGENT: '等待 Agent'
+  WAITING_FOR_AGENT: '等待 Agent',
+  CANCELLED: '已取消'
 };
 
 export function createEmptyStages(): Record<WorkflowStage, StageState> {

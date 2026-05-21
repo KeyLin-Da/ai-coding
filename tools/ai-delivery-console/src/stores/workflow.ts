@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import type { ActionInput, RequirementInput, RequirementWorkflow, ReviewInput, RunEvent } from '@shared/workflow';
+import type { ActionInput, AgentProvider, RequirementInput, RequirementWorkflow, ReviewInput, RunEvent } from '@shared/workflow';
 import { apiClient } from '@/api/client';
 
 interface WorkflowState {
@@ -7,6 +7,8 @@ interface WorkflowState {
   current?: RequirementWorkflow;
   loading: boolean;
   runEvents: RunEvent[];
+  agents: AgentProvider[];
+  eventSource?: EventSource;
 }
 
 export const useWorkflowStore = defineStore('workflow', {
@@ -14,9 +16,14 @@ export const useWorkflowStore = defineStore('workflow', {
     requirements: [],
     current: undefined,
     loading: false,
-    runEvents: []
+    runEvents: [],
+    agents: [],
+    eventSource: undefined
   }),
   actions: {
+    async loadAgents() {
+      this.agents = await apiClient.listAgents();
+    },
     async loadRequirements() {
       this.loading = true;
       try {
@@ -62,6 +69,34 @@ export const useWorkflowStore = defineStore('workflow', {
         return;
       }
       this.runEvents = await apiClient.getRunEvents(this.current.requirementId, runId);
+    },
+    streamRunEvents(runId: string) {
+      if (!this.current) {
+        return;
+      }
+      this.stopRunStream();
+      const requirementId = this.current.requirementId;
+      this.runEvents = [];
+      this.eventSource = new EventSource(`/api/ai-delivery/runs/${encodeURIComponent(runId)}/stream?requirementId=${encodeURIComponent(requirementId)}`);
+      this.eventSource.onmessage = (event) => {
+        this.runEvents.push(JSON.parse(event.data) as RunEvent);
+      };
+      this.eventSource.onerror = () => {
+        this.stopRunStream();
+      };
+    },
+    stopRunStream() {
+      if (this.eventSource) {
+        this.eventSource.close();
+        this.eventSource = undefined;
+      }
+    },
+    async cancelRun(runId: string) {
+      if (!this.current) {
+        return;
+      }
+      await apiClient.cancelRun(this.current.requirementId, runId);
+      await this.loadRequirement(this.current.requirementId);
     }
   }
 });

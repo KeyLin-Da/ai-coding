@@ -5,6 +5,24 @@ import { createEmptyStages } from '../../shared/workflow';
 import { deriveCurrentStage } from '../../shared/stage-rules';
 import { normalizeRequirementId } from './workspace';
 
+export function normalizePrdClarification(value?: string): string | undefined {
+  const withoutControls = Array.from(String(value || ''))
+    .map((char) => {
+      const code = char.charCodeAt(0);
+      return code <= 0x1f || code === 0x7f ? ' ' : char;
+    })
+    .join('');
+  const normalized = withoutControls
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 500);
+  return normalized || undefined;
+}
+
+function hasInputField(input: RequirementInput, key: keyof RequirementInput): boolean {
+  return Object.prototype.hasOwnProperty.call(input, key);
+}
+
 export class WorkflowRepository {
   constructor(private readonly workspaceRoot: string) {}
 
@@ -47,10 +65,14 @@ export class WorkflowRepository {
     const requirementId = normalizeRequirementId(input.requirementId);
     const existing = await this.load(requirementId);
     if (existing) {
+      const prdClarification = hasInputField(input, 'prdClarification')
+        ? normalizePrdClarification(input.prdClarification)
+        : existing.prdClarification;
       return this.save({
         ...existing,
         title: input.title || existing.title,
         branchName: input.branchName ?? existing.branchName,
+        prdClarification,
         sources: input.sources?.length ? input.sources : existing.sources
       });
     }
@@ -59,6 +81,7 @@ export class WorkflowRepository {
       requirementId,
       title: input.title || `需求 ${requirementId}`,
       branchName: input.branchName,
+      prdClarification: normalizePrdClarification(input.prdClarification),
       sources: input.sources || [],
       currentStage: 'PRD',
       status: 'DRAFT',

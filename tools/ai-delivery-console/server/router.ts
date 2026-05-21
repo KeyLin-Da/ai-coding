@@ -1,13 +1,14 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { URL } from 'node:url';
 import type { ActionInput, RequirementInput, ReviewInput } from '../shared/workflow';
-import { WorkflowRepository } from './services/workflow-repository';
+import { normalizePrdClarification, WorkflowRepository } from './services/workflow-repository';
 import { scanRequirementArtifacts } from './services/workspace-scanner';
 import { WorkflowLock } from './services/workflow-lock';
 import { executeAction } from './services/action-adapters';
 import { readRunEvents } from './services/run-log';
 import { readArtifact, saveArtifact } from './services/markdown-service';
 import { applyReview, refreshCodeReviewIssues, returnToImplementation } from './services/review-service';
+import { cancelAgentRun, listAgentProviders } from './services/agent-providers';
 
 async function parseBody<T>(request: IncomingMessage): Promise<T> {
   const chunks: Buffer[] = [];
@@ -44,6 +45,11 @@ export function createRouter(workspaceRoot: string) {
     try {
       const url = new URL(request.url || '/', 'http://localhost');
       const pathname = url.pathname;
+
+      if (request.method === 'GET' && pathname === '/api/ai-delivery/agents') {
+        send(response, 200, { data: await listAgentProviders() });
+        return;
+      }
 
       if (request.method === 'GET' && pathname === '/api/ai-delivery/requirements') {
         send(response, 200, { data: await repository.list() });
@@ -82,7 +88,30 @@ export function createRouter(workspaceRoot: string) {
             send(response, 404, { message: '需求不存在' });
             return;
           }
-          const run = await executeAction(workspaceRoot, workflow, action);
+          if (action.actionType === 'PRD_ANALYZE') {
+            const params = action.params || {};
+            const sources = Array.isArray(params.sources)
+              ? params.sources.map((item) => String(item).trim()).filter(Boolean)
+              : workflow.sources;
+            workflow = {
+              ...workflow,
+              sources,
+              prdClarification: normalizePrdClarification(typeof params.description === 'string' ? params.description : workflow.prdClarification)
+            };
+          }
+          const run = await executeAction(workspaceRoot, workflow, action, async (updatedRun) => {
+            const latest = await repository.load(requirementId);
+            if (!latest) {
+              return;
+            }
+            const index = latest.runs.findIndex((item) => item.id === updatedRun.id);
+            if (index >= 0) {
+              latest.runs[index] = updatedRun;
+            } else {
+              latest.runs.unshift(updatedRun);
+            }
+            await repository.save(latest);
+          });
           workflow.runs.unshift(run);
           if (action.actionType === 'REFRESH_ARTIFACTS') {
             workflow.artifacts = await scanRequirementArtifacts(workspaceRoot, workflow.requirementId, workflow.branchName);
@@ -103,6 +132,59 @@ export function createRouter(workspaceRoot: string) {
       if (request.method === 'GET' && runMatch) {
         const requirementId = url.searchParams.get('requirementId') || '';
         send(response, 200, { data: await readRunEvents(workspaceRoot, requirementId, runMatch[1]) });
+        return;
+      }
+
+      const runStreamMatch = match(pathname, /^\/api\/ai-delivery\/runs\/([^/]+)\/stream$/);
+      if (request.method === 'GET' && runStreamMatch) {
+        const requirementId = url.searchParams.get('requirementId') || '';
+        response.writeHead(200, {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache',
+          Connection: 'keep-alive',
+          'Access-Control-Allow-Origin': '*'
+        });
+        let sent = 0;
+        let interval: NodeJS.Timeout | undefined;
+        const push = async () => {
+          const events = await readRunEvents(workspaceRoot, requirementId, runStreamMatch[1]);
+          for (const event of events.slice(sent)) {
+            response.write(`data: ${JSON.stringify(event)}\n\n`);
+          }
+          sent = events.length;
+          const workflow = await repository.load(requirementId);
+          const run = workflow?.runs.find((item) => item.id === runStreamMatch[1]);
+          if (run && ['SUCCEEDED', 'FAILED', 'CANCELLED', 'WAITING_FOR_AGENT'].includes(run.status)) {
+            if (interval) {
+              clearInterval(interval);
+            }
+            response.end();
+          }
+        };
+        interval = setInterval(() => {
+          push().catch((error) => {
+            response.write(`event: error\ndata: ${JSON.stringify({ message: error.message })}\n\n`);
+          });
+        }, 500);
+        request.on('close', () => clearInterval(interval));
+        await push();
+        return;
+      }
+
+      const cancelMatch = match(pathname, /^\/api\/ai-delivery\/runs\/([^/]+)\/cancel$/);
+      if (request.method === 'POST' && cancelMatch) {
+        const body = await parseBody<{ requirementId: string }>(request);
+        const cancelled = await cancelAgentRun(workspaceRoot, body.requirementId, cancelMatch[1]);
+        const workflow = await repository.load(body.requirementId);
+        if (workflow) {
+          const run = workflow.runs.find((item) => item.id === cancelMatch[1]);
+          if (run && cancelled) {
+            run.status = 'CANCELLED';
+            run.finishedAt = new Date().toISOString();
+            await repository.save(workflow);
+          }
+        }
+        send(response, 200, { data: { cancelled } });
         return;
       }
 

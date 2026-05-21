@@ -1,4 +1,4 @@
-import type { ActionInput, RequirementInput, RequirementWorkflow, ReviewInput, RunEvent } from '@shared/workflow';
+import type { ActionInput, AgentProvider, RequirementInput, RequirementWorkflow, ReviewInput, RunEvent } from '@shared/workflow';
 
 interface ApiResult<T> {
   data: T;
@@ -23,6 +23,9 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
 export const apiClient = {
   listRequirements() {
     return request<RequirementWorkflow[]>('/api/ai-delivery/requirements');
+  },
+  listAgents() {
+    return request<AgentProvider[]>('/api/ai-delivery/agents');
   },
   createRequirement(input: RequirementInput) {
     return request<RequirementWorkflow>('/api/ai-delivery/requirements', {
@@ -56,5 +59,11 @@ export const apiClient = {
   },
   getRunEvents(requirementId: string, runId: string) {
     return request<RunEvent[]>(`/api/ai-delivery/runs/${encodeURIComponent(runId)}/events?requirementId=${encodeURIComponent(requirementId)}`);
+  },
+  cancelRun(requirementId: string, runId: string) {
+    return request<{ cancelled: boolean }>(`/api/ai-delivery/runs/${encodeURIComponent(runId)}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify({ requirementId })
+    });
   }
 };
