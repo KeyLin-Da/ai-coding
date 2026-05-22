@@ -1,47 +1,26 @@
-# .codebuddy 配置目录
+# .codex 配置目录
 
-本目录包含 CodeBuddy AI 助手的自定义命令（Commands）和技能（Skills）配置，用于扩展和定制 AI 助手的功能。
+本目录包含 Codex AI Agent 的自定义技能（Skills）配置，用于扩展和定制 AI 助手的功能。
 
 ## 目录结构
 
 ```
-.codebuddy/
-├── commands/          # 自定义命令
-│   └── opsx/         # OpenSpec 工作流命令集
+.codex/
 └── skills/           # 自定义技能
-    ├── code-review/              # 代码评审技能
-    ├── prd-analyzer/             # PRD 分析器技能
-    └── openspec-*/               # OpenSpec 相关技能集合
+    ├── coding-database-query/   # 数据库查询工具
+    ├── coding-design/           # 技术方案设计专家
+    ├── coding-junit/            # 单元测试生成专家
+    ├── coding-prd-analyzer/     # PRD 分析器
+    └── coding-review/           # 代码评审官
 tools/
 └── ai-delivery-console/        # AI 需求交付控制台（可视化工具）
 ```
-
-## Commands（命令）
-
-### OpenSpec 工作流命令 (`opsx/`)
-
-提供完整的 OpenSpec 变更管理工作流，支持从需求到实现的全流程管理。
-
-| 命令文件 | 说明 |
-|---------|------|
-| `onboard.md` | 新手引导 - 通过实际任务演示完整的 OpenSpec 工作流程 |
-| `new.md` | 创建新的变更容器 |
-| `explore.md` | 探索模式 - 在实施前分析问题 |
-| `continue.md` | 继续未完成的变更工作 |
-| `apply.md` | 应用变更 - 执行任务清单 |
-| `verify.md` | 验证变更完成情况 |
-| `archive.md` | 归档已完成的变更 |
-| `ff.md` | 快速前进（Fast-forward）变更 |
-| `sync.md` | 同步规格说明 |
-| `bulk-archive.md` | 批量归档多个变更 |
-
-**使用方式：** 在 CodeBuddy 中使用 `/opsx:<command>` 调用
 
 ## Skills（技能）
 
 ### Coding 系列技能（支持 AI 需求交付控制台可视化执行）
 
-以下技能均可通过 [AI 需求交付控制台](tools/ai-delivery-console/) 进行可视化管理和执行。
+以下技能均可通过 [AI 需求交付控制台](tools/ai-delivery-console/) 进行可视化管理和执行，也可通过 Codex CLI 直接调用。
 
 #### 🏗️ coding-design - 技术方案设计专家
 基于 OpenSpec 体系进行需求分析、技术探索和技术方案设计输出。支持首次设计和二次评审模式，可查询数据库表结构和参考设计规范。
@@ -120,77 +99,52 @@ npm run dev         # 前端服务 (http://127.0.0.1:5178)
 
 ---
 
-### OpenSpec 技能集合
-
-以下技能为 OpenSpec 工作流提供辅助功能：
-
-| 技能名称 | 说明 |
-|---------|------|
-| `openspec-new-change` | 创建新的 OpenSpec 变更 |
-| `openspec-continue-change` | 继续处理现有变更 |
-| `openspec-apply-change` | 应用变更任务 |
-| `openspec-verify-change` | 验证变更完成度 |
-| `openspec-archive-change` | 归档单个变更 |
-| `openspec-bulk-archive-change` | 批量归档变更 |
-| `openspec-ff-change` | 快速推进变更 |
-| `openspec-sync-specs` | 同步规格说明 |
-| `openspec-explore` | 探索和分析变更需求 |
-| `openspec-onboard` | OpenSpec 新手引导 |
-
 ## 工作流程示例
 
 ### 代码评审流程
 
 ```bash
 # 首次评审
-/code-review b=feature_opp_157396
+/coding-review b=feature_opp_157396
 
 # 增量评审（复用历史检查点）
-/code-review b=feature_opp_157396
+/coding-review b=feature_opp_157396
 
 # 带外部文档约束的评审
-/code-review b=bugfix_opp_170025 d=review-notes.md,https://xxx.feishu.cn/docx/xxx
+/coding-review b=bugfix_opp_170025 d=review-notes.md,https://xxx.feishu.cn/docx/xxx
 ```
 
 ### PRD 分析流程
 
 ```bash
 # 分析单个飞书文档
-/prd https://example.feishu.cn/docx/AbCdEfGh
+/coding-prd-analyzer id=172014 source=https://example.feishu.cn/docx/AbCdEfGh
 
 # 分析多个设计稿
-/prd https://lanhu.app/xyz123,https://modao.cc/abc456
+/coding-prd-analyzer id=172014 source=https://lanhu.app/xyz123,https://modao.cc/abc456
 
 # 混合来源分析
-/prd https://example.feishu.cn/docx/abc,./mockups/login.png,./docs/req.pdf
+/coding-prd-analyzer id=172014 source=https://example.feishu.cn/docx/abc,./mockups/login.png,./docs/req.pdf
 
-# 生成功能点后，手动创建 OpenSpec 变更
-/opsx:new prd-20260424-login
+# 带澄清描述
+/coding-prd-analyzer id=172014 c="需要支持第三方登录" source=https://example.feishu.cn/docx/abc
 ```
 
-### OpenSpec 完整工作流
+### 技术方案设计流程
 
 ```bash
-# 1. 新手引导（首次使用）
-/opsx:onboard
+# 基于 PRD 生成技术方案
+/coding-design d=docs/172014/prd/analysis.md r=172014
 
-# 2. 创建变更
-/opsx:new add-user-authentication
+# 二次评审（带评审意见）
+/coding-design d=docs/172014/prd/analysis.md r=172014 c="增加缓存层设计"
+```
 
-# 3. 探索需求
-/opsx:explore add-user-authentication
+### 单元测试生成流程
 
-# 4. 编写提案、规格、设计、任务
-# （AI 辅助生成各 artifacts）
-
-# 5. 应用变更
-/opsx:apply add-user-authentication
-
-# 6. 验证完成
-/opsx:verify add-user-authentication
-
-# 7. 归档变更
-/opsx:archive add-user-authentication
+```bash
+# 为指定模块生成单元测试
+/coding-junit opp-user "补充用户登录接口测试"
 ```
 
 ## 配置说明
@@ -217,21 +171,25 @@ npm run dev         # 前端服务 (http://127.0.0.1:5178)
 2. **PRD 分析：**
    - 确保飞书文档有正确的分享权限
    - 设计稿链接建议使用公开访问链接
-   - 生成的功能点清单需人工审查后再创建 OpenSpec 变更
+   - 生成的功能点清单需人工审查后再进入技术方案阶段
 
-3. **OpenSpec 工作流：**
-   - 变更命名使用 kebab-case 格式
-   - 保持变更范围小而聚焦
-   - 及时归档已完成的变更
+3. **技术方案设计：**
+   - 先完成 PRD 分析再生成技术方案
+   - 利用 `coding-database-query` 查询表结构
+   - 二次评审时提供具体的评审意见
+
+4. **单元测试：**
+   - 优先为新增接口生成测试
+   - 修改接口时关注新旧返参对比
+   - 定期查看测试覆盖率统计
 
 ## 版本信息
 
-- **code-review skill:** v1.0
-- **prd-analyzer skill:** v1.0
+- **coding 系列技能：** v2.0（Codex 平台）
 - **许可证：** MIT
 
 ## 相关链接
 
-- [CodeBuddy 官方文档](https://codebuddy.com/docs)
-- [OpenSpec 项目](https://github.com/openspec-project/openspec)
+- [Codex 官方文档](https://codex.com/docs)
+- [AI 需求交付控制台](tools/ai-delivery-console/README.md)
 - [阿里巴巴 Java 开发手册](https://github.com/alibaba/p3c)
