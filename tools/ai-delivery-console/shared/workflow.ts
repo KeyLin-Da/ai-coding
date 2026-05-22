@@ -13,9 +13,20 @@ export type WorkflowStatus =
   | 'BLOCKED'
   | 'DONE';
 
-export type RunStatus = 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED' | 'WAITING_FOR_AGENT';
+export type RunStatus =
+  | 'QUEUED'
+  | 'RUNNING'
+  | 'TERMINAL_OPENED'
+  | 'SUCCEEDED'
+  | 'FAILED'
+  | 'CANCELLED'
+  | 'WAITING_FOR_AGENT';
 
 export type ReviewDecision = 'APPROVED' | 'REJECTED' | 'RISK_ACCEPTED';
+
+export type RequirementType = 'REQUIREMENT' | 'DEFECT';
+
+export type ExecutionMode = 'BACKGROUND' | 'TERMINAL';
 
 export type ActionType =
   | 'PRD_ANALYZE'
@@ -78,16 +89,30 @@ export interface RunRecord {
   id: string;
   requirementId: string;
   actionType: ActionType;
+  stage?: WorkflowStage;
   status: RunStatus;
   startedAt: string;
   finishedAt?: string;
   params: Record<string, unknown>;
   commandText?: string;
   agentId?: string;
+  executionMode?: ExecutionMode;
   pid?: number;
   promptPath?: string;
   outputPath?: string;
+  terminalScriptPath?: string;
+  terminalTranscriptPath?: string;
+  terminalStatusPath?: string;
   error?: string;
+}
+
+export interface PrdSourceFile {
+  id: string;
+  name: string;
+  path: string;
+  size: number;
+  mimeType?: string;
+  uploadedAt: string;
 }
 
 export type AgentInputMode = 'PROMPT_FILE' | 'STDIN' | 'ARGUMENTS' | 'MANUAL';
@@ -116,10 +141,12 @@ export interface StageState {
 export interface RequirementWorkflow {
   requirementId: string;
   title: string;
+  requirementType?: RequirementType;
   branchName?: string;
   prdClarification?: string;
   techDesignDocument?: string;
   techDesignClarification?: string;
+  prdSourceFiles?: PrdSourceFile[];
   sources: string[];
   currentStage: WorkflowStage | 'DONE';
   status: WorkflowStatus;
@@ -135,6 +162,7 @@ export interface RequirementWorkflow {
 export interface RequirementInput {
   requirementId: string;
   title?: string;
+  requirementType?: RequirementType;
   branchName?: string;
   prdClarification?: string;
   techDesignDocument?: string;
@@ -163,6 +191,11 @@ export const stageLabels: Record<WorkflowStage, string> = {
   CODE_REVIEW: '代码评审'
 };
 
+export const requirementTypeLabels: Record<RequirementType, string> = {
+  REQUIREMENT: '需求',
+  DEFECT: '缺陷'
+};
+
 export const statusLabels: Record<WorkflowStatus | RunStatus, string> = {
   NOT_STARTED: '未开始',
   DRAFT: '草稿',
@@ -175,6 +208,7 @@ export const statusLabels: Record<WorkflowStatus | RunStatus, string> = {
   DONE: '完成',
   QUEUED: '排队中',
   RUNNING: '运行中',
+  TERMINAL_OPENED: '终端已打开',
   SUCCEEDED: '成功',
   FAILED: '失败',
   WAITING_FOR_AGENT: '等待 Agent',
@@ -188,4 +222,37 @@ export function createEmptyStages(): Record<WorkflowStage, StageState> {
     IMPLEMENTATION: { stage: 'IMPLEMENTATION', status: 'NOT_STARTED' },
     CODE_REVIEW: { stage: 'CODE_REVIEW', status: 'NOT_STARTED' }
   };
+}
+
+export const actionStageMap: Partial<Record<ActionType, WorkflowStage>> = {
+  PRD_ANALYZE: 'PRD',
+  DESIGN_GENERATE: 'TECH_DESIGN',
+  OPENSPEC_STATUS: 'IMPLEMENTATION',
+  OPENSPEC_NEW_CHANGE: 'IMPLEMENTATION',
+  OPENSPEC_INSTRUCTIONS: 'IMPLEMENTATION',
+  OPENSPEC_FF: 'IMPLEMENTATION',
+  OPENSPEC_APPLY: 'IMPLEMENTATION',
+  OPENSPEC_VERIFY: 'IMPLEMENTATION',
+  JUNIT_GENERATE: 'IMPLEMENTATION',
+  CODE_REVIEW: 'CODE_REVIEW',
+  RETURN_TO_IMPLEMENTATION: 'CODE_REVIEW'
+};
+
+export function stageForAction(actionType: ActionType): WorkflowStage | undefined {
+  return actionStageMap[actionType];
+}
+
+export function defaultBranchName(requirementId: string, requirementType: RequirementType = 'REQUIREMENT'): string {
+  const prefix = requirementType === 'DEFECT' ? 'bugfix' : 'feature';
+  return `${prefix}/opp#${requirementId}`;
+}
+
+export function shouldSyncBranchName(
+  currentBranchName: string | undefined,
+  previousAutoBranchName: string | undefined,
+  hasManualBranchName: boolean
+): boolean {
+  const current = (currentBranchName || '').trim();
+  const previousAuto = (previousAutoBranchName || '').trim();
+  return !hasManualBranchName || !current || current === previousAuto;
 }

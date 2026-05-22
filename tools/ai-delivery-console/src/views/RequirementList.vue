@@ -5,7 +5,7 @@
         <strong>需求工作流</strong>
         <p class="muted">按需求号聚合 PRD、技术方案、OpenSpec、单测和代码评审。</p>
       </div>
-      <el-button type="primary" :icon="Plus" @click="dialogVisible = true">创建/导入</el-button>
+      <el-button type="primary" :icon="Plus" @click="openCreateDialog">创建/导入</el-button>
     </div>
 
     <el-table :data="store.requirements" v-loading="store.loading" style="width: 100%">
@@ -32,27 +32,20 @@
 
   <el-dialog v-model="dialogVisible" title="创建或导入需求" width="560px">
     <el-form label-position="top">
-      <el-form-item label="需求号">
+      <el-form-item label="需求号" required>
         <el-input v-model="form.requirementId" placeholder="例如 172014" />
       </el-form-item>
-      <el-form-item label="标题">
+      <el-form-item label="标题" required>
         <el-input v-model="form.title" placeholder="需求标题" />
       </el-form-item>
-      <el-form-item label="分支名">
-        <el-input v-model="form.branchName" placeholder="feature/opp-172014" />
+      <el-form-item label="需求类型" required>
+        <el-radio-group v-model="form.requirementType">
+          <el-radio-button label="REQUIREMENT">{{ requirementTypeLabels.REQUIREMENT }}</el-radio-button>
+          <el-radio-button label="DEFECT">{{ requirementTypeLabels.DEFECT }}</el-radio-button>
+        </el-radio-group>
       </el-form-item>
-      <el-form-item label="PRD 澄清描述">
-        <el-input
-          v-model="form.prdClarification"
-          type="textarea"
-          :rows="3"
-          maxlength="500"
-          show-word-limit
-          placeholder="对应 /coding-prd-analyzer 的 c 参数，可填写范围边界、排除项、业务前提或术语定义"
-        />
-      </el-form-item>
-      <el-form-item label="PRD 来源">
-        <el-input v-model="sourcesText" type="textarea" :rows="3" placeholder="每行一个飞书、设计稿或本地文件来源" />
+      <el-form-item label="分支名" required>
+        <el-input v-model="form.branchName" :placeholder="branchNamePreview" @input="onBranchNameInput" />
       </el-form-item>
     </el-form>
     <template #footer>
@@ -63,41 +56,83 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { DocumentAdd, Plus, View } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import type { RequirementInput } from '@shared/workflow';
-import { stageLabels } from '@shared/workflow';
+import { defaultBranchName, requirementTypeLabels, shouldSyncBranchName, stageLabels } from '@shared/workflow';
 import { useWorkflowStore } from '@/stores/workflow';
 
 const store = useWorkflowStore();
 const router = useRouter();
 const dialogVisible = ref(false);
-const sourcesText = ref('');
 const form = reactive<RequirementInput>({
   requirementId: '',
   title: '',
-  branchName: '',
-  prdClarification: '',
-  sources: []
+  requirementType: 'REQUIREMENT',
+  branchName: ''
 });
+const lastAutoBranchName = ref('');
+const branchNameEdited = ref(false);
+
+const branchNamePreview = computed(() => {
+  const requirementId = form.requirementId.trim() || '需求号';
+  return defaultBranchName(requirementId, form.requirementType || 'REQUIREMENT');
+});
+
+function syncBranchName() {
+  const nextAutoBranchName = branchNamePreview.value;
+  if (shouldSyncBranchName(form.branchName, lastAutoBranchName.value, branchNameEdited.value)) {
+    form.branchName = nextAutoBranchName;
+  }
+  lastAutoBranchName.value = nextAutoBranchName;
+}
+
+watch(() => [form.requirementId, form.requirementType], syncBranchName, { immediate: true });
+
+function onBranchNameInput(value: string) {
+  branchNameEdited.value = value.trim() !== '' && value.trim() !== lastAutoBranchName.value;
+}
 
 function stageText(stage: string) {
   return stage === 'DONE' ? '完成' : stageLabels[stage as keyof typeof stageLabels];
 }
 
+function openCreateDialog() {
+  form.requirementId = '';
+  form.title = '';
+  form.requirementType = 'REQUIREMENT';
+  form.branchName = '';
+  branchNameEdited.value = false;
+  lastAutoBranchName.value = '';
+  syncBranchName();
+  dialogVisible.value = true;
+}
+
 async function submit() {
-  if (!form.requirementId) {
+  const requirementId = form.requirementId.trim();
+  const title = form.title?.trim();
+  const requirementType = form.requirementType || 'REQUIREMENT';
+  const branchName = form.branchName?.trim() || defaultBranchName(requirementId, requirementType);
+
+  if (!requirementId) {
     ElMessage.warning('请填写需求号');
     return;
   }
+  if (!title) {
+    ElMessage.warning('请填写标题');
+    return;
+  }
+  if (!branchName) {
+    ElMessage.warning('请填写分支名');
+    return;
+  }
   const workflow = await store.createRequirement({
-    ...form,
-    sources: sourcesText.value
-      .split('\n')
-      .map((item) => item.trim())
-      .filter(Boolean)
+    requirementId,
+    title,
+    requirementType,
+    branchName
   });
   dialogVisible.value = false;
   router.push(`/requirements/${workflow.requirementId}`);

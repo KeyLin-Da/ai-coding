@@ -1,6 +1,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import path from 'node:path';
 import { URL } from 'node:url';
-import type { ActionInput, RequirementInput, ReviewInput } from '../shared/workflow';
+import type { ActionInput, PrdSourceFile, RequirementInput, RequirementWorkflow, ReviewInput } from '../shared/workflow';
+import { stageForAction } from '../shared/workflow';
 import { normalizePrdClarification, WorkflowRepository } from './services/workflow-repository';
 import { scanRequirementArtifacts } from './services/workspace-scanner';
 import { WorkflowLock } from './services/workflow-lock';
@@ -8,7 +10,13 @@ import { executeAction } from './services/action-adapters';
 import { readRunEvents, appendStageCommandLog } from './services/run-log';
 import { readArtifact, saveArtifact } from './services/markdown-service';
 import { applyReview, refreshCodeReviewIssues, returnToImplementation } from './services/review-service';
-import { cancelAgentRun, listAgentProviders } from './services/agent-providers';
+import { cancelAgentRun, listAgentProviders, refreshTerminalRunStatuses } from './services/agent-providers';
+import {
+  assertAllowedPrdSourceFile,
+  deletePrdSourceFileSnapshot,
+  savePrdSourceFileSnapshot,
+  type UploadedPrdSourceFile
+} from './services/prd-source-files';
 
 async function parseBody<T>(request: IncomingMessage): Promise<T> {
   const chunks: Buffer[] = [];
@@ -19,12 +27,97 @@ async function parseBody<T>(request: IncomingMessage): Promise<T> {
   return raw ? (JSON.parse(raw) as T) : ({} as T);
 }
 
+function splitBuffer(buffer: Buffer, delimiter: Buffer): Buffer[] {
+  const parts: Buffer[] = [];
+  let start = 0;
+  let index = buffer.indexOf(delimiter, start);
+  while (index >= 0) {
+    parts.push(buffer.subarray(start, index));
+    start = index + delimiter.length;
+    index = buffer.indexOf(delimiter, start);
+  }
+  parts.push(buffer.subarray(start));
+  return parts;
+}
+
+function parseDisposition(header: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const part of header.split(';')) {
+    const [rawKey, ...rawValue] = part.trim().split('=');
+    if (!rawValue.length) {
+      continue;
+    }
+    result[rawKey] = rawValue.join('=').replace(/^"|"$/g, '');
+  }
+  return result;
+}
+
+function designDocumentPath(workflow: RequirementWorkflow, params: Record<string, unknown>): string {
+  if (typeof params.documentPath === 'string' && params.documentPath.trim()) {
+    return params.documentPath.trim();
+  }
+  const prdArtifactPath = workflow.artifacts.find((artifact) => artifact.stage === 'PRD' && artifact.exists && artifact.kind !== 'directory')?.path;
+  return prdArtifactPath || workflow.stages.PRD.artifactPath || `docs/${workflow.requirementId}/prd/analysis.md`;
+}
+
+async function parseMultipartFiles(request: IncomingMessage): Promise<UploadedPrdSourceFile[]> {
+  const contentType = request.headers['content-type'] || '';
+  const boundary = String(contentType).match(/boundary=(?:"([^"]+)"|([^;]+))/)?.[1] || String(contentType).match(/boundary=(?:"([^"]+)"|([^;]+))/)?.[2];
+  if (!boundary) {
+    throw new Error('缺少 multipart boundary');
+  }
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  const body = Buffer.concat(chunks);
+  const boundaryBuffer = Buffer.from(`--${boundary}`);
+  const files: UploadedPrdSourceFile[] = [];
+  for (const rawPart of splitBuffer(body, boundaryBuffer)) {
+    let part = rawPart;
+    if (part.length < 4 || part.equals(Buffer.from('--\r\n')) || part.equals(Buffer.from('--'))) {
+      continue;
+    }
+    if (part.subarray(0, 2).equals(Buffer.from('\r\n'))) {
+      part = part.subarray(2);
+    }
+    if (part.subarray(part.length - 2).equals(Buffer.from('\r\n'))) {
+      part = part.subarray(0, part.length - 2);
+    }
+    if (part.subarray(part.length - 2).equals(Buffer.from('--'))) {
+      part = part.subarray(0, part.length - 2);
+    }
+    const headerEnd = part.indexOf(Buffer.from('\r\n\r\n'));
+    if (headerEnd < 0) {
+      continue;
+    }
+    const headerText = part.subarray(0, headerEnd).toString('utf8');
+    const content = part.subarray(headerEnd + 4);
+    const headers = Object.fromEntries(
+      headerText.split('\r\n').map((line) => {
+        const [name, ...value] = line.split(':');
+        return [name.toLowerCase(), value.join(':').trim()];
+      })
+    );
+    const disposition = parseDisposition(headers['content-disposition'] || '');
+    if (!disposition.filename) {
+      continue;
+    }
+    files.push({
+      filename: path.basename(disposition.filename),
+      mimeType: headers['content-type'],
+      content
+    });
+  }
+  return files;
+}
+
 function send(response: ServerResponse, status: number, body: unknown): void {
   response.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
+    'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS'
   });
   response.end(JSON.stringify(body));
 }
@@ -52,7 +145,13 @@ export function createRouter(workspaceRoot: string) {
       }
 
       if (request.method === 'GET' && pathname === '/api/ai-delivery/requirements') {
-        send(response, 200, { data: await repository.list() });
+        const workflows = await Promise.all(
+          (await repository.list()).map(async (workflow) => {
+            const refreshed = await refreshTerminalRunStatuses(workspaceRoot, workflow);
+            return refreshed.changed ? repository.save(refreshed.workflow) : refreshed.workflow;
+          })
+        );
+        send(response, 200, { data: workflows });
         return;
       }
 
@@ -67,12 +166,71 @@ export function createRouter(workspaceRoot: string) {
 
       const requirementMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)$/);
       if (request.method === 'GET' && requirementMatch) {
-        const workflow = await repository.load(requirementMatch[1]);
+        let workflow = await repository.load(requirementMatch[1]);
         if (!workflow) {
           send(response, 404, { message: '需求不存在' });
           return;
         }
+        const refreshed = await refreshTerminalRunStatuses(workspaceRoot, workflow);
+        workflow = refreshed.workflow;
+        // 扫描并更新产物索引
+        workflow.artifacts = await scanRequirementArtifacts(workspaceRoot, workflow.requirementId, workflow.branchName);
+        workflow = await repository.save(workflow);
         send(response, 200, { data: workflow });
+        return;
+      }
+
+      const prdFilesMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/prd-files$/);
+      if (request.method === 'POST' && prdFilesMatch) {
+        const requirementId = prdFilesMatch[1];
+        const files = await parseMultipartFiles(request);
+        if (!files.length) {
+          send(response, 400, { message: '请至少选择一个 PRD 来源文件' });
+          return;
+        }
+        const lock = new WorkflowLock(workspaceRoot, requirementId);
+        await lock.acquire();
+        try {
+          let workflow = await repository.load(requirementId);
+          if (!workflow) {
+            send(response, 404, { message: '需求不存在' });
+            return;
+          }
+          files.forEach(assertAllowedPrdSourceFile);
+          const snapshots: PrdSourceFile[] = [];
+          for (const file of files) {
+            snapshots.push(await savePrdSourceFileSnapshot(workspaceRoot, workflow.requirementId, file));
+          }
+          const sources = new Set([...workflow.sources, ...snapshots.map((file) => file.path)]);
+          workflow = await repository.save({
+            ...workflow,
+            prdSourceFiles: [...(workflow.prdSourceFiles || []), ...snapshots],
+            sources: [...sources]
+          });
+          send(response, 200, { data: workflow });
+        } finally {
+          await lock.release();
+        }
+        return;
+      }
+
+      const prdFileDeleteMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/prd-files\/([^/]+)$/);
+      if (request.method === 'DELETE' && prdFileDeleteMatch) {
+        const requirementId = prdFileDeleteMatch[1];
+        const fileId = decodeURIComponent(prdFileDeleteMatch[2]);
+        const lock = new WorkflowLock(workspaceRoot, requirementId);
+        await lock.acquire();
+        try {
+          let workflow = await repository.load(requirementId);
+          if (!workflow) {
+            send(response, 404, { message: '需求不存在' });
+            return;
+          }
+          workflow = await repository.save(await deletePrdSourceFileSnapshot(workspaceRoot, workflow, fileId));
+          send(response, 200, { data: workflow });
+        } finally {
+          await lock.release();
+        }
         return;
       }
 
@@ -101,9 +259,10 @@ export function createRouter(workspaceRoot: string) {
           }
           if (action.actionType === 'DESIGN_GENERATE') {
             const params = action.params || {};
+            const documentPath = designDocumentPath(workflow, params);
             workflow = {
               ...workflow,
-              techDesignDocument: typeof params.documentPath === 'string' ? params.documentPath : workflow.techDesignDocument,
+              techDesignDocument: documentPath,
               techDesignClarification: typeof params.clarification === 'string' ? params.clarification : workflow.techDesignClarification
             };
           }
@@ -121,24 +280,16 @@ export function createRouter(workspaceRoot: string) {
             await repository.save(latest);
           });
           
-          // 为每个流程阶段记录命令日志
-          const stageMap: Record<string, 'PRD' | 'TECH_DESIGN' | 'IMPLEMENTATION' | 'CODE_REVIEW'> = {
-            PRD_ANALYZE: 'PRD',
-            DESIGN_GENERATE: 'TECH_DESIGN',
-            OPENSPEC_STATUS: 'IMPLEMENTATION',
-            OPENSPEC_VERIFY: 'IMPLEMENTATION',
-            JUNIT_GENERATE: 'IMPLEMENTATION',
-            CODE_REVIEW_GENERATE: 'CODE_REVIEW'
-          };
-          const stage = stageMap[action.actionType];
-          if (stage && run.commandText) {
+          const stage = run.stage || stageForAction(action.actionType);
+          if (stage) {
             await appendStageCommandLog(
               workspaceRoot,
               requirementId,
               stage,
-              run.commandText,
+              run.commandText || action.actionType,
               {
                 runId: run.id,
+                actionType: run.actionType,
                 agentId: run.agentId,
                 status: run.status
               }
@@ -146,6 +297,10 @@ export function createRouter(workspaceRoot: string) {
           }
           workflow.runs.unshift(run);
           if (action.actionType === 'REFRESH_ARTIFACTS') {
+            workflow.artifacts = await scanRequirementArtifacts(workspaceRoot, workflow.requirementId, workflow.branchName);
+          }
+          // PRD分析、技术方案生成等可能产生产物的操作，执行完成后自动刷新产物索引
+          if (['PRD_ANALYZE', 'DESIGN_GENERATE'].includes(action.actionType)) {
             workflow.artifacts = await scanRequirementArtifacts(workspaceRoot, workflow.requirementId, workflow.branchName);
           }
           if (action.actionType === 'RETURN_TO_IMPLEMENTATION') {
@@ -186,7 +341,7 @@ export function createRouter(workspaceRoot: string) {
           sent = events.length;
           const workflow = await repository.load(requirementId);
           const run = workflow?.runs.find((item) => item.id === runStreamMatch[1]);
-          if (run && ['SUCCEEDED', 'FAILED', 'CANCELLED', 'WAITING_FOR_AGENT'].includes(run.status)) {
+          if (run && ['SUCCEEDED', 'FAILED', 'CANCELLED', 'WAITING_FOR_AGENT', 'TERMINAL_OPENED'].includes(run.status)) {
             if (interval) {
               clearInterval(interval);
             }

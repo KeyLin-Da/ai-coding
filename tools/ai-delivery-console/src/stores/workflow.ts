@@ -97,6 +97,20 @@ export const useWorkflowStore = defineStore('workflow', {
       }
       await apiClient.cancelRun(this.current.requirementId, runId);
       await this.loadRequirement(this.current.requirementId);
+    },
+    async uploadPrdFiles(files: File[]) {
+      if (!this.current) {
+        return;
+      }
+      this.current = await apiClient.uploadPrdFiles(this.current.requirementId, files);
+      await this.loadRequirements();
+    },
+    async deletePrdFile(fileId: string) {
+      if (!this.current) {
+        return;
+      }
+      this.current = await apiClient.deletePrdFile(this.current.requirementId, fileId);
+      await this.loadRequirements();
     }
   }
 });

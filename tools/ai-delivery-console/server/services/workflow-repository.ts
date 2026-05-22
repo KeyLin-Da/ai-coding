@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { RequirementInput, RequirementWorkflow, WorkflowStage } from '../../shared/workflow';
-import { createEmptyStages } from '../../shared/workflow';
+import type { RequirementInput, RequirementType, RequirementWorkflow, WorkflowStage } from '../../shared/workflow';
+import { createEmptyStages, defaultBranchName } from '../../shared/workflow';
 import { deriveCurrentStage } from '../../shared/stage-rules';
 import { normalizeRequirementId } from './workspace';
 
@@ -65,6 +65,12 @@ export class WorkflowRepository {
     const requirementId = normalizeRequirementId(input.requirementId);
     const existing = await this.load(requirementId);
     if (existing) {
+      const requirementType = input.requirementType || existing.requirementType || 'REQUIREMENT';
+      const branchName =
+        input.branchName ??
+        (input.requirementType && input.requirementType !== existing.requirementType
+          ? defaultBranchName(requirementId, requirementType)
+          : existing.branchName);
       const prdClarification = hasInputField(input, 'prdClarification')
         ? normalizePrdClarification(input.prdClarification)
         : existing.prdClarification;
@@ -77,7 +83,8 @@ export class WorkflowRepository {
       return this.save({
         ...existing,
         title: input.title || existing.title,
-        branchName: input.branchName ?? existing.branchName,
+        requirementType,
+        branchName,
         prdClarification,
         techDesignDocument,
         techDesignClarification,
@@ -85,13 +92,16 @@ export class WorkflowRepository {
       });
     }
     const now = new Date().toISOString();
+    const requirementType: RequirementType = input.requirementType || 'REQUIREMENT';
     const workflow: RequirementWorkflow = {
       requirementId,
       title: input.title || `需求 ${requirementId}`,
-      branchName: input.branchName,
+      requirementType,
+      branchName: input.branchName || defaultBranchName(requirementId, requirementType),
       prdClarification: normalizePrdClarification(input.prdClarification),
       techDesignDocument: input.techDesignDocument,
       techDesignClarification: input.techDesignClarification,
+      prdSourceFiles: [],
       sources: input.sources || [],
       currentStage: 'PRD',
       status: 'DRAFT',

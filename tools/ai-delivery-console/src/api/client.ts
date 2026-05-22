@@ -6,11 +6,14 @@ interface ApiResult<T> {
 }
 
 async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
   const response = await fetch(url, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options.headers || {})
-    },
+    headers: isFormData
+      ? options.headers
+      : {
+          'Content-Type': 'application/json',
+          ...(options.headers || {})
+        },
     ...options
   });
   const body = (await response.json()) as ApiResult<T>;
@@ -65,5 +68,23 @@ export const apiClient = {
       method: 'POST',
       body: JSON.stringify({ requirementId })
     });
+  },
+  uploadPrdFiles(requirementId: string, files: File[]) {
+    const formData = new FormData();
+    for (const file of files) {
+      formData.append('files', file);
+    }
+    return request<RequirementWorkflow>(`/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/prd-files`, {
+      method: 'POST',
+      body: formData
+    });
+  },
+  deletePrdFile(requirementId: string, fileId: string) {
+    return request<RequirementWorkflow>(
+      `/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/prd-files/${encodeURIComponent(fileId)}`,
+      {
+        method: 'DELETE'
+      }
+    );
   }
 };

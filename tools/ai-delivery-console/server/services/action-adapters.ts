@@ -1,9 +1,10 @@
 import { spawn } from 'node:child_process';
-import type { ActionInput, RunRecord, RunStatus } from '../../shared/workflow';
+import type { ActionInput, ExecutionMode, RunRecord, RunStatus } from '../../shared/workflow';
+import { stageForAction } from '../../shared/workflow';
 import type { RequirementWorkflow } from '../../shared/workflow';
 import { createRunId, appendRunEvent } from './run-log';
 import { assertInsideWorkspace } from './workspace';
-import { getAgentProvider, startAgentProcess } from './agent-providers';
+import { getAgentProvider, startAgentInTerminal, startAgentProcess } from './agent-providers';
 import { normalizePrdClarification } from './workflow-repository';
 
 const cliActionMap: Partial<Record<ActionInput['actionType'], string[]>> = {
@@ -20,11 +21,24 @@ function hasParam(params: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(params, key);
 }
 
+function executionMode(params: Record<string, unknown>): ExecutionMode {
+  return params.executionMode === 'TERMINAL' ? 'TERMINAL' : 'BACKGROUND';
+}
+
 function prdDescription(workflow: RequirementWorkflow, params: Record<string, unknown>): string {
   if (hasParam(params, 'description')) {
     return normalizePrdClarification(typeof params.description === 'string' ? params.description : '') || '';
   }
   return workflow.prdClarification || '';
+}
+
+function prdDocumentPath(workflow: RequirementWorkflow, params: Record<string, unknown>): string {
+  const explicitPath = asString(params.documentPath);
+  if (explicitPath) {
+    return explicitPath;
+  }
+  const artifactPath = workflow.artifacts.find((artifact) => artifact.stage === 'PRD' && artifact.exists && artifact.kind !== 'directory')?.path;
+  return artifactPath || workflow.stages.PRD.artifactPath || `docs/${workflow.requirementId}/prd/analysis.md`;
 }
 
 function buildSkillCommand(workflow: RequirementWorkflow, action: ActionInput): string {
@@ -42,7 +56,7 @@ function buildSkillCommand(workflow: RequirementWorkflow, action: ActionInput): 
     case 'PRD_ANALYZE':
       return `/coding-prd-analyzer id=${requirementId}${prdClarification ? ` c=${prdClarification}` : ''}${sources ? ` ${sources}` : ''}`;
     case 'DESIGN_GENERATE':
-      return `/coding-design d=${params.documentPath || workflow.title} r=${requirementId}${clarification ? ` c=${clarification}` : ''}`;
+      return `/coding-design d=${prdDocumentPath(workflow, params)} r=${requirementId}${clarification ? ` c=${clarification}` : ''}`;
     case 'JUNIT_GENERATE':
       return `generate-unit-test ${moduleName || '<module-name>'}${description ? ` "${description}"` : ''}`;
     case 'CODE_REVIEW':
@@ -131,9 +145,11 @@ export async function executeAction(
     id: runId,
     requirementId: workflow.requirementId,
     actionType: action.actionType,
+    stage: stageForAction(action.actionType),
     status: 'RUNNING',
     startedAt,
-    params
+    params,
+    executionMode: executionMode(params)
   };
 
   await appendRunEvent(workspaceRoot, workflow.requirementId, runId, {
@@ -207,7 +223,9 @@ export async function executeAction(
     return run;
   }
 
-  return startAgentProcess(workspaceRoot, workflow, run, provider, commandText, onRunUpdate);
+  return executionMode(params) === 'TERMINAL'
+    ? startAgentInTerminal(workspaceRoot, workflow, run, provider, commandText)
+    : startAgentProcess(workspaceRoot, workflow, run, provider, commandText, onRunUpdate);
 }
 
 export const internalForTests = {

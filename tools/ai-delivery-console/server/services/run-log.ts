@@ -43,20 +43,20 @@ export async function appendStageCommandLog(
   requirementId: string,
   stage: WorkflowStage,
   command: string,
-  metadata?: Record<string, any>
+  metadata?: Record<string, unknown>
 ): Promise<void> {
   const logDir = getStageLogDir(workspaceRoot, requirementId, stage);
   await fs.mkdir(logDir, { recursive: true });
   const logPath = getStageLogPath(workspaceRoot, requirementId, stage);
-  
+
   const timestamp = new Date().toISOString();
   const logEntry = {
     timestamp,
     command,
     ...(metadata || {})
   };
-  
-  await fs.appendFile(logPath, JSON.stringify(logEntry) + '\n', 'utf8');
+
+  await fs.appendFile(logPath, `${JSON.stringify(logEntry)}\n`, 'utf8');
 }
 
 export async function readRunEvents(workspaceRoot: string, requirementId: string, runId: string): Promise<RunEvent[]> {

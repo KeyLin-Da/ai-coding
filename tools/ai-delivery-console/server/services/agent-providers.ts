@@ -1,10 +1,10 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import type { AgentProvider, RequirementWorkflow, RunRecord } from '../../shared/workflow';
+import type { AgentProvider, RequirementWorkflow, RunRecord, RunStatus } from '../../shared/workflow';
 import { serverConfig } from '../config';
 import { appendRunEvent } from './run-log';
-import { assertInsideWorkspace, normalizeRequirementId } from './workspace';
+import { assertInsideWorkspace, normalizeRequirementId, toRelativePath } from './workspace';
 
 const activeProcesses = new Map<string, ChildProcessWithoutNullStreams>();
 const cancelledRunIds = new Set<string>();
@@ -100,6 +100,185 @@ ${commandText}
 
 function renderCommand(command: string[], context: Record<string, string>): string[] {
   return command.map((part) => part.replace(/\{(\w+)\}/g, (_, key) => context[key] ?? ''));
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+export function terminalCommandLine(provider: AgentProvider, renderedCommand: string[]): string {
+  if (provider.inputMode === 'STDIN' && renderedCommand[renderedCommand.length - 1] === '-') {
+    return [...renderedCommand.slice(0, -1).map(shellQuote), '"$(cat "$PROMPT_FILE")"'].join(' ');
+  }
+  const command = renderedCommand.map(shellQuote).join(' ');
+  return provider.inputMode === 'STDIN' ? `${command} < "$PROMPT_FILE"` : command;
+}
+
+interface TerminalRunScript {
+  promptPath: string;
+  scriptPath: string;
+  statusPath: string;
+  transcriptPath: string;
+  commandLine: string;
+}
+
+export async function createTerminalRunScript(
+  workspaceRoot: string,
+  workflow: RequirementWorkflow,
+  run: RunRecord,
+  provider: AgentProvider,
+  commandText: string
+): Promise<TerminalRunScript> {
+  const promptPath = await createPromptEnvelope(workspaceRoot, workflow, run, commandText);
+  const absolutePromptPath = assertInsideWorkspace(workspaceRoot, promptPath);
+  const requirementId = normalizeRequirementId(workflow.requirementId);
+  const scriptDir = path.join(workspaceRoot, 'docs', requirementId, 'workflow', 'scripts');
+  const runDir = path.join(workspaceRoot, 'docs', requirementId, 'workflow', 'runs');
+  await fs.mkdir(scriptDir, { recursive: true });
+  await fs.mkdir(runDir, { recursive: true });
+
+  const absoluteScriptPath = path.join(scriptDir, `${run.id}.command`);
+  const absoluteTranscriptPath = path.join(runDir, `${run.id}.terminal.log`);
+  const absoluteStatusPath = path.join(runDir, `${run.id}.terminal-status.json`);
+  const rendered = renderCommand(provider.command || [], {
+    workspaceRoot,
+    promptFile: absolutePromptPath,
+    promptPath: absolutePromptPath,
+    commandText,
+    requirementId: workflow.requirementId,
+    runId: run.id
+  });
+  const commandLine = terminalCommandLine(provider, rendered);
+  const transcriptPath = toRelativePath(workspaceRoot, absoluteTranscriptPath);
+  const statusPath = toRelativePath(workspaceRoot, absoluteStatusPath);
+
+  const script = `#!/bin/zsh
+emulate -L zsh
+setopt pipefail
+
+WORKSPACE_ROOT=${shellQuote(workspaceRoot)}
+PROMPT_FILE=${shellQuote(absolutePromptPath)}
+TRANSCRIPT_FILE=${shellQuote(absoluteTranscriptPath)}
+STATUS_FILE=${shellQuote(absoluteStatusPath)}
+RUN_ID=${shellQuote(run.id)}
+REQUIREMENT_ID=${shellQuote(workflow.requirementId)}
+AGENT_NAME=${shellQuote(provider.name)}
+COMMAND_TEXT=${shellQuote(commandText)}
+COMMAND_PREVIEW=${shellQuote(commandLine)}
+
+mkdir -p "$(dirname "$TRANSCRIPT_FILE")"
+cd "$WORKSPACE_ROOT" || exit 1
+
+printf '{"status":"RUNNING","startedAt":"%s","transcriptPath":"%s"}\\n' "$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")" ${shellQuote(transcriptPath)} > "$STATUS_FILE"
+
+{
+  print "[AI Delivery] 开始终端执行"
+  print "[AI Delivery] 需求号: $REQUIREMENT_ID"
+  print "[AI Delivery] Run ID: $RUN_ID"
+  print "[AI Delivery] Agent: $AGENT_NAME"
+  print "[AI Delivery] Prompt: $PROMPT_FILE"
+  print "[AI Delivery] 标准调用: $COMMAND_TEXT"
+  print "[AI Delivery] 命令: $COMMAND_PREVIEW"
+  print ""
+
+  ${commandLine}
+  command_exit=$?
+
+  print ""
+  if (( command_exit == 0 )); then
+    terminal_status="SUCCEEDED"
+    print "[AI Delivery] Agent 执行完成"
+  else
+    terminal_status="FAILED"
+    print "[AI Delivery] Agent 执行失败，退出码 $command_exit"
+  fi
+
+  finished_at="$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")"
+  printf '{"status":"%s","exitCode":%s,"finishedAt":"%s","transcriptPath":"%s"}\\n' "$terminal_status" "$command_exit" "$finished_at" ${shellQuote(transcriptPath)} > "$STATUS_FILE"
+  print "[AI Delivery] Transcript: $TRANSCRIPT_FILE"
+  print "[AI Delivery] Status: $STATUS_FILE"
+  exit $command_exit
+} 2>&1 | tee -a "$TRANSCRIPT_FILE"
+
+exit $pipestatus[1]
+`;
+
+  await fs.writeFile(absoluteScriptPath, script, { encoding: 'utf8', mode: 0o755 });
+  await fs.chmod(absoluteScriptPath, 0o755);
+
+  return {
+    promptPath,
+    scriptPath: toRelativePath(workspaceRoot, absoluteScriptPath),
+    statusPath,
+    transcriptPath,
+    commandLine
+  };
+}
+
+async function launchTerminalScript(workspaceRoot: string, absoluteScriptPath: string): Promise<void> {
+  if (process.env.AI_DELIVERY_TERMINAL_DRY_RUN === '1') {
+    return;
+  }
+  const rawCommand = process.env.AI_DELIVERY_TERMINAL_COMMAND || 'open -a Terminal {scriptFile}';
+  const command = renderCommand(splitCommand(rawCommand), {
+    workspaceRoot,
+    scriptFile: absoluteScriptPath
+  });
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(command[0], command.slice(1), {
+      cwd: workspaceRoot,
+      shell: false,
+      stdio: 'ignore',
+      detached: true
+    });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`打开本地终端失败，退出码 ${code}`));
+      }
+    });
+    child.unref();
+  });
+}
+
+export async function refreshTerminalRunStatuses(
+  workspaceRoot: string,
+  workflow: RequirementWorkflow
+): Promise<{ workflow: RequirementWorkflow; changed: boolean }> {
+  let changed = false;
+  const finalStatuses = new Set<RunStatus>(['SUCCEEDED', 'FAILED', 'CANCELLED']);
+  for (const run of workflow.runs) {
+    if (run.executionMode !== 'TERMINAL' || !run.terminalStatusPath || finalStatuses.has(run.status)) {
+      continue;
+    }
+    const absoluteStatusPath = assertInsideWorkspace(workspaceRoot, run.terminalStatusPath);
+    const raw = await fs.readFile(absoluteStatusPath, 'utf8').catch(() => '');
+    if (!raw.trim()) {
+      continue;
+    }
+    const status = JSON.parse(raw) as { status?: RunStatus; exitCode?: number; finishedAt?: string; transcriptPath?: string };
+    if (!status.status || !finalStatuses.has(status.status)) {
+      continue;
+    }
+    run.status = status.status;
+    run.finishedAt = status.finishedAt || new Date().toISOString();
+    run.error = status.status === 'FAILED' ? `终端 Agent 退出码: ${status.exitCode ?? 'unknown'}` : undefined;
+    await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
+      type: status.status === 'FAILED' ? 'ERROR' : 'EXIT',
+      level: status.status === 'FAILED' ? 'ERROR' : 'INFO',
+      message: status.status === 'FAILED' ? `终端 Agent 执行失败，退出码 ${status.exitCode ?? 'unknown'}` : '终端 Agent 执行完成',
+      agentId: run.agentId,
+      data: {
+        exitCode: status.exitCode,
+        transcriptPath: status.transcriptPath || run.terminalTranscriptPath,
+        statusPath: run.terminalStatusPath
+      }
+    });
+    changed = true;
+  }
+  return { workflow, changed };
 }
 
 export async function startAgentProcess(
@@ -253,6 +432,95 @@ export async function startAgentProcess(
     }
   }, serverConfig.agentTimeout);
   child.on('close', () => clearTimeout(timeout));
+
+  return run;
+}
+
+export async function startAgentInTerminal(
+  workspaceRoot: string,
+  workflow: RequirementWorkflow,
+  run: RunRecord,
+  provider: AgentProvider,
+  commandText: string
+): Promise<RunRecord> {
+  if (provider.inputMode === 'MANUAL' || !provider.command?.length) {
+    run.status = 'WAITING_FOR_AGENT';
+    run.commandText = commandText;
+    run.finishedAt = new Date().toISOString();
+    await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
+      type: 'WARN',
+      level: 'WARN',
+      message: '当前 Agent 为手动模式，请复制标准调用文本执行',
+      agentId: provider.id,
+      data: { commandText }
+    });
+    return run;
+  }
+
+  if (!provider.available) {
+    run.status = 'WAITING_FOR_AGENT';
+    run.commandText = commandText;
+    run.finishedAt = new Date().toISOString();
+    await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
+      type: 'WARN',
+      level: 'WARN',
+      message: `Agent Provider 不可用: ${provider.name}`,
+      agentId: provider.id,
+      data: { commandText }
+    });
+    return run;
+  }
+
+  run.executionMode = 'TERMINAL';
+  run.commandText = commandText;
+  const terminal = await createTerminalRunScript(workspaceRoot, workflow, run, provider, commandText);
+  run.promptPath = terminal.promptPath;
+  run.terminalScriptPath = terminal.scriptPath;
+  run.terminalTranscriptPath = terminal.transcriptPath;
+  run.terminalStatusPath = terminal.statusPath;
+
+  await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
+    type: 'START',
+    level: 'INFO',
+    message: `准备在本地终端启动 Agent: ${provider.name}`,
+    agentId: provider.id,
+    data: {
+      promptPath: terminal.promptPath,
+      scriptPath: terminal.scriptPath,
+      transcriptPath: terminal.transcriptPath,
+      statusPath: terminal.statusPath,
+      commandLine: terminal.commandLine
+    }
+  });
+
+  try {
+    await launchTerminalScript(workspaceRoot, assertInsideWorkspace(workspaceRoot, terminal.scriptPath));
+    run.status = 'TERMINAL_OPENED';
+    await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
+      type: 'INFO',
+      level: 'INFO',
+      message:
+        process.env.AI_DELIVERY_TERMINAL_DRY_RUN === '1'
+          ? '已生成终端脚本，当前为 dry-run 未打开终端'
+          : '已打开本地终端，后续交互请在终端中完成',
+      agentId: provider.id,
+      data: {
+        scriptPath: terminal.scriptPath,
+        transcriptPath: terminal.transcriptPath,
+        statusPath: terminal.statusPath
+      }
+    });
+  } catch (error: any) {
+    run.status = 'FAILED';
+    run.error = error.message;
+    run.finishedAt = new Date().toISOString();
+    await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
+      type: 'ERROR',
+      level: 'ERROR',
+      message: error.message,
+      agentId: provider.id
+    });
+  }
 
   return run;
 }

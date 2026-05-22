@@ -79,8 +79,8 @@ AI_DELIVERY_WORKSPACE_ROOT=/Users/key.lin/work/Projects/ai-coding npm run server
 **适用人群：** Tech Lead、项目经理、全栈开发者
 
 **工作流：**
-1. 在需求列表页面创建新需求（例如 `172014`）
-2. 进入 PRD 分析阶段，点击「生成 PRD」或手动执行 `/coding-prd-analyzer`
+1. 在需求列表页面创建新需求（例如 `172014`），选择需求类型后自动生成 `feature/opp#172014` 或 `bugfix/opp#172014` 分支名
+2. 进入 PRD 分析阶段，填写澄清描述、上传本地 PRD 来源文件，点击「生成 PRD」或手动执行 `/coding-prd-analyzer`
 3. 切换到技术方案阶段，查询数据库结构并设计技术方案
 4. 通过 OpenSpec 进行实施验证，运行单元测试确保质量
 5. 最后进行代码评审，生成分级问题报告
@@ -133,6 +133,7 @@ AI_DELIVERY_WORKSPACE_ROOT=/Users/key.lin/work/Projects/ai-coding npm run server
 所有产物遵循统一的目录结构，便于自动化索引和检索：
 
 - **PRD**：`docs/{需求号}/prd/analysis.md`
+- **PRD 来源文件快照**：`docs/{需求号}/prd/file/**`
 - **技术方案**：`docs/{需求号}/technical-design/design_review.md`
 - **OpenSpec**：`openspec/changes/req-{需求号}`
 - **单元测试报告**：`docs/{需求号}/junit/**`
@@ -140,7 +141,7 @@ AI_DELIVERY_WORKSPACE_ROOT=/Users/key.lin/work/Projects/ai-coding npm run server
 - **工作流元数据**：`docs/{需求号}/workflow/state.json`
 - **运行日志**：`docs/{需求号}/workflow/runs/{runId}.jsonl`
 
-PRD 阶段的“澄清描述”会保存到 workflow 的 `prdClarification` 字段，并在调用 `coding-prd-analyzer` 时作为 `/coding-prd-analyzer` 的 `c` 参数传递；未填写时不会使用需求标题兜底。
+PRD 阶段的“澄清描述”会保存到 workflow 的 `prdClarification` 字段，并在调用 `coding-prd-analyzer` 时作为 `/coding-prd-analyzer` 的 `c` 参数传递；未填写时不会使用需求标题兜底。本地上传的 PDF、图片、Markdown 会快照到 `docs/{需求号}/prd/file/`，并作为 PRD 来源路径传入技能调用，可在页面删除。
 
 ## 🤖 Agent Provider 机制
 
@@ -184,6 +185,18 @@ CODEX_COMMAND='codex exec -C {workspaceRoot} -'
 ```
 
 5. 用户可以复制该文本交给 Agent 执行；执行完成后在页面点击“刷新产物”重新索引文件。
+
+### 本地终端执行
+
+对于需要真实 TTY 交互、确认权限或使用 Agent 原生界面的动作，可以在页面执行方式中选择“本地终端”。Runner 会：
+
+1. 生成 Prompt Envelope：`docs/{需求号}/workflow/prompts/{runId}.md`
+2. 生成可执行脚本：`docs/{需求号}/workflow/scripts/{runId}.command`
+3. 使用 `open -a Terminal {scriptFile}` 打开 macOS Terminal
+4. 将终端 transcript 写入 `docs/{需求号}/workflow/runs/{runId}.terminal.log`
+5. 将退出状态写入 `docs/{需求号}/workflow/runs/{runId}.terminal-status.json`
+
+页面再次加载需求或需求列表时会读取状态文件，把 `TERMINAL_OPENED` 同步为成功或失败。脚本由 Runner 根据已注册 Agent Provider 生成，页面不能传入任意命令。
 
 ## 🔒 安全边界
 

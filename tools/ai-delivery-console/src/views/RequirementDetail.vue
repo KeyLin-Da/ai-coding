@@ -29,9 +29,13 @@
                   <span class="muted" style="float: right">{{ agent.available ? '可用' : '不可用' }}</span>
                 </el-option>
               </el-select>
+              <el-select v-model="selectedExecutionMode" style="width: 140px" placeholder="执行方式">
+                <el-option label="后台执行" value="BACKGROUND" />
+                <el-option label="本地终端" value="TERMINAL" />
+              </el-select>
               <el-button :icon="DocumentChecked" @click="openReview">审核</el-button>
-              <el-button v-if="latestRun" :icon="Tickets" @click="openRunLog(latestRun.id)">日志</el-button>
-              <el-button v-if="latestRun?.status === 'RUNNING'" type="danger" @click="cancelRun(latestRun.id)">取消</el-button>
+              <el-button v-if="currentStageRun" :icon="Tickets" @click="openRunLog(currentStageRun.id)">本步骤日志</el-button>
+              <el-button v-if="currentStageRun?.status === 'RUNNING'" type="danger" @click="cancelRun(currentStageRun.id)">取消</el-button>
             </div>
           </div>
 
@@ -45,21 +49,34 @@
                 show-word-limit
                 placeholder="填写 PRD 澄清描述，对应 coding-prd-analyzer 的 c 参数，例如范围边界、排除项、业务前提"
               />
-              <el-input v-model="sourceText" type="textarea" :rows="3" placeholder="填写 PRD 来源，每行一个" />
+              <el-input v-model="sourceText" type="textarea" :rows="3" placeholder="填写外部 PRD 来源，每行一个，例如飞书、设计稿或在线文档链接" />
+              <div class="prd-file-panel">
+                <div class="action-line">
+                  <input ref="prdFileInput" class="hidden-file-input" type="file" multiple accept=".pdf,.md,.markdown,image/*" @change="uploadPrdFiles" />
+                  <el-button :icon="Upload" @click="choosePrdFiles">上传本地文件</el-button>
+                  <span class="muted">支持 PDF、图片、Markdown，上传后快照到 PRD file 目录。</span>
+                </div>
+                <div v-if="prdSourceFiles.length" class="prd-file-list">
+                  <div v-for="file in prdSourceFiles" :key="file.id" class="prd-file-item">
+                    <div class="prd-file-meta">
+                      <strong>{{ file.name }}</strong>
+                      <small class="muted">{{ file.path }} · {{ formatFileSize(file.size) }}</small>
+                    </div>
+                    <el-button type="danger" link :icon="Delete" @click="deletePrdFile(file.id)">删除</el-button>
+                  </div>
+                </div>
+              </div>
               <el-button type="primary" :icon="Operation" @click="runPrd">生成 PRD</el-button>
               <MarkdownEditor title="PRD 文档" :artifact-path="stageArtifactPath('PRD')" @saved="reload" />
             </div>
 
             <div v-else-if="activeStage === 'TECH_DESIGN'" class="stage-actions">
               <el-alert v-if="!prdApproved" type="warning" show-icon title="需要先通过 PRD 审核" />
-              <el-input
-                v-model="designDocument"
-                type="textarea"
-                :rows="2"
-                maxlength="1000"
-                show-word-limit
-                placeholder="填写需求描述或 PRD 文档路径，对应 coding-design 的 d 参数（必填），例如 PRD 文件路径或需求描述文本"
-              />
+              <el-descriptions :column="1" border class="design-source-summary">
+                <el-descriptions-item label="PRD 文档">
+                  <span class="design-source-path">{{ prdDesignSourcePath || '未关联' }}</span>
+                </el-descriptions-item>
+              </el-descriptions>
               <el-input
                 v-model="designClarification"
                 type="textarea"
@@ -68,7 +85,7 @@
                 show-word-limit
                 placeholder="填写评审意见或补充说明，对应 coding-design 的 c 参数（可选），用于二次评审时提供修改建议"
               />
-              <el-button type="primary" :disabled="!prdApproved" :icon="Operation" @click="runDesign">生成技术方案</el-button>
+              <el-button type="primary" :disabled="!prdApproved || !prdDesignSourcePath" :icon="Operation" @click="runDesign">生成技术方案</el-button>
               <MarkdownEditor title="技术方案" :artifact-path="stageArtifactPath('TECH_DESIGN')" @saved="reload" />
             </div>
 
@@ -112,10 +129,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { Back, Cpu, DataAnalysis, DocumentChecked, Operation, Refresh, Tickets } from '@element-plus/icons-vue';
+import { Back, Cpu, DataAnalysis, Delete, DocumentChecked, Operation, Refresh, Tickets, Upload } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
-import type { RunRecord, WorkflowStage } from '@shared/workflow';
-import { stageLabels } from '@shared/workflow';
+import type { ExecutionMode, RunRecord, WorkflowStage } from '@shared/workflow';
+import { stageForAction, stageLabels } from '@shared/workflow';
 import StageTimeline from '@/components/StageTimeline.vue';
 import MarkdownEditor from '@/components/MarkdownEditor.vue';
 import ReviewDialog from '@/components/ReviewDialog.vue';
@@ -128,6 +145,7 @@ const store = useWorkflowStore();
 const activeStage = ref<WorkflowStage>('PRD');
 const reviewDialog = ref<InstanceType<typeof ReviewDialog>>();
 const runLogDrawer = ref<InstanceType<typeof RunLogDrawer>>();
+const prdFileInput = ref<HTMLInputElement>();
 const selectedArtifactPath = ref('');
 const sourceText = ref('');
 const prdClarification = ref('');
@@ -135,12 +153,21 @@ const changeName = ref('');
 const moduleName = ref('');
 const branchName = ref('');
 const selectedAgentId = ref('codex');
-const designDocument = ref('');
+const selectedExecutionMode = ref<ExecutionMode>('BACKGROUND');
 const designClarification = ref('');
 
 const workflow = computed(() => store.current);
-const latestRun = computed<RunRecord | undefined>(() => workflow.value?.runs[0]);
+const currentStageRun = computed<RunRecord | undefined>(() =>
+  workflow.value?.runs.find((run) => (run.stage || stageForAction(run.actionType)) === activeStage.value)
+);
+const prdSourceFiles = computed(() => workflow.value?.prdSourceFiles || []);
 const prdApproved = computed(() => workflow.value?.stages.PRD.status === 'APPROVED');
+const prdDesignSourcePath = computed(() => {
+  if (!workflow.value) {
+    return '';
+  }
+  return stageArtifactPath('PRD') || workflow.value.stages.PRD.artifactPath || `docs/${workflow.value.requirementId}/prd/analysis.md`;
+});
 const stageHint = computed(() => {
   const hints: Record<WorkflowStage, string> = {
     PRD: '产品生成并二次编辑 PRD，审核通过后进入技术方案。',
@@ -181,29 +208,73 @@ async function runRefresh() {
 }
 
 async function runPrd() {
+  const textSources = sourceText.value
+    .split('\n')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const fileSources = prdSourceFiles.value.map((file) => file.path);
   await store.runAction({
     actionType: 'PRD_ANALYZE',
     params: {
-      agentId: selectedAgentId.value,
+      ...agentActionParams(),
       description: prdClarification.value,
-      sources: sourceText.value
-        .split('\n')
-        .map((item) => item.trim())
-        .filter(Boolean)
+      sources: [...new Set([...textSources, ...fileSources])]
     }
   });
 }
 
+function choosePrdFiles() {
+  prdFileInput.value?.click();
+}
+
+async function uploadPrdFiles(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const files = Array.from(input.files || []);
+  if (!files.length) {
+    return;
+  }
+  await store.uploadPrdFiles(files);
+  input.value = '';
+  ElMessage.success('PRD 来源文件已上传');
+}
+
+async function deletePrdFile(fileId: string) {
+  await store.deletePrdFile(fileId);
+  ElMessage.success('PRD 来源文件已删除');
+}
+
+function formatFileSize(size: number) {
+  if (size < 1024) {
+    return `${size} B`;
+  }
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`;
+  }
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function agentActionParams() {
+  return {
+    agentId: selectedAgentId.value,
+    executionMode: selectedExecutionMode.value
+  };
+}
+
 async function runDesign() {
-  if (!designDocument.value.trim()) {
-    ElMessage.warning('请填写需求描述或文档路径（d 参数）');
+  const documentPath = prdDesignSourcePath.value.trim();
+  if (!prdApproved.value) {
+    ElMessage.warning('请先通过 PRD 审核');
+    return;
+  }
+  if (!documentPath) {
+    ElMessage.warning('未找到 PRD 文档，请先刷新产物');
     return;
   }
   await store.runAction({
     actionType: 'DESIGN_GENERATE',
     params: {
-      agentId: selectedAgentId.value,
-      documentPath: designDocument.value.trim(),
+      ...agentActionParams(),
+      documentPath,
       clarification: designClarification.value.trim()
     }
   });
@@ -214,15 +285,15 @@ async function runOpenSpecStatus() {
 }
 
 async function runOpenSpecVerify() {
-  await store.runAction({ actionType: 'OPENSPEC_VERIFY', params: { agentId: selectedAgentId.value, changeName: changeName.value } });
+  await store.runAction({ actionType: 'OPENSPEC_VERIFY', params: { ...agentActionParams(), changeName: changeName.value } });
 }
 
 async function runJunit() {
-  await store.runAction({ actionType: 'JUNIT_GENERATE', params: { agentId: selectedAgentId.value, moduleName: moduleName.value } });
+  await store.runAction({ actionType: 'JUNIT_GENERATE', params: { ...agentActionParams(), moduleName: moduleName.value } });
 }
 
 async function runCodeReview() {
-  await store.runAction({ actionType: 'CODE_REVIEW', params: { agentId: selectedAgentId.value, branchName: branchName.value } });
+  await store.runAction({ actionType: 'CODE_REVIEW', params: { ...agentActionParams(), branchName: branchName.value } });
 }
 
 async function returnToImplementation() {
@@ -256,12 +327,12 @@ watch(
     if (!value) {
       return;
     }
-    sourceText.value = value.sources.join('\n');
+    const uploadedPaths = new Set((value.prdSourceFiles || []).map((file) => file.path));
+    sourceText.value = value.sources.filter((source) => !uploadedPaths.has(source)).join('\n');
     prdClarification.value = value.prdClarification || '';
     changeName.value = value.stages.IMPLEMENTATION.changeName || `req-${value.requirementId}`;
     moduleName.value = moduleName.value || '';
     branchName.value = value.branchName || '';
-    designDocument.value = value.techDesignDocument || '';
     designClarification.value = value.techDesignClarification || '';
     if (value.currentStage !== 'DONE') {
       activeStage.value = value.currentStage;
@@ -301,11 +372,61 @@ onMounted(async () => {
   max-width: 360px;
 }
 
+.design-source-summary {
+  max-width: 100%;
+}
+
+.design-source-path {
+  overflow-wrap: anywhere;
+}
+
 .stage-toolbar-actions {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.hidden-file-input {
+  display: none;
+}
+
+.prd-file-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.prd-file-list {
+  display: grid;
+  border: 1px solid #e3e8f2;
+  border-radius: 8px;
+}
+
+.prd-file-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e3e8f2;
+}
+
+.prd-file-item:last-child {
+  border-bottom: 0;
+}
+
+.prd-file-meta {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.prd-file-meta strong,
+.prd-file-meta small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 760px) {

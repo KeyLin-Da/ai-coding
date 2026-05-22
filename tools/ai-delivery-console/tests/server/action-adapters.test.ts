@@ -40,8 +40,34 @@ describe('action-adapters', () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-action-'));
     const run = await executeAction(root, workflow(), { actionType: 'PRD_ANALYZE', params: {} });
     expect(run.status).toBe('WAITING_FOR_AGENT');
+    expect(run.stage).toBe('PRD');
     expect(run.commandText).toContain('/coding-prd-analyzer id=172014');
     expect(run.commandText).not.toContain(' c=');
+  });
+
+  it('技能动作支持本地终端执行模式', async () => {
+    const previous = process.env.AI_DELIVERY_TERMINAL_DRY_RUN;
+    process.env.AI_DELIVERY_TERMINAL_DRY_RUN = '1';
+    try {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-action-'));
+      const run = await executeAction(root, workflow(), {
+        actionType: 'PRD_ANALYZE',
+        params: { agentId: 'codex', executionMode: 'TERMINAL', sources: [] }
+      });
+
+      expect(run.status).toBe('TERMINAL_OPENED');
+      expect(run.executionMode).toBe('TERMINAL');
+      expect(run.promptPath).toBeTruthy();
+      expect(run.terminalScriptPath).toMatch(/\.command$/);
+      expect(run.terminalTranscriptPath).toContain('.terminal.log');
+      expect(run.terminalStatusPath).toContain('.terminal-status.json');
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AI_DELIVERY_TERMINAL_DRY_RUN;
+      } else {
+        process.env.AI_DELIVERY_TERMINAL_DRY_RUN = previous;
+      }
+    }
   });
 
   it('PRD 分析显式填写描述时传递 c 参数', async () => {
@@ -98,6 +124,7 @@ describe('action-adapters', () => {
       }
     });
     expect(run.commandText).toContain('/coding-design');
+    expect(run.stage).toBe('TECH_DESIGN');
     expect(run.commandText).toContain('d=docs/172014/prd/analysis.md');
     expect(run.commandText).toContain('r=172014');
     expect(run.commandText).toContain('c=补充接口性能要求');
@@ -124,7 +151,31 @@ describe('action-adapters', () => {
       params: {}
     });
     expect(run.commandText).toContain('/coding-design');
-    expect(run.commandText).toContain('d=定位菜单');
+    expect(run.commandText).toContain('d=docs/172014/prd/analysis.md');
+    expect(run.commandText).toContain('r=172014');
+  });
+
+  it('技术方案生成未显式传 d 时优先使用 PRD 产物路径', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-action-'));
+    const current = {
+      ...workflow(),
+      artifacts: [
+        {
+          id: 'prd-analysis',
+          stage: 'PRD' as const,
+          label: 'PRD 分析文档',
+          path: 'docs/legacy-prd/172014/analysis.md',
+          kind: 'markdown' as const,
+          exists: true
+        }
+      ]
+    };
+    const run = await executeAction(root, current, {
+      actionType: 'DESIGN_GENERATE',
+      params: {}
+    });
+    expect(run.commandText).toContain('/coding-design');
+    expect(run.commandText).toContain('d=docs/legacy-prd/172014/analysis.md');
     expect(run.commandText).toContain('r=172014');
   });
 });

@@ -4,7 +4,15 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { AgentProvider, RequirementWorkflow, RunRecord } from '../../shared/workflow';
 import { createEmptyStages } from '../../shared/workflow';
-import { cancelAgentRun, createPromptEnvelope, listAgentProviders, startAgentProcess } from '../../server/services/agent-providers';
+import {
+  cancelAgentRun,
+  createPromptEnvelope,
+  createTerminalRunScript,
+  listAgentProviders,
+  refreshTerminalRunStatuses,
+  startAgentProcess,
+  terminalCommandLine
+} from '../../server/services/agent-providers';
 import { readRunEvents } from '../../server/services/run-log';
 
 function workflow(): RequirementWorkflow {
@@ -103,6 +111,77 @@ describe('agent-providers', () => {
     const events = await readRunEvents(root, '172014', run.id);
     expect(updated.status).toBe('SUCCEEDED');
     expect(events.some((event) => event.type === 'STDOUT' && event.text?.includes('stdin-envelope-ok'))).toBe(true);
+  });
+
+  it('终端模式下 Codex STDIN 命令改为 prompt 参数以保留终端交互', () => {
+    const provider: AgentProvider = {
+      id: 'codex',
+      name: 'Codex',
+      inputMode: 'STDIN',
+      command: ['codex', 'exec', '-C', '{workspaceRoot}', '-'],
+      available: true,
+      supportsStreaming: true
+    };
+
+    expect(terminalCommandLine(provider, ['codex', 'exec', '-C', '/workspace', '-'])).toBe(
+      "'codex' 'exec' '-C' '/workspace' \"$(cat \"$PROMPT_FILE\")\""
+    );
+  });
+
+  it('生成本地终端脚本并记录 transcript 和状态路径', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-terminal-'));
+    const provider: AgentProvider = {
+      id: 'node-agent',
+      name: 'Node Agent',
+      inputMode: 'PROMPT_FILE',
+      command: [process.execPath, '-e', 'console.log("terminal-ok")'],
+      available: true,
+      supportsStreaming: true
+    };
+    const run = {
+      ...runRecord('run-terminal-script'),
+      executionMode: 'TERMINAL' as const
+    };
+
+    const terminal = await createTerminalRunScript(root, workflow(), run, provider, '/coding-prd-analyzer id=172014');
+    const script = await fs.readFile(path.join(root, terminal.scriptPath), 'utf8');
+
+    expect(terminal.scriptPath).toBe('docs/172014/workflow/scripts/run-terminal-script.command');
+    expect(terminal.transcriptPath).toBe('docs/172014/workflow/runs/run-terminal-script.terminal.log');
+    expect(terminal.statusPath).toBe('docs/172014/workflow/runs/run-terminal-script.terminal-status.json');
+    expect(script).toContain('AI Delivery');
+    expect(script).toContain('/coding-prd-analyzer id=172014');
+    expect(script).toContain('terminal-status.json');
+  });
+
+  it('刷新本地终端状态文件并更新运行记录', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-terminal-'));
+    const item = workflow();
+    const run: RunRecord = {
+      ...runRecord('run-terminal-finished'),
+      status: 'TERMINAL_OPENED',
+      executionMode: 'TERMINAL',
+      terminalStatusPath: 'docs/172014/workflow/runs/run-terminal-finished.terminal-status.json',
+      terminalTranscriptPath: 'docs/172014/workflow/runs/run-terminal-finished.terminal.log'
+    };
+    item.runs.push(run);
+    await fs.mkdir(path.join(root, 'docs', '172014', 'workflow', 'runs'), { recursive: true });
+    await fs.writeFile(
+      path.join(root, run.terminalStatusPath),
+      JSON.stringify({
+        status: 'SUCCEEDED',
+        exitCode: 0,
+        finishedAt: '2026-05-22T00:00:00.000Z',
+        transcriptPath: run.terminalTranscriptPath
+      })
+    );
+
+    const refreshed = await refreshTerminalRunStatuses(root, item);
+    const events = await readRunEvents(root, '172014', run.id);
+
+    expect(refreshed.changed).toBe(true);
+    expect(refreshed.workflow.runs[0].status).toBe('SUCCEEDED');
+    expect(events.some((event) => event.type === 'EXIT' && event.message.includes('终端 Agent'))).toBe(true);
   });
 
   it('可以取消正在运行的 Agent', async () => {

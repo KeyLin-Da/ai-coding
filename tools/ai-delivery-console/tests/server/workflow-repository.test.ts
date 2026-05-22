@@ -12,12 +12,23 @@ describe('WorkflowRepository', () => {
   it('创建 workflow 并用 state.json 持久化', async () => {
     const workspace = await tmpWorkspace();
     const repository = new WorkflowRepository(workspace);
-    const workflow = await repository.upsert({ requirementId: 'REQ/172014', title: '定位菜单' });
+    const workflow = await repository.upsert({ requirementId: 'REQ/172014', title: '定位菜单', requirementType: 'REQUIREMENT' });
 
     expect(workflow.requirementId).toBe('REQ_172014');
+    expect(workflow.requirementType).toBe('REQUIREMENT');
+    expect(workflow.branchName).toBe('feature/opp#REQ_172014');
     const loaded = await repository.load('REQ_172014');
     expect(loaded?.title).toBe('定位菜单');
     expect(await fs.stat(path.join(workspace, 'docs', 'REQ_172014', 'workflow', 'state.json'))).toBeTruthy();
+  });
+
+  it('缺陷类型默认生成 bugfix 分支名', async () => {
+    const workspace = await tmpWorkspace();
+    const repository = new WorkflowRepository(workspace);
+    const workflow = await repository.upsert({ requirementId: '172014', title: '定位菜单缺陷', requirementType: 'DEFECT' });
+
+    expect(workflow.requirementType).toBe('DEFECT');
+    expect(workflow.branchName).toBe('bugfix/opp#172014');
   });
 
   it('更新已有 workflow 时保留运行记录', async () => {

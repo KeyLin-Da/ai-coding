@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RequirementWorkflow } from '../../shared/workflow';
-import { createEmptyStages } from '../../shared/workflow';
+import { createEmptyStages, stageForAction } from '../../shared/workflow';
 import { canApproveStage, canEnterStage, deriveCurrentStage, nextStage } from '../../shared/stage-rules';
 
 function workflow(): RequirementWorkflow {
@@ -47,5 +47,15 @@ describe('stage-rules', () => {
     const item = workflow();
     item.stages.PRD.status = 'APPROVED';
     expect(deriveCurrentStage(item)).toBe('TECH_DESIGN');
+  });
+
+  it('按动作归属独立步骤日志', () => {
+    expect(stageForAction('PRD_ANALYZE')).toBe('PRD');
+    expect(stageForAction('DESIGN_GENERATE')).toBe('TECH_DESIGN');
+    expect(stageForAction('OPENSPEC_VERIFY')).toBe('IMPLEMENTATION');
+    expect(stageForAction('JUNIT_GENERATE')).toBe('IMPLEMENTATION');
+    expect(stageForAction('CODE_REVIEW')).toBe('CODE_REVIEW');
+    expect(stageForAction('RETURN_TO_IMPLEMENTATION')).toBe('CODE_REVIEW');
+    expect(stageForAction('REFRESH_ARTIFACTS')).toBeUndefined();
   });
 });
