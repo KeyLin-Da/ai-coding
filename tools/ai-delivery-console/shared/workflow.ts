@@ -37,6 +37,7 @@ export type ActionType =
   | 'OPENSPEC_FF'
   | 'OPENSPEC_APPLY'
   | 'OPENSPEC_VERIFY'
+  | 'OPENSPEC_ARCHIVE'
   | 'JUNIT_GENERATE'
   | 'CODE_REVIEW'
   | 'RETURN_TO_IMPLEMENTATION'
@@ -113,6 +114,46 @@ export interface PrdSourceFile {
   size: number;
   mimeType?: string;
   uploadedAt: string;
+}
+
+export type OpenSpecArtifactType = 'proposal' | 'design' | 'tasks' | 'spec';
+
+export interface OpenSpecArtifactRef {
+  id: string;
+  type: OpenSpecArtifactType;
+  label: string;
+  path: string;
+  exists: boolean;
+}
+
+export interface OpenSpecTaskItem {
+  id?: string;
+  title: string;
+  completed: boolean;
+  line: number;
+  raw: string;
+}
+
+export interface OpenSpecTaskGroup {
+  title: string;
+  items: OpenSpecTaskItem[];
+}
+
+export interface OpenSpecTaskSummary {
+  total: number;
+  completed: number;
+  groups: OpenSpecTaskGroup[];
+}
+
+export interface OpenSpecSummary {
+  changeName: string;
+  rootPath: string;
+  exists: boolean;
+  archived: boolean;
+  archivePath?: string;
+  artifacts: OpenSpecArtifactRef[];
+  specs: OpenSpecArtifactRef[];
+  tasks: OpenSpecTaskSummary;
 }
 
 export type AgentInputMode = 'PROMPT_FILE' | 'STDIN' | 'ARGUMENTS' | 'MANUAL';
@@ -233,6 +274,7 @@ export const actionStageMap: Partial<Record<ActionType, WorkflowStage>> = {
   OPENSPEC_FF: 'IMPLEMENTATION',
   OPENSPEC_APPLY: 'IMPLEMENTATION',
   OPENSPEC_VERIFY: 'IMPLEMENTATION',
+  OPENSPEC_ARCHIVE: 'CODE_REVIEW',
   JUNIT_GENERATE: 'IMPLEMENTATION',
   CODE_REVIEW: 'CODE_REVIEW',
   RETURN_TO_IMPLEMENTATION: 'CODE_REVIEW'

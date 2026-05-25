@@ -1,4 +1,4 @@
-import type { ActionInput, AgentProvider, RequirementInput, RequirementWorkflow, ReviewInput, RunEvent } from '@shared/workflow';
+import type { ActionInput, AgentProvider, OpenSpecSummary, RequirementInput, RequirementWorkflow, ReviewInput, RunEvent } from '@shared/workflow';
 
 interface ApiResult<T> {
   data: T;
@@ -38,6 +38,17 @@ export const apiClient = {
   },
   getRequirement(requirementId: string) {
     return request<RequirementWorkflow>(`/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}`);
+  },
+  getOpenSpecSummary(requirementId: string, changeName: string) {
+    return request<OpenSpecSummary>(
+      `/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/openspec-summary?changeName=${encodeURIComponent(changeName)}`
+    );
+  },
+  updateOpenSpecTask(requirementId: string, input: { changeName: string; line: number; completed: boolean; raw: string }) {
+    return request<OpenSpecSummary>(`/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/openspec-tasks`, {
+      method: 'POST',
+      body: JSON.stringify(input)
+    });
   },
   runAction(requirementId: string, input: ActionInput) {
     return request<{ workflow: RequirementWorkflow }>('/api/ai-delivery/requirements/' + encodeURIComponent(requirementId) + '/actions', {

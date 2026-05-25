@@ -67,7 +67,7 @@
                 </div>
               </div>
               <el-button type="primary" :icon="Operation" @click="runPrd">生成 PRD</el-button>
-              <MarkdownEditor title="PRD 文档" :artifact-path="stageArtifactPath('PRD')" @saved="reload" />
+              <MarkdownEditor title="PRD 文档" :artifact-path="prdEditorPath" @saved="reload" />
             </div>
 
             <div v-else-if="activeStage === 'TECH_DESIGN'" class="stage-actions">
@@ -100,9 +100,53 @@
                 <el-button :icon="Cpu" @click="runJunit">生成/关联单测</el-button>
               </div>
               <el-descriptions :column="2" border>
-                <el-descriptions-item label="OpenSpec">{{ stageArtifactPath('IMPLEMENTATION') || '未关联' }}</el-descriptions-item>
+                <el-descriptions-item label="OpenSpec">{{ openSpecSummary?.rootPath || stageArtifactPath('IMPLEMENTATION') || '未关联' }}</el-descriptions-item>
+                <el-descriptions-item label="归档状态">
+                  <el-tag :type="openSpecSummary?.archived ? 'success' : 'info'" size="small">
+                    {{ openSpecSummary?.archived ? '已归档' : '进行中' }}
+                  </el-tag>
+                </el-descriptions-item>
+                <el-descriptions-item label="任务进度">{{ openSpecSummary ? `${openSpecSummary.tasks.completed} / ${openSpecSummary.tasks.total}` : '未读取' }}</el-descriptions-item>
                 <el-descriptions-item label="待处理问题">{{ workflow.issues.filter((item) => item.status === 'OPEN').length }}</el-descriptions-item>
               </el-descriptions>
+              <section class="openspec-section">
+                <div class="section-title">
+                  <strong>任务完成情况</strong>
+                  <span class="muted">{{ openSpecSummary ? `${openSpecTaskPercentage}%` : '未读取' }}</span>
+                </div>
+                <el-progress :percentage="openSpecTaskPercentage" />
+                <div v-if="openSpecSummary?.tasks.groups.length" class="openspec-task-list">
+                  <section v-for="group in openSpecSummary.tasks.groups" :key="group.title" class="openspec-task-group">
+                    <strong>{{ group.title }}</strong>
+                    <div v-for="task in group.items" :key="`${group.title}-${task.line}`" class="openspec-task-row" :class="{ done: task.completed }">
+                      <el-checkbox
+                        :model-value="task.completed"
+                        :disabled="openSpecSummary?.archived"
+                        @change="(value) => toggleOpenSpecTask(task, value === true)"
+                      />
+                      <span class="openspec-task-id">{{ task.id || '-' }}</span>
+                      <span>{{ task.title }}</span>
+                    </div>
+                  </section>
+                </div>
+                <el-empty v-else description="暂无任务" />
+              </section>
+              <div v-if="openSpecDocuments.length" class="openspec-preview-tabs">
+                <div class="section-title">
+                  <strong>OpenSpec 文档预览</strong>
+                  <span class="muted">{{ selectedOpenSpecDocPath || openSpecSummary?.rootPath || '未关联' }}</span>
+                </div>
+                <el-tabs v-model="selectedOpenSpecDocPath" class="openspec-doc-tabs">
+                  <el-tab-pane v-for="doc in openSpecDocuments" :key="doc.id" :label="doc.label" :name="doc.path" :disabled="!doc.exists" />
+                </el-tabs>
+              </div>
+              <MarkdownEditor
+                v-if="selectedOpenSpecDocPath"
+                :key="`${selectedOpenSpecDocPath}-${openSpecPreviewVersion}`"
+                title="OpenSpec 文档预览"
+                :artifact-path="selectedOpenSpecDocPath"
+                @saved="reload"
+              />
             </div>
 
             <div v-else class="stage-actions">
@@ -110,7 +154,9 @@
                 <el-input v-model="branchName" placeholder="分支名，例如 feature/opp-172014" />
                 <el-button type="primary" :icon="Operation" @click="runCodeReview">生成代码评审</el-button>
                 <el-button type="danger" :icon="Back" @click="returnToImplementation">打回实施</el-button>
+                <el-button v-if="canArchiveOpenSpec" type="success" :icon="DocumentChecked" @click="runOpenSpecArchive">归档 OpenSpec</el-button>
               </div>
+              <el-alert v-if="openSpecSummary?.archived" type="success" show-icon :title="`OpenSpec 已归档：${openSpecSummary.archivePath}`" />
               <MarkdownEditor title="代码评审汇总" :artifact-path="stageArtifactPath('CODE_REVIEW')" @saved="reload" />
             </div>
           </div>
@@ -131,7 +177,7 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { Back, Cpu, DataAnalysis, Delete, DocumentChecked, Operation, Refresh, Tickets, Upload } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
-import type { ExecutionMode, RunRecord, WorkflowStage } from '@shared/workflow';
+import type { ExecutionMode, OpenSpecSummary, OpenSpecTaskItem, RunRecord, WorkflowStage } from '@shared/workflow';
 import { stageForAction, stageLabels } from '@shared/workflow';
 import StageTimeline from '@/components/StageTimeline.vue';
 import MarkdownEditor from '@/components/MarkdownEditor.vue';
@@ -139,6 +185,7 @@ import ReviewDialog from '@/components/ReviewDialog.vue';
 import RunLogDrawer from '@/components/RunLogDrawer.vue';
 import ArtifactSidebar from '@/components/ArtifactSidebar.vue';
 import { useWorkflowStore } from '@/stores/workflow';
+import { apiClient } from '@/api/client';
 
 const route = useRoute();
 const store = useWorkflowStore();
@@ -155,6 +202,9 @@ const branchName = ref('');
 const selectedAgentId = ref('codex');
 const selectedExecutionMode = ref<ExecutionMode>('BACKGROUND');
 const designClarification = ref('');
+const openSpecSummary = ref<OpenSpecSummary>();
+const selectedOpenSpecDocPath = ref('');
+const openSpecPreviewVersion = ref(0);
 
 const workflow = computed(() => store.current);
 const currentStageRun = computed<RunRecord | undefined>(() =>
@@ -162,11 +212,30 @@ const currentStageRun = computed<RunRecord | undefined>(() =>
 );
 const prdSourceFiles = computed(() => workflow.value?.prdSourceFiles || []);
 const prdApproved = computed(() => workflow.value?.stages.PRD.status === 'APPROVED');
+const openSpecDocuments = computed(() => [...(openSpecSummary.value?.artifacts || []), ...(openSpecSummary.value?.specs || [])]);
+const openSpecTaskPercentage = computed(() => {
+  const total = openSpecSummary.value?.tasks.total || 0;
+  if (!total) {
+    return 0;
+  }
+  return Math.round(((openSpecSummary.value?.tasks.completed || 0) / total) * 100);
+});
+const canArchiveOpenSpec = computed(() => Boolean(workflow.value?.stages.CODE_REVIEW.status === 'APPROVED' && !openSpecSummary.value?.archived));
+const prdEditorPath = computed(() => {
+  if (!workflow.value) {
+    return '';
+  }
+  const selected = workflow.value.artifacts.find((artifact) => artifact.path === selectedArtifactPath.value);
+  if (selected?.stage === 'PRD' && selected.kind !== 'directory') {
+    return selected.path;
+  }
+  return stageArtifactPath('PRD') || workflow.value.stages.PRD.artifactPath || `docs/${workflow.value.requirementId}/prd/analysis.md`;
+});
 const prdDesignSourcePath = computed(() => {
   if (!workflow.value) {
     return '';
   }
-  return stageArtifactPath('PRD') || workflow.value.stages.PRD.artifactPath || `docs/${workflow.value.requirementId}/prd/analysis.md`;
+  return prdEditorPath.value;
 });
 const stageHint = computed(() => {
   const hints: Record<WorkflowStage, string> = {
@@ -191,6 +260,19 @@ function stageArtifactPath(stage: WorkflowStage) {
 async function reload() {
   if (typeof route.params.requirementId === 'string') {
     await store.loadRequirement(route.params.requirementId);
+    await loadOpenSpecSummary();
+  }
+}
+
+async function loadOpenSpecSummary() {
+  if (!workflow.value) {
+    return;
+  }
+  const summary = await apiClient.getOpenSpecSummary(workflow.value.requirementId, changeName.value || `req-${workflow.value.requirementId}`);
+  openSpecSummary.value = summary;
+  const selectedStillExists = openSpecDocuments.value.some((doc) => doc.path === selectedOpenSpecDocPath.value && doc.exists);
+  if (!selectedStillExists) {
+    selectedOpenSpecDocPath.value = openSpecDocuments.value.find((doc) => doc.exists)?.path || '';
   }
 }
 
@@ -204,6 +286,7 @@ function selectArtifact(path: string) {
 
 async function runRefresh() {
   await store.runAction({ actionType: 'REFRESH_ARTIFACTS' });
+  await loadOpenSpecSummary();
   ElMessage.success('产物索引已刷新');
 }
 
@@ -282,10 +365,12 @@ async function runDesign() {
 
 async function runOpenSpecStatus() {
   await store.runAction({ actionType: 'OPENSPEC_STATUS', params: { changeName: changeName.value } });
+  await loadOpenSpecSummary();
 }
 
 async function runOpenSpecVerify() {
   await store.runAction({ actionType: 'OPENSPEC_VERIFY', params: { ...agentActionParams(), changeName: changeName.value } });
+  await loadOpenSpecSummary();
 }
 
 async function runJunit() {
@@ -296,13 +381,37 @@ async function runCodeReview() {
   await store.runAction({ actionType: 'CODE_REVIEW', params: { ...agentActionParams(), branchName: branchName.value } });
 }
 
+async function runOpenSpecArchive() {
+  await store.runAction({ actionType: 'OPENSPEC_ARCHIVE', params: { ...agentActionParams(), changeName: changeName.value } });
+  await loadOpenSpecSummary();
+}
+
 async function returnToImplementation() {
   await store.runAction({ actionType: 'RETURN_TO_IMPLEMENTATION' });
   activeStage.value = 'IMPLEMENTATION';
 }
 
+async function toggleOpenSpecTask(task: OpenSpecTaskItem, completed: boolean) {
+  if (!workflow.value || openSpecSummary.value?.archived) {
+    return;
+  }
+  try {
+    openSpecSummary.value = await apiClient.updateOpenSpecTask(workflow.value.requirementId, {
+      changeName: changeName.value || `req-${workflow.value.requirementId}`,
+      line: task.line,
+      completed,
+      raw: task.raw
+    });
+    openSpecPreviewVersion.value += 1;
+    ElMessage.success(completed ? '任务已确认完成' : '任务已取消完成');
+  } catch (error: any) {
+    ElMessage.error(error.message || '任务状态更新失败');
+    await loadOpenSpecSummary();
+  }
+}
+
 function openReview() {
-  reviewDialog.value?.open(activeStage.value, stageArtifactPath(activeStage.value));
+  reviewDialog.value?.open(activeStage.value, activeStage.value === 'PRD' ? prdEditorPath.value : stageArtifactPath(activeStage.value));
 }
 
 async function submitReview(input: { stage: WorkflowStage; decision: 'APPROVED' | 'REJECTED' | 'RISK_ACCEPTED'; comment: string; artifactPath?: string }) {
@@ -334,9 +443,8 @@ watch(
     moduleName.value = moduleName.value || '';
     branchName.value = value.branchName || '';
     designClarification.value = value.techDesignClarification || '';
-    if (value.currentStage !== 'DONE') {
-      activeStage.value = value.currentStage;
-    }
+    void loadOpenSpecSummary();
+    activeStage.value = value.currentStage === 'DONE' ? 'CODE_REVIEW' : value.currentStage;
   },
   { immediate: true }
 );
@@ -378,6 +486,120 @@ onMounted(async () => {
 
 .design-source-path {
   overflow-wrap: anywhere;
+}
+
+.openspec-section {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #e3e8f2;
+  border-radius: 8px;
+}
+
+.openspec-preview-tabs {
+  display: grid;
+  gap: 8px;
+  padding: 12px 12px 0;
+  border: 1px solid #e3e8f2;
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  background: #ffffff;
+}
+
+.openspec-doc-tabs :deep(.el-tabs__header) {
+  margin: 0;
+}
+
+.openspec-doc-tabs :deep(.el-tabs__item) {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.section-title .muted {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.openspec-doc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.openspec-doc-row {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid #dbe3ef;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #172033;
+  text-align: left;
+  cursor: pointer;
+}
+
+.openspec-doc-row.active {
+  border-color: #2563eb;
+  background: #f0f6ff;
+}
+
+.openspec-doc-row.missing {
+  color: #8a96a8;
+  cursor: not-allowed;
+}
+
+.openspec-doc-row span,
+.openspec-doc-row small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.openspec-doc-row small {
+  color: #697891;
+}
+
+.openspec-task-list {
+  display: grid;
+  gap: 12px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.openspec-task-group {
+  display: grid;
+  gap: 6px;
+}
+
+.openspec-task-row {
+  display: grid;
+  grid-template-columns: 28px 56px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #eef2f7;
+  border-radius: 6px;
+}
+
+.openspec-task-row.done {
+  background: #f6fbf8;
+  color: #52637a;
+}
+
+.openspec-task-id {
+  color: #697891;
+  font-variant-numeric: tabular-nums;
 }
 
 .stage-toolbar-actions {

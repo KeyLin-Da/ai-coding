@@ -67,13 +67,15 @@ function buildSkillCommand(workflow: RequirementWorkflow, action: ActionInput): 
       return `/openspec-apply-change ${changeName}`;
     case 'OPENSPEC_VERIFY':
       return `/openspec-verify-change ${changeName}`;
+    case 'OPENSPEC_ARCHIVE':
+      return `/openspec-archive-change ${changeName}`;
     default:
       return '';
   }
 }
 
 function isAgentAction(actionType: ActionInput['actionType']): boolean {
-  return ['PRD_ANALYZE', 'DESIGN_GENERATE', 'OPENSPEC_FF', 'OPENSPEC_APPLY', 'OPENSPEC_VERIFY', 'JUNIT_GENERATE', 'CODE_REVIEW'].includes(actionType);
+  return ['PRD_ANALYZE', 'DESIGN_GENERATE', 'OPENSPEC_FF', 'OPENSPEC_APPLY', 'OPENSPEC_VERIFY', 'OPENSPEC_ARCHIVE', 'JUNIT_GENERATE', 'CODE_REVIEW'].includes(actionType);
 }
 
 function runCli(workspaceRoot: string, args: string[]): Promise<{ status: RunStatus; output: string; error?: string }> {
@@ -121,6 +123,7 @@ export function validateActionInput(workspaceRoot: string, action: ActionInput):
     'OPENSPEC_FF',
     'OPENSPEC_APPLY',
     'OPENSPEC_VERIFY',
+    'OPENSPEC_ARCHIVE',
     'JUNIT_GENERATE',
     'CODE_REVIEW',
     'RETURN_TO_IMPLEMENTATION',

@@ -11,6 +11,7 @@ import { readRunEvents, appendStageCommandLog } from './services/run-log';
 import { readArtifact, saveArtifact } from './services/markdown-service';
 import { applyReview, refreshCodeReviewIssues, returnToImplementation } from './services/review-service';
 import { cancelAgentRun, listAgentProviders, refreshTerminalRunStatuses } from './services/agent-providers';
+import { normalizeOpenSpecChangeName, readOpenSpecSummary, updateOpenSpecTaskStatus } from './services/openspec-summary';
 import {
   assertAllowedPrdSourceFile,
   deletePrdSourceFileSnapshot,
@@ -158,7 +159,7 @@ export function createRouter(workspaceRoot: string) {
       if (request.method === 'POST' && pathname === '/api/ai-delivery/requirements') {
         const input = await parseBody<RequirementInput>(request);
         let workflow = await repository.upsert(input);
-        workflow.artifacts = await scanRequirementArtifacts(workspaceRoot, workflow.requirementId, workflow.branchName);
+        workflow.artifacts = await scanRequirementArtifacts(workspaceRoot, workflow.requirementId, workflow.branchName, workflow.stages.IMPLEMENTATION.changeName);
         workflow = await repository.save(workflow);
         send(response, 200, { data: workflow });
         return;
@@ -174,9 +175,45 @@ export function createRouter(workspaceRoot: string) {
         const refreshed = await refreshTerminalRunStatuses(workspaceRoot, workflow);
         workflow = refreshed.workflow;
         // 扫描并更新产物索引
-        workflow.artifacts = await scanRequirementArtifacts(workspaceRoot, workflow.requirementId, workflow.branchName);
+        workflow.artifacts = await scanRequirementArtifacts(workspaceRoot, workflow.requirementId, workflow.branchName, workflow.stages.IMPLEMENTATION.changeName);
         workflow = await repository.save(workflow);
         send(response, 200, { data: workflow });
+        return;
+      }
+
+      const openSpecSummaryMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/openspec-summary$/);
+      if (request.method === 'GET' && openSpecSummaryMatch) {
+        const workflow = await repository.load(openSpecSummaryMatch[1]);
+        if (!workflow) {
+          send(response, 404, { message: '需求不存在' });
+          return;
+        }
+        const fallbackChangeName = workflow.stages.IMPLEMENTATION.changeName || `req-${workflow.requirementId}`;
+        const changeName = normalizeOpenSpecChangeName(url.searchParams.get('changeName') || fallbackChangeName, fallbackChangeName);
+        send(response, 200, { data: await readOpenSpecSummary(workspaceRoot, changeName, fallbackChangeName) });
+        return;
+      }
+
+      const openSpecTaskMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/openspec-tasks$/);
+      if (request.method === 'POST' && openSpecTaskMatch) {
+        const requirementId = openSpecTaskMatch[1];
+        const input = await parseBody<{ changeName?: string; line: number; completed: boolean; raw?: string }>(request);
+        const lock = new WorkflowLock(workspaceRoot, requirementId);
+        await lock.acquire();
+        try {
+          const workflow = await repository.load(requirementId);
+          if (!workflow) {
+            send(response, 404, { message: '需求不存在' });
+            return;
+          }
+          const fallbackChangeName = workflow.stages.IMPLEMENTATION.changeName || `req-${workflow.requirementId}`;
+          const changeName = normalizeOpenSpecChangeName(input.changeName || fallbackChangeName, fallbackChangeName);
+          send(response, 200, {
+            data: await updateOpenSpecTaskStatus(workspaceRoot, changeName, fallbackChangeName, Number(input.line), Boolean(input.completed), input.raw)
+          });
+        } finally {
+          await lock.release();
+        }
         return;
       }
 
@@ -266,6 +303,20 @@ export function createRouter(workspaceRoot: string) {
               techDesignClarification: typeof params.clarification === 'string' ? params.clarification : workflow.techDesignClarification
             };
           }
+          if (['OPENSPEC_STATUS', 'OPENSPEC_FF', 'OPENSPEC_APPLY', 'OPENSPEC_VERIFY', 'OPENSPEC_ARCHIVE'].includes(action.actionType)) {
+            const params = action.params || {};
+            const changeName = normalizeOpenSpecChangeName(typeof params.changeName === 'string' ? params.changeName : '', workflow.stages.IMPLEMENTATION.changeName || `req-${workflow.requirementId}`);
+            workflow = {
+              ...workflow,
+              stages: {
+                ...workflow.stages,
+                IMPLEMENTATION: {
+                  ...workflow.stages.IMPLEMENTATION,
+                  changeName
+                }
+              }
+            };
+          }
           const run = await executeAction(workspaceRoot, workflow, action, async (updatedRun) => {
             const latest = await repository.load(requirementId);
             if (!latest) {
@@ -297,11 +348,11 @@ export function createRouter(workspaceRoot: string) {
           }
           workflow.runs.unshift(run);
           if (action.actionType === 'REFRESH_ARTIFACTS') {
-            workflow.artifacts = await scanRequirementArtifacts(workspaceRoot, workflow.requirementId, workflow.branchName);
+            workflow.artifacts = await scanRequirementArtifacts(workspaceRoot, workflow.requirementId, workflow.branchName, workflow.stages.IMPLEMENTATION.changeName);
           }
           // PRD分析、技术方案生成等可能产生产物的操作，执行完成后自动刷新产物索引
-          if (['PRD_ANALYZE', 'DESIGN_GENERATE'].includes(action.actionType)) {
-            workflow.artifacts = await scanRequirementArtifacts(workspaceRoot, workflow.requirementId, workflow.branchName);
+          if (['PRD_ANALYZE', 'DESIGN_GENERATE', 'OPENSPEC_ARCHIVE'].includes(action.actionType)) {
+            workflow.artifacts = await scanRequirementArtifacts(workspaceRoot, workflow.requirementId, workflow.branchName, workflow.stages.IMPLEMENTATION.changeName);
           }
           if (action.actionType === 'RETURN_TO_IMPLEMENTATION') {
             const issues = await refreshCodeReviewIssues(workspaceRoot, workflow);

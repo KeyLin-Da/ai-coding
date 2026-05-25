@@ -32,4 +32,21 @@ describe('workspace-scanner', () => {
       ])
     );
   });
+
+  it('兼容旧式 PRD 产物路径', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-legacy-prd-'));
+    await fs.mkdir(path.join(root, 'docs', 'prd', '172014'), { recursive: true });
+    await fs.writeFile(path.join(root, 'docs', 'prd', '172014', 'analysis.md'), '# Legacy PRD');
+
+    const artifacts = await scanRequirementArtifacts(root, '172014', 'feature/opp-172014');
+    const legacyPrd = artifacts.find((item) => item.id === 'prd-analysis-legacy');
+
+    expect(legacyPrd).toMatchObject({
+      stage: 'PRD',
+      label: 'PRD 分析文档（旧路径）',
+      path: 'docs/prd/172014/analysis.md',
+      kind: 'markdown',
+      exists: true
+    });
+  });
 });

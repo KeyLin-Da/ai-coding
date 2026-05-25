@@ -55,6 +55,7 @@ describe('stage-rules', () => {
     expect(stageForAction('OPENSPEC_VERIFY')).toBe('IMPLEMENTATION');
     expect(stageForAction('JUNIT_GENERATE')).toBe('IMPLEMENTATION');
     expect(stageForAction('CODE_REVIEW')).toBe('CODE_REVIEW');
+    expect(stageForAction('OPENSPEC_ARCHIVE')).toBe('CODE_REVIEW');
     expect(stageForAction('RETURN_TO_IMPLEMENTATION')).toBe('CODE_REVIEW');
     expect(stageForAction('REFRESH_ARTIFACTS')).toBeUndefined();
   });

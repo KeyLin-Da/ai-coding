@@ -178,4 +178,15 @@ describe('action-adapters', () => {
     expect(run.commandText).toContain('d=docs/legacy-prd/172014/analysis.md');
     expect(run.commandText).toContain('r=172014');
   });
+
+  it('OpenSpec 归档使用 archive 技能并归属代码评审阶段', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-action-'));
+    const run = await executeAction(root, workflow(), {
+      actionType: 'OPENSPEC_ARCHIVE',
+      params: { changeName: 'req-172014' }
+    });
+    expect(run.status).toBe('WAITING_FOR_AGENT');
+    expect(run.stage).toBe('CODE_REVIEW');
+    expect(run.commandText).toBe('/openspec-archive-change req-172014');
+  });
 });
