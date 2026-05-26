@@ -1,0 +1,209 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - paragraph [ref=e6]: OpenSpec Delivery Console
+      - heading "AI 需求交付控制台" [level=1] [ref=e7]
+    - button "刷新" [ref=e8] [cursor=pointer]:
+      - img [ref=e10]
+      - generic [ref=e12]: 刷新
+  - main [ref=e13]:
+    - generic [ref=e14]:
+      - generic [ref=e15]:
+        - generic [ref=e16]:
+          - generic [ref=e17]:
+            - generic [ref=e18]: 需求
+            - generic [ref=e19]: /
+            - strong [ref=e20]: "171697"
+          - generic [ref=e21]:
+            - button "刷新产物" [ref=e22] [cursor=pointer]:
+              - img [ref=e24]
+              - generic [ref=e26]: 刷新产物
+            - button "返回列表" [ref=e27] [cursor=pointer]:
+              - img [ref=e29]
+              - generic [ref=e32]: 返回列表
+        - heading "【opp-gateway】/admin/api/v2/activityInfo/getClockData、/admin/api/v2/activityInfo/getFunUserData对应功能导致opp-learn严重FGC优化" [level=2] [ref=e33]
+        - generic [ref=e34]:
+          - generic:
+            - generic: 缺陷
+          - generic:
+            - generic: 进行中
+          - generic [ref=e35]: bugfix/opp#171697
+        - generic "阶段时间线" [ref=e36]:
+          - button "✓ PRD 已通过" [ref=e37] [cursor=pointer]:
+            - generic [ref=e38]: ✓
+            - generic [ref=e39]:
+              - strong [ref=e40]: PRD
+              - generic [ref=e41]: 已通过
+          - button "✓ 技术方案 已通过" [ref=e42] [cursor=pointer]:
+            - generic [ref=e43]: ✓
+            - generic [ref=e44]:
+              - strong [ref=e45]: 技术方案
+              - generic [ref=e46]: 已通过
+          - button "3 实施验证 草稿" [ref=e47] [cursor=pointer]:
+            - generic [ref=e48]: "3"
+            - generic [ref=e49]:
+              - strong [ref=e50]: 实施验证
+              - generic [ref=e51]: 草稿
+          - button "4 代码评审 未开始" [ref=e52] [cursor=pointer]:
+            - generic [ref=e53]: "4"
+            - generic [ref=e54]:
+              - strong [ref=e55]: 代码评审
+              - generic [ref=e56]: 未开始
+      - generic [ref=e57]:
+        - main [ref=e58]:
+          - generic [ref=e59]:
+            - generic [ref=e60]:
+              - generic [ref=e61]:
+                - strong [ref=e62]: 实施验证
+                - paragraph [ref=e63]: 实施验证分步骤推进：工件生成与评审。
+              - generic [ref=e64]:
+                - generic [ref=e66] [cursor=pointer]:
+                  - generic:
+                    - combobox [ref=e68]
+                    - generic [ref=e69]: Codex
+                  - img [ref=e72]
+                - generic [ref=e75] [cursor=pointer]:
+                  - generic:
+                    - combobox [ref=e77]
+                    - generic [ref=e78]: 后台执行
+                  - img [ref=e81]
+                - button "本步骤日志" [ref=e83] [cursor=pointer]:
+                  - img [ref=e85]
+                  - generic [ref=e87]: 本步骤日志
+            - generic [ref=e89]:
+              - navigation "实施验证子步骤" [ref=e90]:
+                - button "1 工件生成与评审 草稿" [ref=e91] [cursor=pointer]:
+                  - generic [ref=e92]: "1"
+                  - generic [ref=e93]:
+                    - strong [ref=e94]: 工件生成与评审
+                    - generic [ref=e95]: 草稿
+                - button "2 开始实施 未开始" [ref=e96] [cursor=pointer]:
+                  - generic [ref=e97]: "2"
+                  - generic [ref=e98]:
+                    - strong [ref=e99]: 开始实施
+                    - generic [ref=e100]: 未开始
+                - button "3 查看变更文件及代码 未开始" [ref=e101] [cursor=pointer]:
+                  - generic [ref=e102]: "3"
+                  - generic [ref=e103]:
+                    - strong [ref=e104]: 查看变更文件及代码
+                    - generic [ref=e105]: 未开始
+                - button "4 执行单测并生成报告 未开始" [ref=e106] [cursor=pointer]:
+                  - generic [ref=e107]: "4"
+                  - generic [ref=e108]:
+                    - strong [ref=e109]: 执行单测并生成报告
+                    - generic [ref=e110]: 未开始
+              - region "实施验证摘要" [ref=e111]:
+                - generic [ref=e112]:
+                  - generic [ref=e113]:
+                    - strong [ref=e114]: OpenSpec
+                    - generic:
+                      - generic: 进行中
+                  - paragraph [ref=e115]: openspec/changes/req-171697
+                  - progressbar [ref=e116]:
+                    - generic [ref=e119]: 70%
+                - generic [ref=e120]:
+                  - generic [ref=e121]:
+                    - generic [ref=e122]: 已完成
+                    - strong [ref=e123]: "21"
+                  - generic [ref=e124]:
+                    - generic [ref=e125]: 待完成
+                    - strong [ref=e126]: "9"
+                  - generic [ref=e127]:
+                    - generic [ref=e128]: 问题
+                    - strong [ref=e129]: "0"
+                  - generic [ref=e130]:
+                    - generic [ref=e131]: 总任务
+                    - strong [ref=e132]: "30"
+              - generic [ref=e133]:
+                - textbox "OpenSpec change name，例如 req-172014" [ref=e136]: req-171697
+                - button "生成 OpenSpec 工件" [ref=e137] [cursor=pointer]:
+                  - img [ref=e139]
+                  - generic [ref=e141]: 生成 OpenSpec 工件
+                - button "查看 OpenSpec 状态" [ref=e142] [cursor=pointer]:
+                  - img [ref=e144]
+                  - generic [ref=e146]: 查看 OpenSpec 状态
+                - button "审核本步骤" [ref=e147] [cursor=pointer]:
+                  - img [ref=e149]
+                  - generic [ref=e151]: 审核本步骤
+              - generic [ref=e152]:
+                - generic [ref=e153]:
+                  - strong [ref=e154]: OpenSpec 工作
+                  - generic [ref=e155]: openspec/changes/req-171697/proposal.md
+                - generic [ref=e156]:
+                  - tablist [ref=e160]:
+                    - tab "Proposal" [selected] [ref=e162]
+                    - tab "Design" [ref=e163]
+                    - tab "Tasks" [ref=e164]
+                    - tab "learn-activity-clock-data-performance/spec.md" [ref=e165]
+                  - generic:
+                    - tabpanel "Proposal"
+              - generic [ref=e166]:
+                - generic [ref=e167]:
+                  - generic [ref=e168]:
+                    - strong [ref=e169]: 文档内容
+                    - paragraph [ref=e170]: openspec/changes/req-171697/proposal.md
+                  - generic [ref=e171]:
+                    - button "读取" [ref=e172] [cursor=pointer]:
+                      - img [ref=e174]
+                      - generic [ref=e176]: 读取
+                    - button "下载" [disabled] [ref=e177]:
+                      - img [ref=e179]
+                      - generic [ref=e181]: 下载
+                    - button "保存" [ref=e182] [cursor=pointer]:
+                      - img [ref=e184]
+                      - generic [ref=e186]: 保存
+                - generic [ref=e187]:
+                  - textbox [ref=e190]
+                  - generic [ref=e191]:
+                    - generic [ref=e192]:
+                      - generic [ref=e193]: 预览
+                      - button "全屏预览" [ref=e194] [cursor=pointer]:
+                        - img [ref=e196]
+                    - article [ref=e198]
+        - complementary [ref=e199]:
+          - generic [ref=e200]:
+            - strong [ref=e201]: OpenSpec 文档
+            - button "刷新" [ref=e202] [cursor=pointer]:
+              - img [ref=e204]
+              - generic [ref=e206]: 刷新
+          - generic [ref=e210]:
+            - button "Change openspec/changes/req-171697 已生成" [ref=e211] [cursor=pointer]:
+              - img [ref=e213]
+              - generic [ref=e215]:
+                - generic [ref=e216]: Change
+                - generic [ref=e217]: openspec/changes/req-171697
+              - generic:
+                - generic: 已生成
+            - button "Proposal openspec/changes/req-171697/proposal.md 已生成" [ref=e218] [cursor=pointer]:
+              - img [ref=e220]
+              - generic [ref=e222]:
+                - generic [ref=e223]: Proposal
+                - generic [ref=e224]: openspec/changes/req-171697/proposal.md
+              - generic:
+                - generic: 已生成
+            - button "Design openspec/changes/req-171697/design.md 已生成" [ref=e225] [cursor=pointer]:
+              - img [ref=e227]
+              - generic [ref=e229]:
+                - generic [ref=e230]: Design
+                - generic [ref=e231]: openspec/changes/req-171697/design.md
+              - generic:
+                - generic: 已生成
+            - button "Tasks openspec/changes/req-171697/tasks.md 已生成" [ref=e232] [cursor=pointer]:
+              - img [ref=e234]
+              - generic [ref=e236]:
+                - generic [ref=e237]: Tasks
+                - generic [ref=e238]: openspec/changes/req-171697/tasks.md
+              - generic:
+                - generic: 已生成
+            - button "learn-activity-clock-data-performance openspec/changes/req-171697/specs/learn-activity-clock-data-performance/spec.md 已生成" [ref=e239] [cursor=pointer]:
+              - img [ref=e241]
+              - generic [ref=e243]:
+                - generic [ref=e244]: learn-activity-clock-data-performance
+                - generic [ref=e245]: openspec/changes/req-171697/specs/learn-activity-clock-data-performance/spec.md
+              - generic:
+                - generic: 已生成
+          - generic [ref=e246]:
+            - strong [ref=e247]: 评审问题
+            - generic [ref=e248]:
+              - img [ref=e250]
+              - paragraph [ref=e267]: 暂无问题

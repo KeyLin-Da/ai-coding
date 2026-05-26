@@ -1,0 +1,958 @@
+- generic [ref=e1]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - generic "Collapse" [ref=e6] [cursor=pointer]
+      - generic "Project Pages" [ref=e9]:
+        - generic [ref=e10]:
+          - list:
+            - listitem [ref=e11]:
+              - generic "Project Pages" [ref=e12] [cursor=pointer]
+        - generic [ref=e13] [cursor=pointer]:
+          - generic [ref=e14]: 组队学习（极易学）
+          - generic [ref=e15]: (6 of 8)
+    - generic [ref=e16]:
+      - list [ref=e18]:
+        - listitem [ref=e19]:
+          - generic "View Options" [ref=e20] [cursor=pointer]
+        - listitem [ref=e21]:
+          - generic "Documentation" [ref=e22] [cursor=pointer]
+      - link [ref=e26] [cursor=pointer]:
+        - /url: https://www.axure.com
+  - generic [ref=e27]:
+    - generic [ref=e28]:
+      - generic [ref=e35]: Pages
+      - list [ref=e37]:
+        - listitem [ref=e38]:
+          - generic [ref=e41] [cursor=pointer]: 更新记录
+        - listitem [ref=e43]:
+          - generic [ref=e46] [cursor=pointer]: 用户故事
+        - listitem [ref=e48]:
+          - generic [ref=e51] [cursor=pointer]: 业务流程&业务功能
+        - listitem [ref=e53]:
+          - generic [ref=e55] [cursor=pointer]: "#160461-APP"
+          - list [ref=e59]:
+            - listitem [ref=e60]:
+              - generic [ref=e63] [cursor=pointer]: 文化推广专区
+            - listitem [ref=e65]:
+              - generic [ref=e68] [cursor=pointer]: 埋点需求
+        - listitem [ref=e70]:
+          - generic [ref=e72] [cursor=pointer]: "#160461-OPP后台"
+          - list [ref=e76]:
+            - listitem [ref=e77]:
+              - generic [ref=e80] [cursor=pointer]: 组队学习（极易学）
+        - listitem [ref=e82]:
+          - generic [ref=e84] [cursor=pointer]: "#167023-用户权限配置对接会员中心"
+          - list [ref=e88]:
+            - listitem [ref=e89]:
+              - generic [ref=e92] [cursor=pointer]: 组队学习（极易学）
+            - listitem [ref=e94]:
+              - generic [ref=e97] [cursor=pointer]: 历史数据处理方案
+      - generic [ref=e99]:
+        - text: Use
+        - text: and
+        - text: keys
+        - text: to move between pages
+    - iframe [active] [ref=e106]:
+      - generic [active] [ref=f1e1]:
+        - generic:
+          - img [ref=f1e3]
+          - generic [ref=f1e7]:
+            - paragraph [ref=f1e8]: 【APP】【学习】O1-文化落地推广专区
+            - paragraph [ref=f1e9]: https://infinitus-devops.coding.net/p/opp/requirements/issues/160461/detail
+            - paragraph [ref=f1e10]: 需求概述：
+            - paragraph [ref=f1e11]: 1、【新增】解锁方式=按日期解锁
+            - paragraph [ref=f1e12]: 2、支持配置是否展示排行榜（前端兼容）
+            - paragraph [ref=f1e13]: 3、成功邀请好友获得奖励，由原必填调整为选填
+            - paragraph [ref=f1e14]: 4、活动内容配置，新增按指定日期显示
+            - paragraph [ref=f1e15]: 5、活动内容配置优化「学习内容/学习课件」的必填校验，只需其中一个为必填即可
+            - paragraph [ref=f1e16]: 6、活动内容配置，新增测评和问卷，对接卷王考试系统和体验家系统
+            - paragraph [ref=f1e17]
+          - img [ref=f1e19]
+          - img [ref=f1e21]
+          - img [ref=f1e23]
+          - img [ref=f1e25]
+          - img [ref=f1e27]
+          - paragraph [ref=f1e31]: 活动管理-组队打卡-组队学习（极易学）-列表页
+          - img [ref=f1e33]
+          - paragraph [ref=f1e37]: 活动管理-组队打卡-组队学习（极易学）-新建-基础配置
+          - img [ref=f1e39]
+          - img [ref=f1e41]
+          - paragraph [ref=f1e45]: 按日期解锁
+          - generic [ref=f1e46]:
+            - img [ref=f1e47]
+            - paragraph [ref=f1e49]: "2"
+          - img [ref=f1e51]
+          - generic [ref=f1e52]:
+            - img [ref=f1e53]
+            - paragraph [ref=f1e55]: "3"
+          - generic:
+            - paragraph [ref=f1e59]: "是否开启排行榜:"
+            - img [ref=f1e61]
+            - paragraph [ref=f1e65]: 开启
+            - img [ref=f1e67]
+            - paragraph [ref=f1e71]: 关闭
+          - generic [ref=f1e72]:
+            - img [ref=f1e73]
+            - paragraph [ref=f1e75]: "4"
+          - paragraph [ref=f1e79]: 活动管理-组队打卡-组队学习（极易学）-新建-活动内容配置-学习
+          - generic:
+            - img "u603_seg0" [ref=f1e80]
+            - img "u603_seg1" [ref=f1e81]
+            - img "u603_seg2" [ref=f1e82]
+            - img "u603_seg3" [ref=f1e83]
+          - img [ref=f1e85]
+          - generic:
+            - img "u605_seg0" [ref=f1e86]
+            - img "u605_seg1" [ref=f1e87]
+            - img "u605_seg2" [ref=f1e88]
+            - img "u605_seg3" [ref=f1e89]
+            - img "u605_seg4" [ref=f1e90]
+          - generic:
+            - paragraph [ref=f1e94]: 活动管理-组队打卡-组队学习（极易学）-新建-活动内容配置-考试
+            - img [ref=f1e96]
+            - img [ref=f1e98]
+            - img [ref=f1e100]
+            - img [ref=f1e102]
+            - img [ref=f1e104]
+            - generic:
+              - paragraph [ref=f1e108]: 是否必做：
+              - generic:
+                - img [ref=f1e110]
+                - paragraph [ref=f1e114]: 必做
+              - generic:
+                - img [ref=f1e116]
+                - paragraph [ref=f1e120]: 选做
+            - generic:
+              - paragraph [ref=f1e124]: "* 考试链接："
+              - paragraph [ref=f1e128]: 在：考试管理-考试/问卷管理-新建问卷-发放问卷 获取链接
+            - generic:
+              - paragraph [ref=f1e132]: "* 合格分数："
+              - paragraph [ref=f1e136]: 请输入分数
+              - paragraph [ref=f1e140]: 分
+            - generic:
+              - paragraph [ref=f1e144]: 任务奖励：
+              - paragraph [ref=f1e150]: 积分/任务
+            - generic:
+              - paragraph [ref=f1e154]: "* 考试ID："
+              - paragraph [ref=f1e158]: 在：考试管理-考试/问卷管理-新建问卷-发放问卷 获取链接时，截取最后的ID，例如：YvG6x5
+            - generic:
+              - paragraph [ref=f1e162]: 任务类型：
+              - generic:
+                - img [ref=f1e164]
+                - paragraph [ref=f1e168]: 考试（支持卷王）
+              - generic:
+                - img [ref=f1e170]
+                - paragraph [ref=f1e174]: 学习
+              - generic:
+                - img [ref=f1e176]
+                - paragraph [ref=f1e180]: 调研（支持体验家/卷王）
+            - generic:
+              - paragraph [ref=f1e184]: "* 任务开启日期："
+              - img [ref=f1e186]
+            - generic:
+              - paragraph [ref=f1e190]: "* 任务名称："
+              - paragraph [ref=f1e196]: 0/20
+            - generic:
+              - paragraph [ref=f1e200]: "* 任务进行中按钮文案："
+              - paragraph [ref=f1e204]: 去提交
+              - paragraph [ref=f1e208]: 3/4
+          - generic:
+            - paragraph [ref=f1e212]: 活动管理-组队打卡-组队学习（极易学）-新建-活动内容配置-考试
+            - img [ref=f1e214]
+            - img [ref=f1e216]
+            - img [ref=f1e218]
+            - img [ref=f1e220]
+            - generic:
+              - img [ref=f1e222]
+              - paragraph [ref=f1e226]: "* 任务开启日期："
+            - img [ref=f1e228]
+            - generic:
+              - paragraph [ref=f1e232]: "* 问卷链接："
+              - paragraph [ref=f1e236]: 请输入链接
+            - generic:
+              - paragraph [ref=f1e240]: 任务类型：
+              - generic:
+                - img [ref=f1e242]
+                - paragraph [ref=f1e246]: 考试（支持卷王）
+              - generic:
+                - img [ref=f1e248]
+                - paragraph [ref=f1e252]: 学习
+              - generic:
+                - img [ref=f1e254]
+                - paragraph [ref=f1e258]: 调研（支持体验家/卷王）
+            - generic:
+              - paragraph [ref=f1e262]: 来源：
+              - generic:
+                - img [ref=f1e264]
+                - paragraph [ref=f1e268]: 卷王
+              - generic:
+                - img [ref=f1e270]
+                - paragraph [ref=f1e274]: 体验家
+            - generic:
+              - paragraph [ref=f1e278]: 任务奖励：
+              - paragraph [ref=f1e284]: 积分/任务
+            - generic:
+              - paragraph [ref=f1e288]: "* 任务名称："
+              - paragraph [ref=f1e294]: 0/20
+            - generic:
+              - paragraph [ref=f1e298]: 是否必做：
+              - generic:
+                - img [ref=f1e300]
+                - paragraph [ref=f1e304]: 必做
+              - generic:
+                - img [ref=f1e306]
+                - paragraph [ref=f1e310]: 选做
+            - generic:
+              - paragraph [ref=f1e314]: "* 任务进行中按钮文案："
+              - paragraph [ref=f1e318]: 去考试
+              - paragraph [ref=f1e322]: 3/4
+          - img [ref=f1e324]
+          - img [ref=f1e326]
+          - img [ref=f1e328]
+          - img [ref=f1e330]
+          - img [ref=f1e332]
+          - paragraph [ref=f1e336]: 活动管理-组队打卡-组队学习（极易学）-新建-页面装修配置
+          - img [ref=f1e338]
+          - generic:
+            - img "u717_seg0" [ref=f1e339]
+            - img "u717_seg1" [ref=f1e340]
+            - img "u717_seg2" [ref=f1e341]
+            - img "u717_seg3" [ref=f1e342]
+          - img [ref=f1e344]
+          - img [ref=f1e346]
+          - img [ref=f1e348]
+          - img [ref=f1e350]
+          - img [ref=f1e352]
+          - generic [ref=f1e353]:
+            - img [ref=f1e354]
+            - paragraph [ref=f1e356]: "5"
+          - img [ref=f1e358]
+          - img [ref=f1e360]
+          - generic [ref=f1e361]:
+            - img [ref=f1e362]
+            - paragraph [ref=f1e364]: "7"
+          - img [ref=f1e368]
+          - img [ref=f1e370]
+          - generic [ref=f1e371]:
+            - img [ref=f1e372]
+            - paragraph [ref=f1e374]: "8"
+          - img [ref=f1e376]
+          - generic [ref=f1e377]:
+            - img [ref=f1e378]
+            - paragraph [ref=f1e380]: "9"
+          - generic [ref=f1e381]:
+            - img [ref=f1e382]
+            - paragraph [ref=f1e384]: "1"
+          - generic [ref=f1e385]:
+            - img [ref=f1e386]
+            - generic [ref=f1e387]:
+              - paragraph [ref=f1e388]: 组队学习（极易学）-新增活动-打卡学习新增按日期解锁方式
+              - paragraph [ref=f1e389]: 1、路径：opp后台-活动管理-组队打卡-组队学习（极易学）
+              - paragraph [ref=f1e390]: 2、组队学习-新增，「打卡类型-打卡学习」，新增「解锁方式：按日期解锁」。按日期解锁，主要作用在配置任务时，任务根据指定日期才能解锁，具体日期配置，详见下方「活动内容」配置说明
+          - generic [ref=f1e391]:
+            - img [ref=f1e392]
+            - paragraph [ref=f1e394]: "2"
+          - img [ref=f1e396]
+          - img [ref=f1e398]
+          - img [ref=f1e400]
+          - paragraph [ref=f1e404]: 复制活动
+          - img [ref=f1e406]
+          - generic [ref=f1e407]:
+            - img [ref=f1e408]
+            - paragraph [ref=f1e410]: "1"
+          - generic:
+            - generic [ref=f1e413]:
+              - paragraph [ref=f1e414]: 组队学习（极易学）-列表页
+              - paragraph [ref=f1e415]: 1、路径：opp后台-活动管理-组队打卡-组队学习（极易学）
+              - paragraph [ref=f1e416]: 2、列表页中的活动-操作栏「更多」，增加「复制活动」功能，范围：组队学习全部活动类型
+              - paragraph [ref=f1e417]: 3、点击「复制活动」，进入到新增页面，对应复制活动基础配置、页面装修、活动内容的全部配置
+              - list [ref=f1e418]:
+                - listitem [ref=f1e419]: 基础配置支持复制全部字段，支持编辑
+                - listitem [ref=f1e420]: 页面装修支持复制全部字段，支持编辑
+                - listitem [ref=f1e421]: 活动内容支持复制全部字段，支持编辑
+                - listitem [ref=f1e422]: 历史方案，
+              - paragraph [ref=f1e423]
+            - paragraph [ref=f1e427] [cursor=pointer]: 点击打开
+          - generic [ref=f1e428]:
+            - img [ref=f1e429]
+            - generic [ref=f1e430]:
+              - paragraph [ref=f1e431]: 组队学习（极易学）-打卡学习-按日期解锁-新增是否开启排行榜
+              - paragraph [ref=f1e432]: 1、路径：opp后台-活动管理-组队打卡-组队学习（极易学）-全部活动类型
+              - paragraph [ref=f1e433]: 2、新增「是否开启排行榜」，默认选中「开启」，支持切换「关闭」。如开启，则APP端为「打卡学习-按日期解锁」活动时，则显示排行榜入口，反之APP端不显示排行榜入口
+              - paragraph [ref=f1e434]: 3、历史数据，默认开启
+          - generic [ref=f1e435]:
+            - img [ref=f1e436]
+            - paragraph [ref=f1e438]: "3"
+          - generic [ref=f1e439]:
+            - img [ref=f1e440]
+            - generic [ref=f1e441]:
+              - paragraph [ref=f1e442]: 组队学习（极易学）-基础配置
+              - paragraph [ref=f1e443]: 1、路径：opp后台-活动管理-组队打卡-组队学习（极易学）-全部活动类型
+              - paragraph [ref=f1e444]: 2、基础配置-基础信息-「成功邀请好友获得积分」字段，由原本的必填字段改为非必填；默认值为0，如默认值=0，则APP端邀请好友需要隐藏成功邀请好友获得积分的逻辑
+          - generic [ref=f1e445]:
+            - img [ref=f1e446]
+            - paragraph [ref=f1e448]: "4"
+          - generic [ref=f1e449]:
+            - img [ref=f1e450]
+            - paragraph [ref=f1e452]: "5"
+          - generic [ref=f1e453]:
+            - img [ref=f1e454]
+            - generic [ref=f1e455]:
+              - paragraph [ref=f1e456]: 组队学习（极易学）-内容配置
+              - paragraph [ref=f1e457]: 1、类型：「打卡学习-按日期解锁」
+              - paragraph [ref=f1e458]: 2、「打卡学习-按日期解锁」活动内容引用原有的「打卡学习-次日解锁的」页面字段，且有新增字段，新增详见下方说明
+              - paragraph [ref=f1e459]: 3、任务数量根据「基础配置-基础信息」-「打卡数量」显示任务数
+              - paragraph [ref=f1e460]: 4、显示必填字段「任务名称」，默认根据任务对应数量进行显示，支持修改，限制输入20个字，不支持输入表情
+              - paragraph [ref=f1e461]: 5、「打卡学习-按日期解锁」-「活动内容-基础信息」-「任务开启日期」，必填字段
+              - list [ref=f1e462]:
+                - listitem [ref=f1e463]: 任务开启日期，主要控制每个任务入口开启时间。点击支持选择日期，如右侧示意图
+                - listitem [ref=f1e464]: 任务日期配置规则说明：
+                - list [ref=f1e465]:
+                  - listitem [ref=f1e466]: 选中日期后，按照选择日期的00:00:00进行开启
+                  - listitem [ref=f1e467]: 日期选择范围：可选时间范围对应基础配置的「活动日期」，配置有有活动日期区间时，则不符合范围的日期置灰不可选；如是不限制，则支持全部日期
+                  - listitem [ref=f1e468]: 任务二的日期要大于等于任务一，只要任务一确认了任务开启日期，则任务二选择开启日期只能是与任务一同一天或者往后的日期；例：任务一选中2026年2月25日，任务二选中2026年2月26日，任务三支持选中2026年2月25日（由运营人员自行负责）
+              - paragraph [ref=f1e469]: 6、任务进行中按钮文案：新增必填字段，控制打卡任务列表页，任务进行中的按钮，默认文案：去学习；支持输入中英数特殊符号，不支持emj表情，上限4个字
+              - paragraph [ref=f1e470]
+          - generic:
+            - generic:
+              - generic [ref=f1e471]:
+                - img [ref=f1e472]
+                - generic [ref=f1e473]:
+                  - paragraph [ref=f1e474]: 组队学习（极易学）-页面装修
+                  - paragraph [ref=f1e475]: 1、沿用原有打卡学习的页面装修全部字段配置，历史方案，
+              - paragraph [ref=f1e479] [cursor=pointer]: 点击打开
+          - generic:
+            - generic:
+              - img [ref=f1e481]
+              - img [ref=f1e483]
+              - paragraph [ref=f1e487]: "* 任务开启日期："
+          - generic [ref=f1e490]:
+            - img [ref=f1e491]
+            - generic [ref=f1e492]:
+              - paragraph [ref=f1e493]: 组队学习（极易学）-内容配置
+              - paragraph [ref=f1e494]: 1、类型：「打卡学习-按日期解锁」
+              - paragraph [ref=f1e495]: （0318调整，暂不对接卷王）2、「打卡学习-按日期解锁」-「活动内容-基础信息」-「任务类型」，包含默认值「学习」，支持切换「考试（支持卷王）」或「调研（支持体验家/卷王）」
+              - paragraph [ref=f1e496]: 3、「打卡学习-按日期解锁」任务类型「学习」，沿用现有「打卡学习-次日解锁的」页面全部字段，详见下方说明
+              - paragraph [ref=f1e497]: 4、「打卡学习-按日期解锁」任务类型「考试（支持卷王）」，本次新增，详见下方说明
+              - paragraph [ref=f1e498]: 5、「打卡学习-按日期解锁」任务类型「调研（支持体验家/卷王）」，本次新增，详见下方说明
+          - generic [ref=f1e499]:
+            - img [ref=f1e500]
+            - paragraph [ref=f1e502]: "6"
+          - generic [ref=f1e503]:
+            - img [ref=f1e504]
+            - paragraph [ref=f1e506]: "7"
+          - generic:
+            - generic [ref=f1e507]:
+              - img [ref=f1e508]
+              - generic [ref=f1e509]:
+                - paragraph [ref=f1e510]: 组队学习（极易学）-内容配置-任务类型：学习
+                - paragraph [ref=f1e511]: 1、「任务奖励」非必填项，支持输入正整数（现有功能字段）
+                - paragraph [ref=f1e512]: 2、「学习内容描述」必填字段，富文本输入器（现有功能字段）
+                - paragraph [ref=f1e513]: 3、「学习内容」已有功能，参照（学习打卡-次日解锁），沿用部分原有逻辑；支持配置必做和选择
+                - paragraph [ref=f1e514]: 4、「学习课件」已有功能，参照（学习打卡-次日解锁），沿用部分原有逻辑；支持配置必做和选择
+                - paragraph [ref=f1e515]: 5、「课后作业」已有功能，参照（学习打卡-次日解锁），沿用部分原有逻辑；支持配置必做和选择
+                - paragraph [ref=f1e516]: 6、「课后作业」已有功能，参照（学习打卡-次日解锁），沿用部分原有逻辑；支持配置必做和选择
+                - paragraph [ref=f1e517]: 7、「学习」类型保存规则说明：
+                - list [ref=f1e518]:
+                  - listitem [ref=f1e519]: "需检验学习内容、学习课件是否其中一项有配置，如配置为空，需toast提示{任务n的学习内容或学习课件需最少配置一个任务}；多个学习任务未配置时，用逗号隔开弹窗提示，例：任务一，任务二，任务三的学习内容或学习课件需要最少配置一个任务"
+                  - listitem [ref=f1e520]: （0318调整范围）「学习内容」、「学习课件」、「课后作业」、「课后作业」，配置项有一个内容为必做，则在APP打卡学习页面，归类为必做任务。反之全部配置为选做时，则归类为选做任务
+                  - listitem [ref=f1e521]: 「学习内容」本期改动需支持上传图片格式，详见下方说明
+                - paragraph [ref=f1e522]
+            - paragraph [ref=f1e526] [cursor=pointer]: 点击打开
+            - paragraph [ref=f1e530]: 历史方案
+          - generic [ref=f1e531]:
+            - img [ref=f1e532]
+            - generic [ref=f1e533]:
+              - paragraph [ref=f1e534]: （0318调整，暂不对接卷王）组队学习（极易学）-内容配置-任务类型：问卷（支持体验家/卷王）
+              - paragraph [ref=f1e535]: 1、任务进行中按钮文案：新增必填字段，控制打卡任务列表页，任务进行中的按钮，默认文案：去考试；支持输入中英数特殊符号，不支持emj表情，上限4个字
+              - paragraph [ref=f1e536]: 2、「任务奖励」非必填项，支持输入正整数（现有功能字段）
+              - paragraph [ref=f1e537]: 3、「是否必做」，默认选中必做，支持切换选做
+              - paragraph [ref=f1e538]: 4、「来源」单选项，默认选中「体验家」，支持切换「卷王」
+              - paragraph [ref=f1e539]: 5、「问卷链接」输入框，必填。限制最多输入1000字，支持特殊符号。前端根据该配置，跳转对应考试H5。未填写时，检验需要toast提示：考试链接不能为空
+              - paragraph [ref=f1e540]
+          - generic [ref=f1e541]:
+            - img [ref=f1e542]
+            - generic [ref=f1e543]:
+              - paragraph [ref=f1e544]: （0318调整，暂不对接卷王）组队学习（极易学）-内容配置-任务类型：考试（支持卷王）
+              - paragraph [ref=f1e545]: 1、任务进行中按钮文案：新增必填字段，控制打卡任务列表页，任务进行中的按钮，默认文案：去提交；支持输入中英数特殊符号，不支持emj表情，上限4个字
+              - paragraph [ref=f1e546]: 2、「任务奖励」非必填项，支持输入正整数（现有功能字段）
+              - paragraph [ref=f1e547]: 3、「是否必做」默认选中必做，支持切换选做
+              - paragraph [ref=f1e548]: 4、「考试ID」输入框，必填。限制最多输入200字，支持特殊符号。系统将根据该考试ID获取用户的考试结果
+              - paragraph [ref=f1e549]: 5、「考试链接」输入框，必填。限制最多输入1000字，支持特殊符号。前端根据该配置，跳转对应考试H5。未填写时，检验需要toast提示：考试链接不能为空
+              - paragraph [ref=f1e550]: 6、「合格分数」输入框，必填。限制只能输入0～1000的正整数。代表用户在该课程配置的考试ID下完成测试，且分数大于等于配置的合格分数时，才算完成（如同一个考试ID下，同一个用户有多条考试记录，取分数最高）
+              - paragraph [ref=f1e551]
+              - paragraph [ref=f1e552]
+              - paragraph [ref=f1e553]
+          - img [ref=f1e555]
+          - generic [ref=f1e556]:
+            - img [ref=f1e557]
+            - paragraph [ref=f1e559]: "8"
+          - generic [ref=f1e560]:
+            - img [ref=f1e561]
+            - paragraph [ref=f1e563]: "9"
+          - generic [ref=f1e564]:
+            - img [ref=f1e565]
+            - generic [ref=f1e566]:
+              - paragraph [ref=f1e567]: 组队学习（极易学）-内容配置-活动内容保存
+              - paragraph [ref=f1e568]: 1、如多个任务类型类型未填必填项时，按照任务先后进行提示。例：任务一为学习，未填写必填项，任务二为考试，未填写必填项。则提示任务一未填写情况
+              - paragraph [ref=f1e569]
+          - paragraph [ref=f1e573]: 活动管理-组队打卡-组队学习（极易学）-列表页-打卡学习-（新增）作业数据
+          - img [ref=f1e575]
+          - img [ref=f1e579]
+          - img [ref=f1e581]
+          - img [ref=f1e583]
+          - img [ref=f1e585]
+          - img [ref=f1e587]
+          - img [ref=f1e589]
+          - img [ref=f1e591]
+          - img [ref=f1e595]
+          - generic:
+            - img "u789_seg0" [ref=f1e596]
+            - img "u789_seg1" [ref=f1e597]
+            - img "u789_seg2" [ref=f1e598]
+          - generic:
+            - generic [ref=f1e599]:
+              - generic [ref=f1e600]:
+                - img [ref=f1e601]
+                - paragraph [ref=f1e603]: 学员名称
+              - generic [ref=f1e604]:
+                - img [ref=f1e605]
+                - paragraph [ref=f1e607]: 学员卡号
+              - generic [ref=f1e608]:
+                - img [ref=f1e609]
+                - paragraph [ref=f1e611]: 市场
+              - generic [ref=f1e612]:
+                - img [ref=f1e613]
+                - paragraph [ref=f1e615]: 职级
+              - generic [ref=f1e616]:
+                - img [ref=f1e617]
+                - paragraph [ref=f1e619]: 分公司
+              - generic [ref=f1e620]:
+                - img [ref=f1e621]
+                - paragraph [ref=f1e623]: 审核结果
+              - generic [ref=f1e624]:
+                - img [ref=f1e625]
+                - paragraph [ref=f1e627]: 发布时间
+              - generic [ref=f1e628]:
+                - img [ref=f1e629]
+                - paragraph [ref=f1e631]: 任务归属
+              - generic [ref=f1e632]:
+                - img [ref=f1e633]
+                - paragraph [ref=f1e635]: 作业内容（文本）
+              - generic [ref=f1e636]:
+                - img [ref=f1e637]
+                - paragraph [ref=f1e639]: 作业内容（图片）
+              - generic [ref=f1e640]:
+                - img [ref=f1e641]
+                - paragraph [ref=f1e643]: 作业内容（视频）
+              - generic [ref=f1e644]:
+                - img [ref=f1e645]
+                - paragraph [ref=f1e647]: 操作
+              - generic [ref=f1e648]:
+                - img [ref=f1e649]
+                - paragraph [ref=f1e651]: 王平
+              - generic [ref=f1e652]:
+                - img [ref=f1e653]
+                - paragraph [ref=f1e655]: "121000268"
+              - generic [ref=f1e656]:
+                - img [ref=f1e657]
+                - paragraph [ref=f1e659]: 来杨市场
+              - generic [ref=f1e660]:
+                - img [ref=f1e661]
+                - paragraph [ref=f1e663]: 首席业务总监
+              - generic [ref=f1e664]:
+                - img [ref=f1e665]
+                - paragraph [ref=f1e667]: 广东分公司
+              - generic [ref=f1e668]:
+                - img [ref=f1e669]
+                - paragraph [ref=f1e671]: 通过
+              - generic [ref=f1e672]:
+                - img [ref=f1e673]
+                - paragraph [ref=f1e675]: "20260306"
+              - generic [ref=f1e676]:
+                - img [ref=f1e677]
+                - paragraph [ref=f1e679]: 任务一
+              - generic [ref=f1e680]:
+                - img [ref=f1e681]
+                - paragraph [ref=f1e683]: 感谢老师的细心讲解，很多养生知识，很多养生知识…..
+              - img [ref=f1e685]
+              - img [ref=f1e687]
+              - generic [ref=f1e688]:
+                - img [ref=f1e689]
+                - paragraph [ref=f1e691]: 修改审核结果
+              - generic [ref=f1e692]:
+                - img [ref=f1e693]
+                - paragraph [ref=f1e695]: 何小和
+              - generic [ref=f1e696]:
+                - img [ref=f1e697]
+                - paragraph [ref=f1e699]: "333266777"
+              - generic [ref=f1e700]:
+                - img [ref=f1e701]
+                - paragraph [ref=f1e703]: 彭焰市场
+              - generic [ref=f1e704]:
+                - img [ref=f1e705]
+                - paragraph [ref=f1e707]: 乐享二星
+              - generic [ref=f1e708]:
+                - img [ref=f1e709]
+                - paragraph [ref=f1e711]: 广东分公司
+              - generic [ref=f1e712]:
+                - img [ref=f1e713]
+                - paragraph [ref=f1e715]: 不通过
+              - generic [ref=f1e716]:
+                - img [ref=f1e717]
+                - paragraph [ref=f1e719]: "20260306"
+              - generic [ref=f1e720]:
+                - img [ref=f1e721]
+                - paragraph [ref=f1e723]: 任务2
+              - generic [ref=f1e724]:
+                - img [ref=f1e725]
+                - paragraph [ref=f1e727]: 感谢老师的细心讲解，很多养生知识，很多养生知识…..
+              - img [ref=f1e729]
+              - img [ref=f1e731]
+              - generic [ref=f1e732]:
+                - img [ref=f1e733]
+                - paragraph [ref=f1e735]: 修改审核结果
+            - img [ref=f1e737]
+            - generic:
+              - img [ref=f1e739]
+              - img [ref=f1e741]
+            - generic [ref=f1e742]:
+              - img [ref=f1e743]
+              - paragraph [ref=f1e745]: "9"
+            - paragraph [ref=f1e749]: 详情
+            - img [ref=f1e751]
+            - generic [ref=f1e752]:
+              - img [ref=f1e753]
+              - paragraph [ref=f1e755]: "9"
+            - paragraph [ref=f1e759]: 详情
+            - generic:
+              - img [ref=f1e761]
+              - img [ref=f1e763]
+          - paragraph [ref=f1e767]: 任务归属
+          - img [ref=f1e769]
+          - img [ref=f1e771]
+          - img [ref=f1e773]
+          - img [ref=f1e775]
+          - img [ref=f1e777]
+          - generic [ref=f1e778]:
+            - img [ref=f1e779]
+            - paragraph [ref=f1e781]: "10"
+          - generic [ref=f1e782]:
+            - img [ref=f1e783]
+            - paragraph [ref=f1e785]: "11"
+          - generic [ref=f1e786]:
+            - img [ref=f1e787]
+            - paragraph [ref=f1e789]: "12"
+          - generic [ref=f1e790]:
+            - img [ref=f1e791]
+            - paragraph [ref=f1e793]: "13"
+          - generic [ref=f1e794]:
+            - img [ref=f1e795]
+            - paragraph [ref=f1e797]: "14"
+          - generic [ref=f1e798]:
+            - img [ref=f1e799]
+            - generic [ref=f1e800]:
+              - paragraph [ref=f1e801]: 组队学习（极易学）-打卡学习-学习数据
+              - paragraph [ref=f1e802]: 1、路径：opp后台-活动管理-组队打卡-组队学习（极易学）-类型：打卡学习-操作：学习数据
+              - paragraph [ref=f1e803]: 2、学习类型：打卡学习，学习数据，新增【作业数据】tab（原学习类型：社群学习，已有tab）
+              - paragraph [ref=f1e804]
+          - generic [ref=f1e805]:
+            - img [ref=f1e806]
+            - paragraph [ref=f1e808]: "10"
+          - img [ref=f1e810]
+          - paragraph [ref=f1e814]: 导出excel样式
+          - generic [ref=f1e815]:
+            - img [ref=f1e816]
+            - generic [ref=f1e817]:
+              - paragraph [ref=f1e818]: 组队学习（极易学）-打卡学习-学习数据-搜索
+              - paragraph [ref=f1e819]: 1、搜索条件包含任务归属、统计时间、搜索
+              - paragraph [ref=f1e820]: 2、任务归属：根据任务类型进行显示，默认值显示全部；如按照天数，根据配置天数显示：第一天、第二天、第三天…；如按照任务数，根据配置任务数显示：任务一、任务二、任务三
+              - paragraph [ref=f1e821]: 3、统计时间：时间组件，搜索范围为用户在该时间段发布的作业
+              - paragraph [ref=f1e822]: 4、搜索：模糊搜索，支持查询学员名称或学员卡号
+              - paragraph [ref=f1e823]
+          - generic [ref=f1e824]:
+            - img [ref=f1e825]
+            - generic [ref=f1e826]:
+              - paragraph [ref=f1e827]: 组队学习（极易学）-打卡学习-学习数据-统计数据
+              - paragraph [ref=f1e828]: 1、统计数据包含：总发表人数、作业总数量；支持根据搜索条件变化
+              - paragraph [ref=f1e829]: 2、总发表人数，即用户在该打卡活动中发布过的人数，需排重
+              - paragraph [ref=f1e830]: 3、作业总数，即用户在该打卡活动中发布过的作业数量，无需排重，发布1个作业则+1
+              - paragraph [ref=f1e831]
+          - generic [ref=f1e832]:
+            - img [ref=f1e833]
+            - generic [ref=f1e834]:
+              - paragraph [ref=f1e835]: 组队学习（极易学）-打卡学习-学习数据-导出
+              - paragraph [ref=f1e836]: 1、导出数据，主要导出详细数据，包含：学员名称、学员卡号、市场、职级、分公司、发布时间、任务归属、作业内容（文本）、作业内容（图片）、作业内容（视频）
+              - paragraph [ref=f1e837]: 2、作业内容（图片）和作业内容（视频），导出展示为图片/视频的链接（如示意图）
+              - paragraph [ref=f1e838]
+          - generic [ref=f1e839]:
+            - img [ref=f1e840]
+            - paragraph [ref=f1e842]: "11"
+          - generic [ref=f1e843]:
+            - img [ref=f1e844]
+            - paragraph [ref=f1e846]: "12"
+          - generic [ref=f1e847]:
+            - img [ref=f1e848]
+            - paragraph [ref=f1e850]: "13"
+          - generic [ref=f1e851]:
+            - img [ref=f1e852]
+            - generic [ref=f1e853]:
+              - paragraph [ref=f1e854]: 组队学习（极易学）-打卡学习-学习数据-详细数据
+              - paragraph [ref=f1e855]: 1、详细数据包含：学员名称、学员卡号、市场、职级、分公司、发布时间、任务归属、作业内容（文本）、作业内容（图片）、作业内容（视频）
+              - paragraph [ref=f1e856]: 2、学员名称：上报该活动用户对应登录账号的姓名
+              - paragraph [ref=f1e857]: 3、学员卡号：上报该活动用户对应登录账号的卡号
+              - paragraph [ref=f1e858]: 4、市场：上报该活动用户对应登录账号的归属市场
+              - paragraph [ref=f1e859]: 5、职级：上报该活动用户对应登录账号对应的职级
+              - paragraph [ref=f1e860]: 6、分公司：上报该活动用户对应登录账号对应的所属分公司
+              - paragraph [ref=f1e861]: （0325补充）6.1、审核结果：当前直接发布后为审核通过
+              - paragraph [ref=f1e862]: 7、发布时间：上报该活动用户对应登录账号成功发布课后作业的时间
+              - paragraph [ref=f1e863]: 8、任务归属：上报该活动用户对应登录账号成功发布课后作业，该课后作业归属于哪个任务或哪天
+              - paragraph [ref=f1e864]: 9、作业内容（文本）：上报该活动用户对应登录账号成功发布课后作业的文案；文本显示3行，超过3行显示…；鼠标放置文本上，显示全部字段，鼠标移开则隐藏；样式详见下方示意图
+              - paragraph [ref=f1e865]: 10、作业内容（图片）：上报该活动用户对应登录账号成功发布课后作业的图片；显示首张图片，右上角显示照片数量；点击【详情】显示全部图片；如无上传图片显示/，且不显示照片数量和「详情」按钮，样式详见下方示意图
+              - paragraph [ref=f1e866]: 11、作业内容（视频）：上报该活动用户对应登录账号成功发布课后作业的视频，点击视频，则弹出弹窗自动播放视频；如无上传视频显示/，样式详见下方示意图
+              - paragraph [ref=f1e867]: （0325补充）12、操作-修改审核结果：如修改审核结果为不通过，则发布的内容将隐藏，APP端不显示审核内容
+              - paragraph [ref=f1e868]: 注：如用户在APP删除了作业心得，则后台需要同步删除
+          - generic [ref=f1e869]:
+            - img [ref=f1e870]
+            - paragraph [ref=f1e872]: "14"
+          - generic:
+            - generic [ref=f1e873]:
+              - generic [ref=f1e874]:
+                - img [ref=f1e875]
+                - paragraph [ref=f1e877]: 学员名称
+              - generic [ref=f1e878]:
+                - img [ref=f1e879]
+                - paragraph [ref=f1e881]: 学员卡号
+              - generic [ref=f1e882]:
+                - img [ref=f1e883]
+                - paragraph [ref=f1e885]: 市场
+              - generic [ref=f1e886]:
+                - img [ref=f1e887]
+                - paragraph [ref=f1e889]: 职级
+              - generic [ref=f1e890]:
+                - img [ref=f1e891]
+                - paragraph [ref=f1e893]: 分公司
+              - generic [ref=f1e894]:
+                - img [ref=f1e895]
+                - paragraph [ref=f1e897]: 审核结果
+              - generic [ref=f1e898]:
+                - img [ref=f1e899]
+                - paragraph [ref=f1e901]: 发布时间
+              - generic [ref=f1e902]:
+                - img [ref=f1e903]
+                - paragraph [ref=f1e905]: 任务归属
+              - generic [ref=f1e906]:
+                - img [ref=f1e907]
+                - paragraph [ref=f1e909]: 作业内容（文本）
+              - generic [ref=f1e910]:
+                - img [ref=f1e911]
+                - paragraph [ref=f1e913]: 作业内容（图片）
+              - generic [ref=f1e914]:
+                - img [ref=f1e915]
+                - paragraph [ref=f1e917]: 作业内容（视频）
+              - generic [ref=f1e918]:
+                - img [ref=f1e919]
+                - paragraph [ref=f1e921]: 操作
+              - generic [ref=f1e922]:
+                - img [ref=f1e923]
+                - paragraph [ref=f1e925]: 王平
+              - generic [ref=f1e926]:
+                - img [ref=f1e927]
+                - paragraph [ref=f1e929]: "121000268"
+              - generic [ref=f1e930]:
+                - img [ref=f1e931]
+                - paragraph [ref=f1e933]: 来杨市场
+              - generic [ref=f1e934]:
+                - img [ref=f1e935]
+                - paragraph [ref=f1e937]: 首席业务总监
+              - generic [ref=f1e938]:
+                - img [ref=f1e939]
+                - paragraph [ref=f1e941]: 广东分公司
+              - generic [ref=f1e942]:
+                - img [ref=f1e943]
+                - paragraph [ref=f1e945]: 通过
+              - generic [ref=f1e946]:
+                - img [ref=f1e947]
+                - paragraph [ref=f1e949]: "20260306"
+              - generic [ref=f1e950]:
+                - img [ref=f1e951]
+                - paragraph [ref=f1e953]: 任务一
+              - generic [ref=f1e954]:
+                - img [ref=f1e955]
+                - paragraph [ref=f1e957]: 感谢老师的细心讲解，很多养生知识，很多养生知识…..
+              - img [ref=f1e959]
+              - img [ref=f1e961]
+              - generic [ref=f1e962]:
+                - img [ref=f1e963]
+                - paragraph [ref=f1e965]: 修改审核结果
+              - generic [ref=f1e966]:
+                - img [ref=f1e967]
+                - paragraph [ref=f1e969]: 何小和
+              - generic [ref=f1e970]:
+                - img [ref=f1e971]
+                - paragraph [ref=f1e973]: "333266777"
+              - generic [ref=f1e974]:
+                - img [ref=f1e975]
+                - paragraph [ref=f1e977]: 彭焰市场
+              - generic [ref=f1e978]:
+                - img [ref=f1e979]
+                - paragraph [ref=f1e981]: 乐享二星
+              - generic [ref=f1e982]:
+                - img [ref=f1e983]
+                - paragraph [ref=f1e985]: 广东分公司
+              - generic [ref=f1e986]:
+                - img [ref=f1e987]
+                - paragraph [ref=f1e989]: 通过
+              - generic [ref=f1e990]:
+                - img [ref=f1e991]
+                - paragraph [ref=f1e993]: "20260306"
+              - generic [ref=f1e994]:
+                - img [ref=f1e995]
+                - paragraph [ref=f1e997]: 任务2
+              - generic [ref=f1e998]:
+                - img [ref=f1e999]
+                - paragraph [ref=f1e1001]: 感谢老师的细心讲解，很多养生知识，很多养生知识…..
+              - generic [ref=f1e1002]:
+                - img [ref=f1e1003]
+                - paragraph [ref=f1e1005]: /
+              - generic [ref=f1e1006]:
+                - img [ref=f1e1007]
+                - paragraph [ref=f1e1009]: /
+              - generic [ref=f1e1010]:
+                - img [ref=f1e1011]
+                - paragraph [ref=f1e1013]: 修改审核结果
+            - img [ref=f1e1015]
+            - generic:
+              - img [ref=f1e1017]
+              - img [ref=f1e1019]
+            - generic [ref=f1e1020]:
+              - img [ref=f1e1021]
+              - paragraph [ref=f1e1023]: "9"
+            - paragraph [ref=f1e1027]: 详情
+          - paragraph [ref=f1e1031]: 样式示意
+          - generic:
+            - img [ref=f1e1033]
+            - paragraph [ref=f1e1037]: 感谢老师的细心讲解，很多养生知识，很多养生知识，很多知识
+          - generic:
+            - generic [ref=f1e1040]:
+              - img [ref=f1e1041]
+              - paragraph [ref=f1e1043]: X
+            - img [ref=f1e1045]
+            - img [ref=f1e1047]
+            - img [ref=f1e1049]
+            - img [ref=f1e1051]
+            - img [ref=f1e1053]
+            - img [ref=f1e1055]
+            - img [ref=f1e1057]
+            - img [ref=f1e1059]
+            - img [ref=f1e1061]
+            - paragraph [ref=f1e1065]: 作业内容（图片）
+          - img [ref=f1e1067]
+          - generic:
+            - img "u927_seg0" [ref=f1e1068]
+            - img "u927_seg1" [ref=f1e1069]
+            - img "u927_seg2" [ref=f1e1070]
+            - paragraph [ref=f1e1072]: 点击详情
+          - img [ref=f1e1074]
+          - img [ref=f1e1076]
+          - generic:
+            - img "u930_seg0" [ref=f1e1077]
+            - img "u930_seg1" [ref=f1e1078]
+            - img "u930_seg2" [ref=f1e1079]
+            - img "u930_seg3" [ref=f1e1080]
+            - paragraph [ref=f1e1082]: 点击单张图片
+          - img [ref=f1e1084]
+          - img [ref=f1e1086]
+          - generic:
+            - img "u933_seg0" [ref=f1e1087]
+            - img "u933_seg1" [ref=f1e1088]
+            - img "u933_seg2" [ref=f1e1089]
+            - paragraph [ref=f1e1091]: 点击视频
+          - img [ref=f1e1093]
+          - generic [ref=f1e1094]:
+            - img [ref=f1e1095]
+            - paragraph [ref=f1e1097]: "4.1"
+          - generic [ref=f1e1098]:
+            - img [ref=f1e1099]
+            - generic [ref=f1e1100]:
+              - paragraph [ref=f1e1101]: 组队学习（极易学）-基础配置
+              - paragraph [ref=f1e1102]: 1、路径：opp后台-活动管理-组队打卡-组队学习（极易学）-全部活动类型
+              - paragraph [ref=f1e1103]: 2、「活动分类」，本次调整，如不配置，则在APP-学习活动页面，热门活动-全部tab模块中不显示该活动
+          - generic [ref=f1e1104]:
+            - img [ref=f1e1105]
+            - paragraph [ref=f1e1107]: "4.1"
+          - img [ref=f1e1111]
+          - generic:
+            - paragraph [ref=f1e1115]: 任务类型：
+            - generic:
+              - img [ref=f1e1117]
+              - paragraph [ref=f1e1121]: 考试（支持卷王）
+            - generic:
+              - img [ref=f1e1123]
+              - paragraph [ref=f1e1127]: 学习
+            - generic:
+              - img [ref=f1e1129]
+              - paragraph [ref=f1e1133]: 调研（支持体验家/卷王）
+          - generic [ref=f1e1134]:
+            - img [ref=f1e1135]
+            - paragraph [ref=f1e1137]: "6"
+          - img [ref=f1e1139]
+          - generic:
+            - paragraph [ref=f1e1143]: "* 任务开启日期："
+            - img [ref=f1e1145]
+          - generic:
+            - paragraph [ref=f1e1149]: "* 任务名称："
+            - paragraph [ref=f1e1155]: 0/20
+          - generic:
+            - generic [ref=f1e1156]:
+              - img [ref=f1e1157]
+              - paragraph [ref=f1e1159]: "* 任务进行中按钮文案："
+            - paragraph [ref=f1e1163]: 去学习
+            - paragraph [ref=f1e1167]: 3/4
+          - generic [ref=f1e1168]:
+            - img [ref=f1e1169]
+            - paragraph [ref=f1e1171]: "7.1"
+          - generic:
+            - generic [ref=f1e1172]:
+              - img [ref=f1e1173]
+              - generic [ref=f1e1174]:
+                - paragraph [ref=f1e1175]: 组队学习（极易学）-内容配置-任务类型：学习-学习内容
+                - paragraph [ref=f1e1176]: （0318调整，暂不需要支持）1、「学习内容」本期改动需支持上传图片格式
+                - list [ref=f1e1177]:
+                  - listitem [ref=f1e1178]: 范围：组队活动（极易学）全部类型活动
+                  - listitem [ref=f1e1179]: 路径：组队学习（极易学）-内容配置-学习内容-新建内容-点击上传
+                  - listitem [ref=f1e1180]: 沿用现有上传功能，增加支持图片格式：jpg、jpeg、png，默认文案改为：支持的文件格式：jpg、jpeg、png、mp3、mp4格式；详见右侧示例图
+            - paragraph [ref=f1e1184] [cursor=pointer]: 点击打开
+            - paragraph [ref=f1e1188]: 历史方案
+          - img [ref=f1e1190]
+          - paragraph [ref=f1e1194]: 调整后样式
+          - paragraph [ref=f1e1198]: jpg、jpeg、png、mp3、mp4格式
+          - generic [ref=f1e1199]:
+            - img [ref=f1e1200]
+            - paragraph [ref=f1e1202]: 变动
+          - img [ref=f1e1204]
+          - img [ref=f1e1206]
+          - img [ref=f1e1208]
+          - img [ref=f1e1210]
+          - generic [ref=f1e1211]:
+            - img [ref=f1e1212]
+            - paragraph [ref=f1e1214]: 0318调整本期不对接卷王
+          - generic [ref=f1e1215]:
+            - img [ref=f1e1216]
+            - paragraph [ref=f1e1218]: 0318调整本期暂不需要支持
+          - img [ref=f1e1220]
+          - generic [ref=f1e1221]:
+            - img [ref=f1e1222]
+            - paragraph [ref=f1e1224]: "2.1"
+          - generic [ref=f1e1225]:
+            - img [ref=f1e1226]
+            - generic [ref=f1e1227]:
+              - paragraph [ref=f1e1228]: （0325补充）组队学习（极易学）-编辑/新增活动
+              - paragraph [ref=f1e1229]: 1、路径：opp后台-活动管理-组队打卡-组队学习（极易学）
+              - paragraph [ref=f1e1230]: 2、原支持终端：腾讯小程，调整文案为支持终端：APP；原应用端：极易学，调整文案为应用端：APP-学习
+          - generic [ref=f1e1231]:
+            - img [ref=f1e1232]
+            - paragraph [ref=f1e1234]: "2.1"
+          - generic [ref=f1e1235]:
+            - img [ref=f1e1236]
+            - generic [ref=f1e1237]:
+              - paragraph [ref=f1e1238]: （0325补充）复制范围说明
+              - paragraph [ref=f1e1239]: 1、列表页面复制字段支持：活动名称、应用端、上架时间、开始时问/结束时间、类型
+              - paragraph [ref=f1e1240]: 2、编辑/新增活动
+              - paragraph [ref=f1e1241]: 1、基础配置-基础信息：支持终端、应用端、活动类型、主题名称、活动日期、打卡数量、成功邀请好友获得、所属栏目、活动标签、活动分类、投放文件
+              - paragraph [ref=f1e1242]: 2、基础配置-参与范围：发起人权限、参与人权限、是否支持复制发布/参与活动
+              - paragraph [ref=f1e1243]: 3、页面装修-页面信息：虚拟参与人数、打卡提醒备注、学习封面图、报名页面介绍、活动页宣传图、课件下载操作说明、发起活动说明
+              - paragraph [ref=f1e1244]: 4、页面装修-证书信息：证书名称、活动证书、证书显示文案
+              - paragraph [ref=f1e1245]: 5、页面装修-分享：学习广告图、分享海报、分享海报文案、活动卡片文案、活动发布成功海报、活动加入成功海报、
+              - paragraph [ref=f1e1246]: 6、活动内容-基础信息：按天数显示/按任务显示、任务类型、任务名称、课程标题、任务奖励、学习内容描述、学习内容、学习课件、课后习题、课后作业、任务进行中按钮文案、任务开启日期、是否必填、来源、问卷链接
+              - paragraph [ref=f1e1247]: 7、打卡内容：打卡成功文案、打卡成功海报
+          - img [ref=f1e1249]
+          - generic:
+            - generic:
+              - generic [ref=f1e1252]:
+                - img [ref=f1e1253]
+                - paragraph [ref=f1e1255]: X
+              - paragraph [ref=f1e1259]: 修改审核结果
+            - generic [ref=f1e1260]:
+              - generic:
+                - img [ref=f1e1261]
+                - paragraph [ref=f1e1263]: 通过
+              - radio "通过" [checked]
+            - generic [ref=f1e1264]:
+              - generic:
+                - img [ref=f1e1265]
+                - paragraph [ref=f1e1267]: 不通过
+              - radio "不通过"
+            - paragraph [ref=f1e1271]: 审核结果：
+            - img [ref=f1e1273]
+          - generic:
+            - img "u996_seg0" [ref=f1e1274]
+            - img "u996_seg1" [ref=f1e1275]
+            - img "u996_seg2" [ref=f1e1276]
+          - img [ref=f1e1278]
+          - img [ref=f1e1280]
+          - generic:
+            - img "u999_seg0" [ref=f1e1281]
+            - img "u999_seg1" [ref=f1e1282]
+            - img "u999_seg2" [ref=f1e1283]
+          - paragraph [ref=f1e1287]: 活动管理-组队打卡-组队学习（极易学）-列表页-组队学习-（变动）作业数据
+          - generic [ref=f1e1288]:
+            - generic [ref=f1e1289]:
+              - img [ref=f1e1290]
+              - paragraph [ref=f1e1292]: 审核结果
+            - generic [ref=f1e1293]:
+              - img [ref=f1e1294]
+              - paragraph [ref=f1e1296]: 操作
+            - generic [ref=f1e1297]:
+              - img [ref=f1e1298]
+              - paragraph [ref=f1e1300]: 通过
+            - generic [ref=f1e1301]:
+              - img [ref=f1e1302]
+              - paragraph [ref=f1e1304]: 修改审核结果
+            - generic [ref=f1e1305]:
+              - img [ref=f1e1306]
+              - paragraph [ref=f1e1308]: 通过
+            - generic [ref=f1e1309]:
+              - img [ref=f1e1310]
+              - paragraph [ref=f1e1312]: 修改审核结果
+            - generic [ref=f1e1313]:
+              - img [ref=f1e1314]
+              - paragraph [ref=f1e1316]: 通过
+            - generic [ref=f1e1317]:
+              - img [ref=f1e1318]
+              - paragraph [ref=f1e1320]: 修改审核结果
+          - img [ref=f1e1322]
+          - generic [ref=f1e1323]:
+            - img [ref=f1e1324]
+            - paragraph [ref=f1e1326]: "15"
+          - generic [ref=f1e1327]:
+            - img [ref=f1e1328]
+            - generic [ref=f1e1329]:
+              - paragraph [ref=f1e1330]: （0325补充）组队学习（极易学）-组队学习-学习数据-详细数据
+              - paragraph [ref=f1e1331]: 1、审核结果：当前直接发布后为审核通过
+              - paragraph [ref=f1e1332]: 2、操作-修改审核结果：如修改审核结果为不通过，则发布的内容将隐藏，APP端不显示审核内容
+              - paragraph [ref=f1e1333]: 注：如用户在APP删除了作业心得，则后台需要同步删除
+          - generic [ref=f1e1334]:
+            - img [ref=f1e1335]
+            - paragraph [ref=f1e1337]: "15"
+          - paragraph [ref=f1e1341]: dev环境-体验家问卷：https://www.xmplus.cn/lite/5623019797128192
+          - img [ref=f1e1343]
+          - generic [ref=f1e1344]:
+            - img [ref=f1e1345]
+            - paragraph [ref=f1e1347]: "10"
+          - paragraph [ref=f1e1351]: "* 分享按钮文案"
+          - generic:
+            - paragraph [ref=f1e1357]: 邀请好友领积分
+            - paragraph [ref=f1e1361]: 7/10
+          - generic [ref=f1e1362]:
+            - img [ref=f1e1363]
+            - generic [ref=f1e1364]:
+              - paragraph [ref=f1e1365]: （0416调整）组队学习（极易学）-编辑/新增活动
+              - paragraph [ref=f1e1366]: 1、路径：opp后台-活动管理-组队打卡-组队学习（极易学）-页面装修配置
+              - paragraph [ref=f1e1367]: 2、分享按钮文案
+              - list [ref=f1e1368]:
+                - listitem [ref=f1e1369]: 适配范围：【打卡学习类型-随时解锁】的活动详情页底部分享按钮、【组队学习类型-随时解锁】页面的活动详情页底部分享按钮，全部活动类型的活动介绍页面底部按钮
+                - listitem [ref=f1e1370]: 分享文案按钮：默认文案：邀请好友领积分；输入格式：支持中英数特殊符合，emj表情，最多支持10个字
+          - generic [ref=f1e1371]:
+            - img [ref=f1e1372]
+            - paragraph [ref=f1e1374]: "10"

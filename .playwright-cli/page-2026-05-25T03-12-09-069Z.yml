@@ -1,0 +1,136 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - paragraph [ref=e6]: OpenSpec Delivery Console
+      - heading "AI 需求交付控制台" [level=1] [ref=e7]
+    - button "刷新" [ref=e8] [cursor=pointer]:
+      - img [ref=e10]
+      - generic [ref=e12]: 刷新
+  - main [ref=e13]:
+    - generic [ref=e14]:
+      - generic [ref=e15]:
+        - generic [ref=e16]:
+          - generic [ref=e17]:
+            - strong [ref=e18]: 【无需求】api/v2/coursePlan/getPlanCoursePage接口优化
+            - paragraph [ref=e19]: 需求号 171634 · bugfix/opp-171634
+          - generic [ref=e20]:
+            - button "刷新产物" [ref=e21] [cursor=pointer]:
+              - img [ref=e23]
+              - generic [ref=e25]: 刷新产物
+            - button "返回列表" [ref=e26] [cursor=pointer]:
+              - img [ref=e28]
+              - generic [ref=e31]: 返回列表
+        - generic "阶段时间线" [ref=e32]:
+          - button "1 PRD 草稿" [ref=e33] [cursor=pointer]:
+            - generic [ref=e34]: "1"
+            - generic [ref=e35]:
+              - strong [ref=e36]: PRD
+              - generic [ref=e37]: 草稿
+          - button "2 技术方案 未开始" [ref=e38] [cursor=pointer]:
+            - generic [ref=e39]: "2"
+            - generic [ref=e40]:
+              - strong [ref=e41]: 技术方案
+              - generic [ref=e42]: 未开始
+          - button "3 实施验证 未开始" [ref=e43] [cursor=pointer]:
+            - generic [ref=e44]: "3"
+            - generic [ref=e45]:
+              - strong [ref=e46]: 实施验证
+              - generic [ref=e47]: 未开始
+          - button "4 代码评审 未开始" [ref=e48] [cursor=pointer]:
+            - generic [ref=e49]: "4"
+            - generic [ref=e50]:
+              - strong [ref=e51]: 代码评审
+              - generic [ref=e52]: 未开始
+      - generic [ref=e53]:
+        - main [ref=e54]:
+          - generic [ref=e55]:
+            - generic [ref=e56]:
+              - generic [ref=e57]:
+                - strong [ref=e58]: PRD
+                - paragraph [ref=e59]: 产品生成并二次编辑 PRD，审核通过后进入技术方案。
+              - generic [ref=e60]:
+                - generic [ref=e62] [cursor=pointer]:
+                  - generic:
+                    - combobox [ref=e64]
+                    - generic [ref=e65]: Codex
+                  - img [ref=e68]
+                - generic [ref=e71] [cursor=pointer]:
+                  - generic:
+                    - combobox [ref=e73]
+                    - generic [ref=e74]: 后台执行
+                  - img [ref=e77]
+                - button "审核" [ref=e79] [cursor=pointer]:
+                  - img [ref=e81]
+                  - generic [ref=e83]: 审核
+                - button "本步骤日志" [ref=e84] [cursor=pointer]:
+                  - img [ref=e86]
+                  - generic [ref=e88]: 本步骤日志
+            - generic [ref=e90]:
+              - generic [ref=e91]:
+                - textbox "填写 PRD 澄清描述，对应 coding-prd-analyzer 的 c 参数，例如范围边界、排除项、业务前提" [ref=e92]
+                - generic [ref=e93]: 0 / 500
+              - textbox "填写外部 PRD 来源，每行一个，例如飞书、设计稿或在线文档链接" [ref=e95]: https://infinitus-devops.coding.net/p/opp/bug-tracking/issues/171634/detail
+              - generic [ref=e97]:
+                - button "上传本地文件" [ref=e98] [cursor=pointer]:
+                  - img [ref=e100]
+                  - generic [ref=e102]: 上传本地文件
+                - generic [ref=e103]: 支持 PDF、图片、Markdown，上传后快照到 PRD file 目录。
+              - button "生成 PRD" [ref=e104] [cursor=pointer]:
+                - img [ref=e106]
+                - generic [ref=e108]: 生成 PRD
+              - generic [ref=e109]:
+                - generic [ref=e110]:
+                  - generic [ref=e111]:
+                    - strong [ref=e112]: PRD 文档
+                    - paragraph [ref=e113]: docs/171634/prd/analysis.md
+                  - generic [ref=e114]:
+                    - button "读取" [ref=e115] [cursor=pointer]:
+                      - img [ref=e117]
+                      - generic [ref=e119]: 读取
+                    - button "下载" [disabled] [ref=e120]:
+                      - img [ref=e122]
+                      - generic [ref=e124]: 下载
+                    - button "保存" [ref=e125] [cursor=pointer]:
+                      - img [ref=e127]
+                      - generic [ref=e129]: 保存
+                - generic [ref=e130]:
+                  - textbox [ref=e133]
+                  - generic [ref=e134]:
+                    - generic [ref=e135]:
+                      - generic [ref=e136]: 预览
+                      - button "全屏预览" [ref=e137] [cursor=pointer]:
+                        - img [ref=e139]
+                    - article [ref=e141]
+        - complementary [ref=e142]:
+          - generic [ref=e143]:
+            - strong [ref=e144]: 产物与问题
+            - button "刷新" [ref=e145] [cursor=pointer]:
+              - img [ref=e147]
+              - generic [ref=e149]: 刷新
+          - generic [ref=e153]:
+            - button "PRD 分析文档 未生成" [ref=e154] [cursor=pointer]:
+              - generic [ref=e155]: PRD 分析文档
+              - generic [ref=e156]: 未生成
+            - button "PRD 分析文档（旧路径） 未生成" [ref=e157] [cursor=pointer]:
+              - generic [ref=e158]: PRD 分析文档（旧路径）
+              - generic [ref=e159]: 未生成
+            - button "技术方案评审文档 未生成" [ref=e160] [cursor=pointer]:
+              - generic [ref=e161]: 技术方案评审文档
+              - generic [ref=e162]: 未生成
+            - button "OpenSpec Change 未生成" [ref=e163] [cursor=pointer]:
+              - generic [ref=e164]: OpenSpec Change
+              - generic [ref=e165]: 未生成
+            - button "OpenSpec Proposal 未生成" [ref=e166] [cursor=pointer]:
+              - generic [ref=e167]: OpenSpec Proposal
+              - generic [ref=e168]: 未生成
+            - button "OpenSpec Design 未生成" [ref=e169] [cursor=pointer]:
+              - generic [ref=e170]: OpenSpec Design
+              - generic [ref=e171]: 未生成
+            - button "OpenSpec Tasks 未生成" [ref=e172] [cursor=pointer]:
+              - generic [ref=e173]: OpenSpec Tasks
+              - generic [ref=e174]: 未生成
+          - generic [ref=e175]:
+            - strong [ref=e176]: 评审问题
+            - generic [ref=e177]:
+              - img [ref=e179]
+              - paragraph [ref=e196]: 暂无问题

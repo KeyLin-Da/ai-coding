@@ -50,6 +50,10 @@ function technicalDesignDocumentPath(workflow: RequirementWorkflow, params: Reco
   return artifactPath || workflow.stages.TECH_DESIGN.artifactPath || `docs/${workflow.requirementId}/technical-design/design_review.md`;
 }
 
+function projectParam(workflow: RequirementWorkflow): string {
+  return (workflow.projects || []).map((project) => project.path || project.name).filter(Boolean).join(',');
+}
+
 function buildSkillCommand(workflow: RequirementWorkflow, action: ActionInput): string {
   const params = action.params || {};
   const requirementId = workflow.requirementId;
@@ -60,12 +64,13 @@ function buildSkillCommand(workflow: RequirementWorkflow, action: ActionInput): 
   const branchName = asString(params.branchName, workflow.branchName || '');
   const changeName = asString(params.changeName, workflow.stages.IMPLEMENTATION.changeName || `req-${requirementId}`);
   const clarification = asString(params.clarification);
+  const projects = projectParam(workflow);
 
   switch (action.actionType) {
     case 'PRD_ANALYZE':
       return `/coding-prd-analyzer id=${requirementId}${prdClarification ? ` c=${prdClarification}` : ''}${sources ? ` ${sources}` : ''}`;
     case 'DESIGN_GENERATE':
-      return `/coding-design d=${prdDocumentPath(workflow, params)} r=${requirementId}${clarification ? ` c=${clarification}` : ''}`;
+      return `/coding-design d=${prdDocumentPath(workflow, params)} r=${requirementId}${projects ? ` p=${projects}` : ''}${clarification ? ` c=${clarification}` : ''}`;
     case 'JUNIT_GENERATE':
       return `generate-unit-test ${moduleName || '<module-name>'}${description ? ` "${description}"` : ''}`;
     case 'CODE_REVIEW':

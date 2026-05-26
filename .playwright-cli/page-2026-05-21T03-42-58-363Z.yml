@@ -1,0 +1,45 @@
+- generic [active]:
+  - generic:
+    - generic:
+      - generic:
+        - generic:
+          - generic [ref=e1]:
+            - generic [ref=e2]:
+              - region "Prototype controls": Skip to content Continue with Google
+              - generic [ref=e3]:
+                - generic [ref=e4]:
+                  - generic [ref=e5]:
+                    - main:
+                      - paragraph [ref=e6]: Screenreader support is currently disabled. To enable it, use the Accessibility settings from the Options menu.
+                  - generic:
+                    - navigation "Pages":
+                      - generic:
+                        - toolbar "Stepper":
+                          - generic:
+                            - generic:
+                              - generic: 1 / 1
+                      - generic:
+                        - button "Restart":
+                          - img
+                          - text: Restart
+                          - generic: R
+                - text: Give feedback, ask a question, or just leave a note of appreciation. Click anywhere in the file to leave a comment.
+            - region "Consent Manager" [ref=e11]:
+              - generic [ref=e12]:
+                - text: This website uses cookies, pixel tags, and local storage for performance, personalization, and marketing purposes. We use our own cookies and some from third parties. Only essential cookies are turned on by default.
+                - link "Cookies settings" [ref=e13]:
+                  - /url: /consent-preferences/
+              - generic [ref=e14]:
+                - button "Do not allow cookies" [ref=e15]:
+                  - generic:
+                    - generic:
+                      - generic: Do not allow cookies
+                - button "Allow all cookies" [ref=e16]:
+                  - generic:
+                    - generic:
+                      - generic: Allow all cookies
+              - button [ref=e18]:
+                - img [ref=e20]
+          - group [ref=e41]:
+            - alert [ref=e43]
+            - alert [ref=e45]

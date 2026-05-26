@@ -1,0 +1,25 @@
+Total messages: 23 (Errors: 3, Warnings: 1)
+Returning 15 messages for level "info"
+
+[LOG] Running frontend commit 621f18592ff7dc951c830de7458ae23fcea2d744 @ https://www.figma.com/proto/w4SWNBKZc84H07MktT2mtR/%E3%80%90%E4%BD%8E%E4%BF%9D%E3%80%91%E6%96%B0%E5%A2%9E%E5%AE%9A%E4%BD%8D%E8%8F%9C%E5%8D%95%E8%A3%85%E4%BF%AE%E7%BB%84%E4%BB%B6?node-id=5-42&t=VUDEYgYAqEACJ6GU-0&scaling=min-zoom&content-scaling=fixed&page-id=0%3A1:505
+[WARNING] Statsig is not ready to log exposures, will retry in 1 seconds @ https://www.figma.com/webpack-artifacts/assets/vendor-core-1e44c283e4ec92dd.min.js.br:53
+[ERROR] Failed to load resource: the server responded with a status of 401 () @ https://www.figma.com/api/statsig/v1_ruleset:0
+[ERROR] Failed to fetch v1 ruleset: w: XHR for "/api/statsig/v1_ruleset" failed with status 401
+    at P (https://www.figma.com/webpack-artifacts/assets/3730-3b7f1ccd632c68eb.min.js.br:1418:10906)
+    at async Object.O [as get] (https://www.figma.com/webpack-artifacts/assets/3730-3b7f1ccd632c68eb.min.js.br:1418:11289)
+    at async https://www.figma.com/webpack-artifacts/assets/9820-8b06d26d1428f771.min.js.br:145:93709
+    at async g.validate (https://www.figma.com/webpack-artifacts/assets/3730-3b7f1ccd632c68eb.min.js.br:1398:5067)
+    at async b (https://www.figma.com/webpack-artifacts/assets/3730-3b7f1ccd632c68eb.min.js.br:1379:170174)
+    at async A (https://www.figma.com/webpack-artifacts/assets/3730-3b7f1ccd632c68eb.min.js.br:1379:169378)
+    at async Object.write (https://www.figma.com/webpack-artifacts/assets/3730-3b7f1ccd632c68eb.min.js.br:1379:168997) @ https://www.figma.com/webpack-artifacts/assets/vendor-core-1e44c283e4ec92dd.min.js.br:53
+[INFO] [PrototypeLib] Booting... (emscripten version 4.0.21) @ https://www.figma.com/webpack-artifacts/assets/vendor-core-1e44c283e4ec92dd.min.js.br:53
+[INFO] [GPU] graphicsAPI:"WebGL 2", vendor:"Google Inc. (Apple)", renderer:"ANGLE (Apple, ANGLE Metal Renderer: Apple M2, Unspecified Version)" version:"OpenGL ES 2.0 (WebGL 2.0 (OpenGL ES 3.0 Chromium))" @ https://www.figma.com/webpack-artifacts/assets/vendor-core-1e44c283e4ec92dd.min.js.br:53
+[LOG] [import] git: 2db2bc0ab9934eb10c6ee50419eeb9d515558057, stamp: 08574C3C9F5E6669 @ https://www.figma.com/webpack-artifacts/assets/vendor-core-1e44c283e4ec92dd.min.js.br:53
+[VERBOSE] Rendering was performed in a subtree hidden by content-visibility. @ :3102
+[VERBOSE] Rendering was performed in a subtree hidden by content-visibility. @ :2756
+[VERBOSE] Rendering was performed in a subtree hidden by content-visibility. @ :2756
+[VERBOSE] Rendering was performed in a subtree hidden by content-visibility. @ :2756
+[VERBOSE] Rendering was performed in a subtree hidden by content-visibility. @ :2756
+[VERBOSE] Rendering was performed in a subtree hidden by content-visibility. @ :2756
+[VERBOSE] Rendering was performed in a subtree hidden by content-visibility. @ :2756
+[ERROR] Failed to load resource: the server responded with a status of 401 () @ https://www.figma.com/api/files/w4SWNBKZc84H07MktT2mtR/prototype/view:0

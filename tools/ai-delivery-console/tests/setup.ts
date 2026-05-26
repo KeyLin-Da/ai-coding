@@ -22,6 +22,21 @@ config.global.stubs = {
   ElOption: {
     template: '<option><slot /></option>'
   },
+  ElTabs: {
+    template: '<div><slot /></div>'
+  },
+  ElTabPane: {
+    template: '<div><slot name="label" /><slot /></div>'
+  },
+  ElAlert: {
+    template: '<div />'
+  },
+  ElRadioGroup: {
+    template: '<div><slot /></div>'
+  },
+  ElRadioButton: {
+    template: '<button><slot /></button>'
+  },
   ElDrawer: {
     template: '<div><slot /></div>'
   },

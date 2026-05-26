@@ -1,0 +1,632 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - paragraph [ref=e6]: OpenSpec Delivery Console
+      - heading "AI 需求交付控制台" [level=1] [ref=e7]
+    - button "刷新" [ref=e8] [cursor=pointer]:
+      - img [ref=e10]
+      - generic [ref=e12]: 刷新
+  - main [ref=e13]:
+    - generic [ref=e14]:
+      - generic [ref=e15]:
+        - generic [ref=e16]:
+          - generic [ref=e17]:
+            - strong [ref=e18]: 【opp】【装修】新增定位菜单组件
+            - paragraph [ref=e19]: 需求号 172014 · feature/opp-172014
+          - generic [ref=e20]:
+            - button "刷新产物" [ref=e21] [cursor=pointer]:
+              - img [ref=e23]
+              - generic [ref=e25]: 刷新产物
+            - button "返回列表" [ref=e26] [cursor=pointer]:
+              - img [ref=e28]
+              - generic [ref=e31]: 返回列表
+        - generic "阶段时间线" [ref=e32]:
+          - button "1 PRD 已通过" [ref=e33] [cursor=pointer]:
+            - generic [ref=e34]: "1"
+            - generic [ref=e35]:
+              - strong [ref=e36]: PRD
+              - generic [ref=e37]: 已通过
+          - button "2 技术方案 草稿" [ref=e38] [cursor=pointer]:
+            - generic [ref=e39]: "2"
+            - generic [ref=e40]:
+              - strong [ref=e41]: 技术方案
+              - generic [ref=e42]: 草稿
+          - button "3 实施验证 未开始" [ref=e43] [cursor=pointer]:
+            - generic [ref=e44]: "3"
+            - generic [ref=e45]:
+              - strong [ref=e46]: 实施验证
+              - generic [ref=e47]: 未开始
+          - button "4 代码评审 未开始" [ref=e48] [cursor=pointer]:
+            - generic [ref=e49]: "4"
+            - generic [ref=e50]:
+              - strong [ref=e51]: 代码评审
+              - generic [ref=e52]: 未开始
+      - generic [ref=e53]:
+        - main [ref=e54]:
+          - generic [ref=e55]:
+            - generic [ref=e56]:
+              - generic [ref=e57]:
+                - strong [ref=e58]: 技术方案
+                - paragraph [ref=e59]: 架构师生成技术方案，审核通过后解锁实施。
+              - generic [ref=e60]:
+                - generic [ref=e62] [cursor=pointer]:
+                  - generic:
+                    - combobox [ref=e64]
+                    - generic [ref=e65]: Codex
+                  - img [ref=e68]
+                - generic [ref=e71] [cursor=pointer]:
+                  - generic:
+                    - combobox [ref=e73]
+                    - generic [ref=e74]: 后台执行
+                  - img [ref=e77]
+                - button "审核" [ref=e79] [cursor=pointer]:
+                  - img [ref=e81]
+                  - generic [ref=e83]: 审核
+                - button "本步骤日志" [ref=e84] [cursor=pointer]:
+                  - img [ref=e86]
+                  - generic [ref=e88]: 本步骤日志
+            - generic [ref=e90]:
+              - table [ref=e93]:
+                - rowgroup [ref=e94]:
+                  - row "PRD 文档 docs/172014/prd/analysis.md" [ref=e95]:
+                    - cell "PRD 文档" [ref=e96]
+                    - cell "docs/172014/prd/analysis.md" [ref=e97]
+              - generic [ref=e98]:
+                - textbox "填写评审意见或补充说明，对应 coding-design 的 c 参数（可选），用于二次评审时提供修改建议" [ref=e99]
+                - generic [ref=e100]: 0 / 500
+              - button "生成技术方案" [ref=e101] [cursor=pointer]:
+                - img [ref=e103]
+                - generic [ref=e105]: 生成技术方案
+              - generic [ref=e106]:
+                - generic [ref=e107]:
+                  - generic [ref=e108]:
+                    - strong [ref=e109]: 技术方案
+                    - paragraph [ref=e110]: docs/172014/technical-design/design_review.md
+                  - generic [ref=e111]:
+                    - button "读取" [ref=e112] [cursor=pointer]:
+                      - img [ref=e114]
+                      - generic [ref=e116]: 读取
+                    - button "下载" [ref=e117] [cursor=pointer]:
+                      - img [ref=e119]
+                      - generic [ref=e121]: 下载
+                    - button "保存" [ref=e122] [cursor=pointer]:
+                      - img [ref=e124]
+                      - generic [ref=e126]: 保存
+                - generic [ref=e127]:
+                  - textbox [ref=e130]: "# 172014 技术方案评审：【opp】【装修】新增定位菜单组件 > 需求编号：172014 > OpenSpec 变更：`req-172014` > 输入文档：`docs/172014/prd/analysis.md` > 目标分支：`feature/opp-172014` > 执行分支：`master`（本地未找到目标分支，已记录为执行风险） > 产出时间：2026-05-21 ## 0. 探索结论 已按 `coding-design` 流程校验参数、创建 OpenSpec 变更目录，并执行 `openspec list --json` 与代码探索。`req-172014` 原本不存在，已初始化到 `openspec/changes/req-172014/`。 关键代码事实： - `MiniPageTemplateEnum` 当前没有 `locationMenu`，新增组件需要同步扩展共享 API 枚举，位置参考 `opp-api/opp-diy-api/src/main/java/com/infinitus/opp/diy/enums/MiniPageTemplateEnum.java:11`。 - 后台可用组件来自 `GET /v3/mini/page/config/all`，底层查询 `mini_page_template_classify where status = 1 order by sort`，参考 `opp-diy/src/main/java/com/infinitus/opp/diy/controller/MiniPageConfigController.java:90` 和 `opp-diy/src/main/java/com/infinitus/opp/diy/repository/MiniPageTemplateClassifyRepository.java:18`。 - 保存接口 `POST /v3/mini/page/config` 会把 `templateList` 转成 `MiniPageTemplateEntity` 后批量保存，并更新装修页缓存，参考 `opp-diy/src/main/java/com/infinitus/opp/diy/servicee/impl/MiniPageConfigServiceImpl.java:540`。 - 用户端 V3 详情走 `GET /v3/mini/page/config/details`，V4 装修详情走 `POST /api/v4/decoration/detail`；V4 对不认识的组件类型会直接过滤并记录“暂不支持”，参考 `opp-diy/src/main/java/com/infinitus/opp/diy/servicee/impl/DecorationConfigServiceImpl.java:117`。 - 工作区实际检索到的装修编辑器主要在 `opp-admin-news-vue/src/components/PageDesigner`，新增组件步骤写在 `PageDesigner/read.md:67`；`opp-admin-learn-vue` 未检索到 `/v3/mini/page/config/all` 相关自定义微页编辑器入口。实现前需确认本需求是否实际复用 `opp-admin-news-vue` 的 PageDesigner，或需要把组件能力同步到 `opp-admin-learn-vue`。 ## 1. 总体方案 采用“新增装修组件类型 + 复用现有微页组件存储”的方案，不新增业务表： 1. 组件类型统一为 `locationMenu`。 2. 后台编辑器新增定位菜单组件入口、画布预览、右侧配置面板和保存校验。 3. 后端在保存接口中增加 `locationMenu` 兜底校验，配置仍存入 `mini_page_template` 的现有 JSON 承载字段。 4. 用户端详情接口透传 V3 字段；V4 装修详情增加 `TemplateLocationMenu` 渲染 VO，避免组件被过滤。 5. 用户端渲染层根据 `locationMenu` 生成吸顶菜单，点击后滚动到当前子页面中位于定位菜单之后的目标组件。 建议数据结构使用 `imgUrl` 外层 `dispose` 兼容现有 V4 解析逻辑，同时保留 `json` 字段作为后续扩展，不把新字段拆到表列： ```json { \"type\": \"locationMenu\", \"imgUrl\": \"{\\\"dispose\\\":{\\\"style\\\":\\\"IMAGE_TEXT\\\",\\\"selectedTextColor\\\":\\\"#333333\\\",\\\"unselectedTextColor\\\":\\\"#999999\\\",\\\"selectedBackgroundColor\\\":\\\"#FFFFFF\\\",\\\"unselectedBackgroundColor\\\":\\\"#FFFFFF\\\",\\\"itemWidth\\\":64,\\\"itemHeight\\\":64,\\\"menus\\\":[{\\\"menuId\\\":\\\"lm_1\\\",\\\"title\\\":\\\"菜单名称\\\",\\\"selectedImageUrl\\\":\\\"https://.../selected.png\\\",\\\"unselectedImageUrl\\\":\\\"https://.../normal.png\\\",\\\"targetComponentId\\\":12345,\\\"targetComponentKey\\\":\\\"comp_xxx\\\",\\\"targetComponentType\\\":\\\"pictureBox\\\",\\\"targetComponentName\\\":\\\"图片1\\\",\\\"targetComponentSort\\\":4}]}}\" } ``` `targetComponentKey` 建议使用前端已有 `itemId`。PageDesigner 新增组件时已有唯一 `itemId` 机制，参考 `opp-admin-news-vue/src/components/PageDesigner/read.md:107`；这样可以解决新建页面首次保存时目标组件还没有 DB id 的问题。保存成功后可同时回写 `targetComponentId`，但目标合法性以同一次提交中的 `itemId/sort/type` 为准。 ## 2. api_scope（涉及接口范围） | 接口 | 方法 | 影响级别 | 变更点 | | --- | --- | --- | --- | | `/v3/mini/page/config/all` | GET | 中 | 可用组件列表返回 `locationMenu`，由 `mini_page_template_classify` 元数据驱动。 | | `/v3/mini/page/config` | POST | 高 | 保存微页时校验 `locationMenu` 唯一性、菜单项数量、样式必填、定位目标合法性，并保存配置。 | | `/v3/mini/page/config/{configId}` | GET | 中 | 后台编辑回显定位菜单完整配置；目标已失效时保留值并给前端标记不可用或返回空目标。 | | `/v3/mini/page/config/item/{configId}` | GET | 低 | 子页面列表返回逻辑不改，但每个子页面的定位菜单约束按当前 `configId` 生效。 | | `/v3/mini/page/config/details` | GET | 高 | 用户端 V3 详情透传 `locationMenu`；缓存刷新仍沿用 `updateRenovationCache`。 | | `/api/v4/decoration/detail` | POST | 高 | V4 转换链路新增 `TemplateLocationMenu`，否则新组件会被过滤。 | ### 保存流程 ```mermaid sequenceDiagram participant Admin as 后台装修编辑器 participant Diy as opp-diy participant Validator as LocationMenuValidator participant DB as mini_page_template participant Cache as 装修页缓存 Admin->>Diy: POST /v3/mini/page/config(templateList) Diy->>Validator: 校验 locationMenu 数量和配置 Validator->>Validator: 校验目标仅来自当前组件之后 Validator-->>Diy: 通过或抛 BizCheckException Diy->>DB: saveAll(templateList) Diy->>Cache: updateRenovationCache(config, templateList) Diy-->>Admin: MiniPageConfigClassVO ``` ### 用户端详情流程 ```mermaid sequenceDiagram participant Client as 小程序/H5 participant Diy as opp-diy participant Cache as 装修页缓存 participant Converter as V4转换器 Client->>Diy: GET /v3/mini/page/config/details 或 POST /api/v4/decoration/detail Diy->>Cache: 根据 code/configId 获取页面与子页面 Diy->>Diy: 过滤上下架、投放对象、人群包 alt V3详情 Diy-->>Client: templateList 含 locationMenu else V4详情 Diy->>Converter: 解析 dispose 为 TemplateLocationMenu Converter-->>Diy: TemplateArrangeVO Diy-->>Client: templateArrangeList 含 locationMenu end ``` ### 异常处理 - 同一子页面存在多个定位菜单：抛出 `BizCheckException(\"同一页面内最多添加一个定位菜单组件\")`。 - 必填字段为空：抛出 `BizCheckException(\"定位菜单组件配置项‘xxxx’不能为空\")`，建议后端只返回首个错误字段，前端保存前可批量提示。 - 菜单项数量小于 1 或大于 10：抛出明确数量错误。 - 目标组件不存在、排序不在定位菜单之后、目标在其他子页面：保存失败。 - V4 解析单个组件 JSON 异常：建议记录 `configId/templateId/type` 后抛业务异常；如要更强可用性，可改为过滤异常组件，但需要产品接受。 ## 3. sql_changes（SQL 改动内容） 不建议新增表或修改 `mini_page_template` 表结构。新增内容为组件元数据和可选校验 SQL。 ### 元数据初始化 `classify_id`、`sort` 需要以当前环境“基本组件”分类实际值为准，不能在设计阶段硬编码。上线 SQL 示例： ```sql -- 1. 查询基础组件分类下现有组件，确认 classify_id 和 sort SELECT classify_id, type, remark, sort FROM mini_page_template_classify WHERE status = 1 ORDER BY classify_id, sort; -- 2. 如不存在 locationMenu，则插入 INSERT INTO mini_page_template_classify (classify_id, type, status, remark, sort, created_time) SELECT :basic_classify_id, 'locationMenu', 1, '定位菜单', :sort, NOW() WHERE NOT EXISTS ( SELECT 1 FROM mini_page_template_classify WHERE classify_id = :basic_classify_id AND type = 'locationMenu' ); ``` ### ER 关系 ```mermaid erDiagram mini_page_config ||--o{ mini_page_template : \"config_id\" mini_page_template }o--|| mini_page_template_classify : \"classify_id\" mini_page_template { string type \"locationMenu\" string img_url \"承载定位菜单配置\" string json \"扩展字段\" } ``` ### 数据库查询说明 本次未使用 `coding-database-query` 查询真实库，因为工作区未提供只读数据源配置。表结构判断来自实体、Repository 和现有 SQL 注解。实现前如需定稿上线 SQL，应使用只读账号确认 `mini_page_template_classify` 的基础组件 `classify_id` 与排序区间。 ## 4. performance（性能考量） - 保存校验只遍历当前子页面 `templateList`，复杂度 O(n + m)，其中 n 为组件数、m 为菜单项数，m 最大 10，可忽略。 - 用户端滚动选中态不应在滚动事件中频繁查询 DOM。建议前端在页面渲染和图片加载完成后缓存目标组件 offset，滚动时使用 `requestAnimationFrame` 或节流计算。 - 定位菜单目标只允许菜单之后的组件，可以减少锚点集合规模；排序变更后前端立即重新计算目标选项。 - 后端不新增 Redis key 和 MQ。缓存更新继续沿用保存后的装修页缓存刷新链路，避免额外一致性面。 - 图片大小 200KB 主要由上传控件/DAM 上传前校验；后端如果只收到 URL，无法可靠获知文件大小，除非接入素材元数据查询。 ## 5. concurrency（并发问题处理） - 微页保存延续现有“后提交覆盖先提交”的语义，不新增分布式锁。 - 同一子页面两个运营同时编辑时，后提交请求会覆盖组件列表；后端唯一性校验仍可保证最终不会保存多个 `locationMenu`。 - 目标组件引用使用 `targetComponentKey(itemId)` 能降低首次保存时 DB id 未生成导致的并发/一致性问题。 - 复制页面时必须重新生成页面内组件 `itemId`，同时同步重写定位菜单 `targetComponentKey`，避免跨页面锚点误指向原页面。 - 删除或拖动目标组件到定位菜单之前时，前端应立即把对应菜单项标记为失效；后端保存兜底失败，避免脏配置进入发布态。 ## 6. impact_analysis（影响范围评估） ### 后台前端 PRD 标注后台工程为 `opp-admin-learn-vue`，但当前工作区检索到完整自定义微页装修编辑器在 `opp-admin-news-vue/src/components/PageDesigner` 和旧 `microEditor`。需要在实现前确认实际落点： - 若新平衡生活+使用 PageDesigner：新增 `location-menu.vue` 的预览组件、配置组件、默认 dispose、组件入口和图标。 - 若需求确实落在 `opp-admin-learn-vue`：需先确认装修编辑器来源，或把 PageDesigner 组件能力迁移/复用过去。 前端需覆盖： - 基础组件区展示“定位菜单”。 - 拖拽唯一性拦截和 toast。 - 三种样式切换和实时预览。 - 菜单项 1-10 个增删。 - 图片上传 jpg/jpeg/png、最大 200KB。 - 标题最多 8 字。 - 定位目标只展示当前子页面中排序在定位菜单之后的组件，同类型展示“类型名+序号”。 - 用户端吸顶、滚动选中、点击定位。 ### 后端 `opp-diy` - `MiniPageConfigServiceImpl.save` 保存前增加 `locationMenu` 校验。 - `MiniPageTemplateClassify` 元数据返回新增类型。 - `getRenovationPageDetailsV2` 与缓存刷新无需新增接口，但要保证新字段完整透传。 - `DecorationConfigServiceImpl` 和共享 VO 需支持 V4 渲染转换。 ### 共享 API `opp-api/opp-diy-api` - 新增 `MiniPageTemplateEnum.LOCATION_MENU(\"locationMenu\", 0)`。 - 新增 `TemplateLocationMenu extends RenderingBase`。 - `RenderingBase` 的 `JsonSubTypes` 增加 `TemplateLocationMenu`。 - `RenderingOldEnum` 增加 `LOCATIONMENU(\"locationMenu\", \"定位菜单\", null, TemplateLocationMenu.class)`。 ### 风险等级 综合风险：中高。主要风险不是表结构，而是多端编辑器、V3/V4 详情、用户端滚动定位之间的契约一致性。 ## 7. unit_test（单元测试设计） ### 后端单元测试 | 测试类 | 方法 | 覆盖场景 | Mock | 预期 | | --- | --- | --- | --- | --- | | `LocationMenuValidatorTest` | `validate_success_imageText` | 图文样式、2 个菜单、目标在后方 | 无 | 校验通过 | | `LocationMenuValidatorTest` | `validate_fail_duplicate` | 同一 templateList 两个定位菜单 | 无 | 指定唯一性异常 | | `LocationMenuValidatorTest` | `validate_fail_targetBeforeMenu` | 目标排序小于等于定位菜单 | 无 | 定位目标异常 | | `LocationMenuValidatorTest` | `validate_fail_menuCount` | 0 个、11 个菜单 | 无 | 数量异常 | | `LocationMenuValidatorTest` | `validate_fail_requiredByStyle` | 纯文字缺标题/目标，纯图片缺图片/宽高 | 无 | 必填字段异常 | | `DecorationConfigServiceImplTest` | `convert_locationMenu_success` | V4 解析 `locationMenu` | Mock `MiniPageConfigService` | 返回 `TemplateArrangeVO` | | `MiniPageConfigServiceImplTest` | `save_refreshCacheWithLocationMenu` | 保存后刷新装修页缓存 | Mock Repository/TreeService | `templateList` 含新组件 | ### 前端测试/验证 - `PageDesigner/config/components.js`：组件入口按渠道/页面类型显示。 - `location-menu` 配置组件：样式切换、菜单项增删、字段必填、图片限制、标题长度。 - 画布预览组件：三种样式、选中态/未选中态、空图片占位。 - 目标下拉：拖动排序、删除目标、同类型序号显示。 - 用户端渲染：点击定位、吸顶、滚动选中、目标缺失降级。 ## 8. 待确认与阻塞 1. 本地无 `feature/opp-172014` 分支，当前产物写在 `master` 工作树。 2. PRD 指向 `opp-admin-learn-vue`，但代码探索显示自定义微页编辑器主要在 `opp-admin-news-vue`；实现前必须确认前端实际工程。 3. 新平衡生活+ 的 `miniAppType=6` 已在 V4 Query 注释中出现，但 `TenantCodeEnum` 当前只包含 `JMEETING/JNEWS/JLEARN/JTEST`；用户端详情的 `tenantCode` 映射需确认。 4. 纯图片样式下标题是否必填、图片宽高默认值和范围、滚动偏移是否扣除顶部导航高度，仍需产品/视觉确认。 5. 后端无法仅凭 URL 校验图片 200KB，需要明确是否接 DAM 元数据或仅由上传控件保证。"
+                  - generic [ref=e131]:
+                    - generic [ref=e132]:
+                      - generic [ref=e133]: 预览
+                      - button "全屏预览" [ref=e134] [cursor=pointer]:
+                        - img [ref=e136]
+                    - article [ref=e138]:
+                      - heading "172014 技术方案评审：【opp】【装修】新增定位菜单组件" [level=1] [ref=e139]
+                      - blockquote [ref=e140]:
+                        - paragraph [ref=e141]:
+                          - text: 需求编号：172014
+                          - text: OpenSpec 变更：
+                          - code [ref=e142]: req-172014
+                          - text: 输入文档：
+                          - code [ref=e143]: docs/172014/prd/analysis.md
+                          - text: 目标分支：
+                          - code [ref=e144]: feature/opp-172014
+                          - text: 执行分支：
+                          - code [ref=e145]: master
+                          - text: （本地未找到目标分支，已记录为执行风险）
+                          - text: 产出时间：2026-05-21
+                      - heading "0. 探索结论" [level=2] [ref=e146]
+                      - paragraph [ref=e147]:
+                        - text: 已按
+                        - code [ref=e148]: coding-design
+                        - text: 流程校验参数、创建 OpenSpec 变更目录，并执行
+                        - code [ref=e149]: openspec list --json
+                        - text: 与代码探索。
+                        - code [ref=e150]: req-172014
+                        - text: 原本不存在，已初始化到
+                        - code [ref=e151]: openspec/changes/req-172014/
+                        - text: 。
+                      - paragraph [ref=e152]: 关键代码事实：
+                      - list [ref=e153]:
+                        - listitem [ref=e154]:
+                          - code [ref=e155]: MiniPageTemplateEnum
+                          - text: 当前没有
+                          - code [ref=e156]: locationMenu
+                          - text: ，新增组件需要同步扩展共享 API 枚举，位置参考
+                          - code [ref=e157]: opp-api/opp-diy-api/src/main/java/com/infinitus/opp/diy/enums/MiniPageTemplateEnum.java:11
+                          - text: 。
+                        - listitem [ref=e158]:
+                          - text: 后台可用组件来自
+                          - code [ref=e159]: GET /v3/mini/page/config/all
+                          - text: ，底层查询
+                          - code [ref=e160]: mini_page_template_classify where status = 1 order by sort
+                          - text: ，参考
+                          - code [ref=e161]: opp-diy/src/main/java/com/infinitus/opp/diy/controller/MiniPageConfigController.java:90
+                          - text: 和
+                          - code [ref=e162]: opp-diy/src/main/java/com/infinitus/opp/diy/repository/MiniPageTemplateClassifyRepository.java:18
+                          - text: 。
+                        - listitem [ref=e163]:
+                          - text: 保存接口
+                          - code [ref=e164]: POST /v3/mini/page/config
+                          - text: 会把
+                          - code [ref=e165]: templateList
+                          - text: 转成
+                          - code [ref=e166]: MiniPageTemplateEntity
+                          - text: 后批量保存，并更新装修页缓存，参考
+                          - code [ref=e167]: opp-diy/src/main/java/com/infinitus/opp/diy/servicee/impl/MiniPageConfigServiceImpl.java:540
+                          - text: 。
+                        - listitem [ref=e168]:
+                          - text: 用户端 V3 详情走
+                          - code [ref=e169]: GET /v3/mini/page/config/details
+                          - text: ，V4 装修详情走
+                          - code [ref=e170]: POST /api/v4/decoration/detail
+                          - text: ；V4 对不认识的组件类型会直接过滤并记录“暂不支持”，参考
+                          - code [ref=e171]: opp-diy/src/main/java/com/infinitus/opp/diy/servicee/impl/DecorationConfigServiceImpl.java:117
+                          - text: 。
+                        - listitem [ref=e172]:
+                          - text: 工作区实际检索到的装修编辑器主要在
+                          - code [ref=e173]: opp-admin-news-vue/src/components/PageDesigner
+                          - text: ，新增组件步骤写在
+                          - code [ref=e174]: PageDesigner/read.md:67
+                          - text: ；
+                          - code [ref=e175]: opp-admin-learn-vue
+                          - text: 未检索到
+                          - code [ref=e176]: /v3/mini/page/config/all
+                          - text: 相关自定义微页编辑器入口。实现前需确认本需求是否实际复用
+                          - code [ref=e177]: opp-admin-news-vue
+                          - text: 的 PageDesigner，或需要把组件能力同步到
+                          - code [ref=e178]: opp-admin-learn-vue
+                          - text: 。
+                      - heading "1. 总体方案" [level=2] [ref=e179]
+                      - paragraph [ref=e180]: 采用“新增装修组件类型 + 复用现有微页组件存储”的方案，不新增业务表：
+                      - list [ref=e181]:
+                        - listitem [ref=e182]:
+                          - text: 组件类型统一为
+                          - code [ref=e183]: locationMenu
+                          - text: 。
+                        - listitem [ref=e184]: 后台编辑器新增定位菜单组件入口、画布预览、右侧配置面板和保存校验。
+                        - listitem [ref=e185]:
+                          - text: 后端在保存接口中增加
+                          - code [ref=e186]: locationMenu
+                          - text: 兜底校验，配置仍存入
+                          - code [ref=e187]: mini_page_template
+                          - text: 的现有 JSON 承载字段。
+                        - listitem [ref=e188]:
+                          - text: 用户端详情接口透传 V3 字段；V4 装修详情增加
+                          - code [ref=e189]: TemplateLocationMenu
+                          - text: 渲染 VO，避免组件被过滤。
+                        - listitem [ref=e190]:
+                          - text: 用户端渲染层根据
+                          - code [ref=e191]: locationMenu
+                          - text: 生成吸顶菜单，点击后滚动到当前子页面中位于定位菜单之后的目标组件。
+                      - paragraph [ref=e192]:
+                        - text: 建议数据结构使用
+                        - code [ref=e193]: imgUrl
+                        - text: 外层
+                        - code [ref=e194]: dispose
+                        - text: 兼容现有 V4 解析逻辑，同时保留
+                        - code [ref=e195]: json
+                        - text: 字段作为后续扩展，不把新字段拆到表列：
+                      - code [ref=e197]: "{ \"type\": \"locationMenu\", \"imgUrl\": \"{\\\"dispose\\\":{\\\"style\\\":\\\"IMAGE_TEXT\\\",\\\"selectedTextColor\\\":\\\"#333333\\\",\\\"unselectedTextColor\\\":\\\"#999999\\\",\\\"selectedBackgroundColor\\\":\\\"#FFFFFF\\\",\\\"unselectedBackgroundColor\\\":\\\"#FFFFFF\\\",\\\"itemWidth\\\":64,\\\"itemHeight\\\":64,\\\"menus\\\":[{\\\"menuId\\\":\\\"lm_1\\\",\\\"title\\\":\\\"菜单名称\\\",\\\"selectedImageUrl\\\":\\\"https://.../selected.png\\\",\\\"unselectedImageUrl\\\":\\\"https://.../normal.png\\\",\\\"targetComponentId\\\":12345,\\\"targetComponentKey\\\":\\\"comp_xxx\\\",\\\"targetComponentType\\\":\\\"pictureBox\\\",\\\"targetComponentName\\\":\\\"图片1\\\",\\\"targetComponentSort\\\":4}]}}\" }"
+                      - paragraph [ref=e198]:
+                        - code [ref=e199]: targetComponentKey
+                        - text: 建议使用前端已有
+                        - code [ref=e200]: itemId
+                        - text: 。PageDesigner 新增组件时已有唯一
+                        - code [ref=e201]: itemId
+                        - text: 机制，参考
+                        - code [ref=e202]: opp-admin-news-vue/src/components/PageDesigner/read.md:107
+                        - text: ；这样可以解决新建页面首次保存时目标组件还没有 DB id 的问题。保存成功后可同时回写
+                        - code [ref=e203]: targetComponentId
+                        - text: ，但目标合法性以同一次提交中的
+                        - code [ref=e204]: itemId/sort/type
+                        - text: 为准。
+                      - heading "2. api_scope（涉及接口范围）" [level=2] [ref=e205]
+                      - table [ref=e206]:
+                        - rowgroup [ref=e207]:
+                          - row "接口 方法 影响级别 变更点" [ref=e208]:
+                            - columnheader "接口" [ref=e209]
+                            - columnheader "方法" [ref=e210]
+                            - columnheader "影响级别" [ref=e211]
+                            - columnheader "变更点" [ref=e212]
+                        - rowgroup [ref=e213]:
+                          - row "/v3/mini/page/config/all GET 中 可用组件列表返回 locationMenu，由 mini_page_template_classify 元数据驱动。" [ref=e214]:
+                            - cell "/v3/mini/page/config/all" [ref=e215]:
+                              - code [ref=e216]: /v3/mini/page/config/all
+                            - cell "GET" [ref=e217]
+                            - cell "中" [ref=e218]
+                            - cell "可用组件列表返回 locationMenu，由 mini_page_template_classify 元数据驱动。" [ref=e219]:
+                              - text: 可用组件列表返回
+                              - code [ref=e220]: locationMenu
+                              - text: ，由
+                              - code [ref=e221]: mini_page_template_classify
+                              - text: 元数据驱动。
+                          - row "/v3/mini/page/config POST 高 保存微页时校验 locationMenu 唯一性、菜单项数量、样式必填、定位目标合法性，并保存配置。" [ref=e222]:
+                            - cell "/v3/mini/page/config" [ref=e223]:
+                              - code [ref=e224]: /v3/mini/page/config
+                            - cell "POST" [ref=e225]
+                            - cell "高" [ref=e226]
+                            - cell "保存微页时校验 locationMenu 唯一性、菜单项数量、样式必填、定位目标合法性，并保存配置。" [ref=e227]:
+                              - text: 保存微页时校验
+                              - code [ref=e228]: locationMenu
+                              - text: 唯一性、菜单项数量、样式必填、定位目标合法性，并保存配置。
+                          - 'row "/v3/mini/page/config/{configId} GET 中 后台编辑回显定位菜单完整配置；目标已失效时保留值并给前端标记不可用或返回空目标。" [ref=e229]':
+                            - 'cell "/v3/mini/page/config/{configId}" [ref=e230]':
+                              - code [ref=e231]: "/v3/mini/page/config/{configId}"
+                            - cell "GET" [ref=e232]
+                            - cell "中" [ref=e233]
+                            - cell "后台编辑回显定位菜单完整配置；目标已失效时保留值并给前端标记不可用或返回空目标。" [ref=e234]
+                          - 'row "/v3/mini/page/config/item/{configId} GET 低 子页面列表返回逻辑不改，但每个子页面的定位菜单约束按当前 configId 生效。" [ref=e235]':
+                            - 'cell "/v3/mini/page/config/item/{configId}" [ref=e236]':
+                              - code [ref=e237]: "/v3/mini/page/config/item/{configId}"
+                            - cell "GET" [ref=e238]
+                            - cell "低" [ref=e239]
+                            - cell "子页面列表返回逻辑不改，但每个子页面的定位菜单约束按当前 configId 生效。" [ref=e240]:
+                              - text: 子页面列表返回逻辑不改，但每个子页面的定位菜单约束按当前
+                              - code [ref=e241]: configId
+                              - text: 生效。
+                          - row "/v3/mini/page/config/details GET 高 用户端 V3 详情透传 locationMenu；缓存刷新仍沿用 updateRenovationCache。" [ref=e242]:
+                            - cell "/v3/mini/page/config/details" [ref=e243]:
+                              - code [ref=e244]: /v3/mini/page/config/details
+                            - cell "GET" [ref=e245]
+                            - cell "高" [ref=e246]
+                            - cell "用户端 V3 详情透传 locationMenu；缓存刷新仍沿用 updateRenovationCache。" [ref=e247]:
+                              - text: 用户端 V3 详情透传
+                              - code [ref=e248]: locationMenu
+                              - text: ；缓存刷新仍沿用
+                              - code [ref=e249]: updateRenovationCache
+                              - text: 。
+                          - row "/api/v4/decoration/detail POST 高 V4 转换链路新增 TemplateLocationMenu，否则新组件会被过滤。" [ref=e250]:
+                            - cell "/api/v4/decoration/detail" [ref=e251]:
+                              - code [ref=e252]: /api/v4/decoration/detail
+                            - cell "POST" [ref=e253]
+                            - cell "高" [ref=e254]
+                            - cell "V4 转换链路新增 TemplateLocationMenu，否则新组件会被过滤。" [ref=e255]:
+                              - text: V4 转换链路新增
+                              - code [ref=e256]: TemplateLocationMenu
+                              - text: ，否则新组件会被过滤。
+                      - heading "保存流程" [level=3] [ref=e257]
+                      - document [ref=e508]:
+                        - generic [ref=e511]: 装修页缓存
+                        - generic [ref=e514]: mini_page_template
+                        - generic [ref=e517]: LocationMenuValidator
+                        - generic [ref=e520]: opp-diy
+                        - generic [ref=e523]: 后台装修编辑器
+                        - generic [ref=e527]: 装修页缓存
+                        - generic [ref=e531]: mini_page_template
+                        - generic [ref=e535]: LocationMenuValidator
+                        - generic [ref=e539]: opp-diy
+                        - generic [ref=e543]: 后台装修编辑器
+                        - generic [ref=e544]: POST /v3/mini/page/config(templateList)
+                        - generic [ref=e545]: 校验 locationMenu 数量和配置
+                        - generic [ref=e546]: 校验目标仅来自当前组件之后
+                        - generic [ref=e548]: 通过或抛 BizCheckException
+                        - generic [ref=e549]: saveAll(templateList)
+                        - generic [ref=e550]: updateRenovationCache(config, templateList)
+                        - generic [ref=e551]: MiniPageConfigClassVO
+                      - heading "用户端详情流程" [level=3] [ref=e261]
+                      - document [ref=e552]:
+                        - generic [ref=e555]: V4转换器
+                        - generic [ref=e558]: 装修页缓存
+                        - generic [ref=e561]: opp-diy
+                        - generic [ref=e564]: 小程序/H5
+                        - generic [ref=e568]: V4转换器
+                        - generic [ref=e572]: 装修页缓存
+                        - generic [ref=e576]: opp-diy
+                        - generic [ref=e580]: 小程序/H5
+                        - generic [ref=e581]:
+                          - generic [ref=e583]: alt
+                          - generic [ref=e584]: "[V3详情]"
+                          - generic [ref=e585]: "[V4详情]"
+                        - generic [ref=e586]: GET /v3/mini/page/config/details 或 POST /api/v4/decoration/detail
+                        - generic [ref=e587]: 根据 code/configId 获取页面与子页面
+                        - generic [ref=e588]: 过滤上下架、投放对象、人群包
+                        - generic [ref=e590]: templateList 含 locationMenu
+                        - generic [ref=e591]: 解析 dispose 为 TemplateLocationMenu
+                        - generic [ref=e592]: TemplateArrangeVO
+                        - generic [ref=e593]: templateArrangeList 含 locationMenu
+                      - heading "异常处理" [level=3] [ref=e263]
+                      - list [ref=e264]:
+                        - listitem [ref=e265]:
+                          - text: 同一子页面存在多个定位菜单：抛出
+                          - code [ref=e266]: BizCheckException("同一页面内最多添加一个定位菜单组件")
+                          - text: 。
+                        - listitem [ref=e267]:
+                          - text: 必填字段为空：抛出
+                          - code [ref=e268]: BizCheckException("定位菜单组件配置项‘xxxx’不能为空")
+                          - text: ，建议后端只返回首个错误字段，前端保存前可批量提示。
+                        - listitem [ref=e269]: 菜单项数量小于 1 或大于 10：抛出明确数量错误。
+                        - listitem [ref=e270]: 目标组件不存在、排序不在定位菜单之后、目标在其他子页面：保存失败。
+                        - listitem [ref=e271]:
+                          - text: V4 解析单个组件 JSON 异常：建议记录
+                          - code [ref=e272]: configId/templateId/type
+                          - text: 后抛业务异常；如要更强可用性，可改为过滤异常组件，但需要产品接受。
+                      - heading "3. sql_changes（SQL 改动内容）" [level=2] [ref=e273]
+                      - paragraph [ref=e274]:
+                        - text: 不建议新增表或修改
+                        - code [ref=e275]: mini_page_template
+                        - text: 表结构。新增内容为组件元数据和可选校验 SQL。
+                      - heading "元数据初始化" [level=3] [ref=e276]
+                      - paragraph [ref=e277]:
+                        - code [ref=e278]: classify_id
+                        - text: 、
+                        - code [ref=e279]: sort
+                        - text: 需要以当前环境“基本组件”分类实际值为准，不能在设计阶段硬编码。上线 SQL 示例：
+                      - code [ref=e281]: "-- 1. 查询基础组件分类下现有组件，确认 classify_id 和 sort SELECT classify_id, type, remark, sort FROM mini_page_template_classify WHERE status = 1 ORDER BY classify_id, sort; -- 2. 如不存在 locationMenu，则插入 INSERT INTO mini_page_template_classify (classify_id, type, status, remark, sort, created_time) SELECT :basic_classify_id, 'locationMenu', 1, '定位菜单', :sort, NOW() WHERE NOT EXISTS ( SELECT 1 FROM mini_page_template_classify WHERE classify_id = :basic_classify_id AND type = 'locationMenu' );"
+                      - heading "ER 关系" [level=3] [ref=e282]
+                      - document [ref=e594]:
+                        - generic [ref=e596]:
+                          - generic [ref=e597]:
+                            - paragraph [ref=e603]: config_id
+                            - paragraph [ref=e609]: classify_id
+                          - generic [ref=e610]:
+                            - paragraph [ref=e617]: mini_page_config
+                            - generic [ref=e618]:
+                              - paragraph [ref=e635]: mini_page_template
+                              - paragraph [ref=e640]: string
+                              - paragraph [ref=e645]: type
+                              - paragraph [ref=e650]: locationMenu
+                              - paragraph [ref=e655]: string
+                              - paragraph [ref=e660]: img_url
+                              - paragraph [ref=e665]: 承载定位菜单配置
+                              - paragraph [ref=e670]: string
+                              - paragraph [ref=e675]: json
+                              - paragraph [ref=e680]: 扩展字段
+                            - paragraph [ref=e693]: mini_page_template_classify
+                      - heading "数据库查询说明" [level=3] [ref=e284]
+                      - paragraph [ref=e285]:
+                        - text: 本次未使用
+                        - code [ref=e286]: coding-database-query
+                        - text: 查询真实库，因为工作区未提供只读数据源配置。表结构判断来自实体、Repository 和现有 SQL 注解。实现前如需定稿上线 SQL，应使用只读账号确认
+                        - code [ref=e287]: mini_page_template_classify
+                        - text: 的基础组件
+                        - code [ref=e288]: classify_id
+                        - text: 与排序区间。
+                      - heading "4. performance（性能考量）" [level=2] [ref=e289]
+                      - list [ref=e290]:
+                        - listitem [ref=e291]:
+                          - text: 保存校验只遍历当前子页面
+                          - code [ref=e292]: templateList
+                          - text: ，复杂度 O(n + m)，其中 n 为组件数、m 为菜单项数，m 最大 10，可忽略。
+                        - listitem [ref=e293]:
+                          - text: 用户端滚动选中态不应在滚动事件中频繁查询 DOM。建议前端在页面渲染和图片加载完成后缓存目标组件 offset，滚动时使用
+                          - code [ref=e294]: requestAnimationFrame
+                          - text: 或节流计算。
+                        - listitem [ref=e295]: 定位菜单目标只允许菜单之后的组件，可以减少锚点集合规模；排序变更后前端立即重新计算目标选项。
+                        - listitem [ref=e296]: 后端不新增 Redis key 和 MQ。缓存更新继续沿用保存后的装修页缓存刷新链路，避免额外一致性面。
+                        - listitem [ref=e297]: 图片大小 200KB 主要由上传控件/DAM 上传前校验；后端如果只收到 URL，无法可靠获知文件大小，除非接入素材元数据查询。
+                      - heading "5. concurrency（并发问题处理）" [level=2] [ref=e298]
+                      - list [ref=e299]:
+                        - listitem [ref=e300]: 微页保存延续现有“后提交覆盖先提交”的语义，不新增分布式锁。
+                        - listitem [ref=e301]:
+                          - text: 同一子页面两个运营同时编辑时，后提交请求会覆盖组件列表；后端唯一性校验仍可保证最终不会保存多个
+                          - code [ref=e302]: locationMenu
+                          - text: 。
+                        - listitem [ref=e303]:
+                          - text: 目标组件引用使用
+                          - code [ref=e304]: targetComponentKey(itemId)
+                          - text: 能降低首次保存时 DB id 未生成导致的并发/一致性问题。
+                        - listitem [ref=e305]:
+                          - text: 复制页面时必须重新生成页面内组件
+                          - code [ref=e306]: itemId
+                          - text: ，同时同步重写定位菜单
+                          - code [ref=e307]: targetComponentKey
+                          - text: ，避免跨页面锚点误指向原页面。
+                        - listitem [ref=e308]: 删除或拖动目标组件到定位菜单之前时，前端应立即把对应菜单项标记为失效；后端保存兜底失败，避免脏配置进入发布态。
+                      - heading "6. impact_analysis（影响范围评估）" [level=2] [ref=e309]
+                      - heading "后台前端" [level=3] [ref=e310]
+                      - paragraph [ref=e311]:
+                        - text: PRD 标注后台工程为
+                        - code [ref=e312]: opp-admin-learn-vue
+                        - text: ，但当前工作区检索到完整自定义微页装修编辑器在
+                        - code [ref=e313]: opp-admin-news-vue/src/components/PageDesigner
+                        - text: 和旧
+                        - code [ref=e314]: microEditor
+                        - text: 。需要在实现前确认实际落点：
+                      - list [ref=e315]:
+                        - listitem [ref=e316]:
+                          - text: 若新平衡生活+使用 PageDesigner：新增
+                          - code [ref=e317]: location-menu.vue
+                          - text: 的预览组件、配置组件、默认 dispose、组件入口和图标。
+                        - listitem [ref=e318]:
+                          - text: 若需求确实落在
+                          - code [ref=e319]: opp-admin-learn-vue
+                          - text: ：需先确认装修编辑器来源，或把 PageDesigner 组件能力迁移/复用过去。
+                      - paragraph [ref=e320]: 前端需覆盖：
+                      - list [ref=e321]:
+                        - listitem [ref=e322]: 基础组件区展示“定位菜单”。
+                        - listitem [ref=e323]: 拖拽唯一性拦截和 toast。
+                        - listitem [ref=e324]: 三种样式切换和实时预览。
+                        - listitem [ref=e325]: 菜单项 1-10 个增删。
+                        - listitem [ref=e326]: 图片上传 jpg/jpeg/png、最大 200KB。
+                        - listitem [ref=e327]: 标题最多 8 字。
+                        - listitem [ref=e328]: 定位目标只展示当前子页面中排序在定位菜单之后的组件，同类型展示“类型名+序号”。
+                        - listitem [ref=e329]: 用户端吸顶、滚动选中、点击定位。
+                      - heading "后端 opp-diy" [level=3] [ref=e330]:
+                        - text: 后端
+                        - code [ref=e331]: opp-diy
+                      - list [ref=e332]:
+                        - listitem [ref=e333]:
+                          - code [ref=e334]: MiniPageConfigServiceImpl.save
+                          - text: 保存前增加
+                          - code [ref=e335]: locationMenu
+                          - text: 校验。
+                        - listitem [ref=e336]:
+                          - code [ref=e337]: MiniPageTemplateClassify
+                          - text: 元数据返回新增类型。
+                        - listitem [ref=e338]:
+                          - code [ref=e339]: getRenovationPageDetailsV2
+                          - text: 与缓存刷新无需新增接口，但要保证新字段完整透传。
+                        - listitem [ref=e340]:
+                          - code [ref=e341]: DecorationConfigServiceImpl
+                          - text: 和共享 VO 需支持 V4 渲染转换。
+                      - heading "共享 API opp-api/opp-diy-api" [level=3] [ref=e342]:
+                        - text: 共享 API
+                        - code [ref=e343]: opp-api/opp-diy-api
+                      - list [ref=e344]:
+                        - listitem [ref=e345]:
+                          - text: 新增
+                          - code [ref=e346]: MiniPageTemplateEnum.LOCATION_MENU("locationMenu", 0)
+                          - text: 。
+                        - listitem [ref=e347]:
+                          - text: 新增
+                          - code [ref=e348]: TemplateLocationMenu extends RenderingBase
+                          - text: 。
+                        - listitem [ref=e349]:
+                          - code [ref=e350]: RenderingBase
+                          - text: 的
+                          - code [ref=e351]: JsonSubTypes
+                          - text: 增加
+                          - code [ref=e352]: TemplateLocationMenu
+                          - text: 。
+                        - listitem [ref=e353]:
+                          - code [ref=e354]: RenderingOldEnum
+                          - text: 增加
+                          - code [ref=e355]: LOCATIONMENU("locationMenu", "定位菜单", null, TemplateLocationMenu.class)
+                          - text: 。
+                      - heading "风险等级" [level=3] [ref=e356]
+                      - paragraph [ref=e357]: 综合风险：中高。主要风险不是表结构，而是多端编辑器、V3/V4 详情、用户端滚动定位之间的契约一致性。
+                      - heading "7. unit_test（单元测试设计）" [level=2] [ref=e358]
+                      - heading "后端单元测试" [level=3] [ref=e359]
+                      - table [ref=e360]:
+                        - rowgroup [ref=e361]:
+                          - row "测试类 方法 覆盖场景 Mock 预期" [ref=e362]:
+                            - columnheader "测试类" [ref=e363]
+                            - columnheader "方法" [ref=e364]
+                            - columnheader "覆盖场景" [ref=e365]
+                            - columnheader "Mock" [ref=e366]
+                            - columnheader "预期" [ref=e367]
+                        - rowgroup [ref=e368]:
+                          - row "LocationMenuValidatorTest validate_success_imageText 图文样式、2 个菜单、目标在后方 无 校验通过" [ref=e369]:
+                            - cell "LocationMenuValidatorTest" [ref=e370]:
+                              - code [ref=e371]: LocationMenuValidatorTest
+                            - cell "validate_success_imageText" [ref=e372]:
+                              - code [ref=e373]: validate_success_imageText
+                            - cell "图文样式、2 个菜单、目标在后方" [ref=e374]
+                            - cell "无" [ref=e375]
+                            - cell "校验通过" [ref=e376]
+                          - row "LocationMenuValidatorTest validate_fail_duplicate 同一 templateList 两个定位菜单 无 指定唯一性异常" [ref=e377]:
+                            - cell "LocationMenuValidatorTest" [ref=e378]:
+                              - code [ref=e379]: LocationMenuValidatorTest
+                            - cell "validate_fail_duplicate" [ref=e380]:
+                              - code [ref=e381]: validate_fail_duplicate
+                            - cell "同一 templateList 两个定位菜单" [ref=e382]
+                            - cell "无" [ref=e383]
+                            - cell "指定唯一性异常" [ref=e384]
+                          - row "LocationMenuValidatorTest validate_fail_targetBeforeMenu 目标排序小于等于定位菜单 无 定位目标异常" [ref=e385]:
+                            - cell "LocationMenuValidatorTest" [ref=e386]:
+                              - code [ref=e387]: LocationMenuValidatorTest
+                            - cell "validate_fail_targetBeforeMenu" [ref=e388]:
+                              - code [ref=e389]: validate_fail_targetBeforeMenu
+                            - cell "目标排序小于等于定位菜单" [ref=e390]
+                            - cell "无" [ref=e391]
+                            - cell "定位目标异常" [ref=e392]
+                          - row "LocationMenuValidatorTest validate_fail_menuCount 0 个、11 个菜单 无 数量异常" [ref=e393]:
+                            - cell "LocationMenuValidatorTest" [ref=e394]:
+                              - code [ref=e395]: LocationMenuValidatorTest
+                            - cell "validate_fail_menuCount" [ref=e396]:
+                              - code [ref=e397]: validate_fail_menuCount
+                            - cell "0 个、11 个菜单" [ref=e398]
+                            - cell "无" [ref=e399]
+                            - cell "数量异常" [ref=e400]
+                          - row "LocationMenuValidatorTest validate_fail_requiredByStyle 纯文字缺标题/目标，纯图片缺图片/宽高 无 必填字段异常" [ref=e401]:
+                            - cell "LocationMenuValidatorTest" [ref=e402]:
+                              - code [ref=e403]: LocationMenuValidatorTest
+                            - cell "validate_fail_requiredByStyle" [ref=e404]:
+                              - code [ref=e405]: validate_fail_requiredByStyle
+                            - cell "纯文字缺标题/目标，纯图片缺图片/宽高" [ref=e406]
+                            - cell "无" [ref=e407]
+                            - cell "必填字段异常" [ref=e408]
+                          - row "DecorationConfigServiceImplTest convert_locationMenu_success V4 解析 locationMenu Mock MiniPageConfigService 返回 TemplateArrangeVO" [ref=e409]:
+                            - cell "DecorationConfigServiceImplTest" [ref=e410]:
+                              - code [ref=e411]: DecorationConfigServiceImplTest
+                            - cell "convert_locationMenu_success" [ref=e412]:
+                              - code [ref=e413]: convert_locationMenu_success
+                            - cell "V4 解析 locationMenu" [ref=e414]:
+                              - text: V4 解析
+                              - code [ref=e415]: locationMenu
+                            - cell "Mock MiniPageConfigService" [ref=e416]:
+                              - text: Mock
+                              - code [ref=e417]: MiniPageConfigService
+                            - cell "返回 TemplateArrangeVO" [ref=e418]:
+                              - text: 返回
+                              - code [ref=e419]: TemplateArrangeVO
+                          - row "MiniPageConfigServiceImplTest save_refreshCacheWithLocationMenu 保存后刷新装修页缓存 Mock Repository/TreeService templateList 含新组件" [ref=e420]:
+                            - cell "MiniPageConfigServiceImplTest" [ref=e421]:
+                              - code [ref=e422]: MiniPageConfigServiceImplTest
+                            - cell "save_refreshCacheWithLocationMenu" [ref=e423]:
+                              - code [ref=e424]: save_refreshCacheWithLocationMenu
+                            - cell "保存后刷新装修页缓存" [ref=e425]
+                            - cell "Mock Repository/TreeService" [ref=e426]
+                            - cell "templateList 含新组件" [ref=e427]:
+                              - code [ref=e428]: templateList
+                              - text: 含新组件
+                      - heading "前端测试/验证" [level=3] [ref=e429]
+                      - list [ref=e430]:
+                        - listitem [ref=e431]:
+                          - code [ref=e432]: PageDesigner/config/components.js
+                          - text: ：组件入口按渠道/页面类型显示。
+                        - listitem [ref=e433]:
+                          - code [ref=e434]: location-menu
+                          - text: 配置组件：样式切换、菜单项增删、字段必填、图片限制、标题长度。
+                        - listitem [ref=e435]: 画布预览组件：三种样式、选中态/未选中态、空图片占位。
+                        - listitem [ref=e436]: 目标下拉：拖动排序、删除目标、同类型序号显示。
+                        - listitem [ref=e437]: 用户端渲染：点击定位、吸顶、滚动选中、目标缺失降级。
+                      - heading "8. 待确认与阻塞" [level=2] [ref=e438]
+                      - list [ref=e439]:
+                        - listitem [ref=e440]:
+                          - text: 本地无
+                          - code [ref=e441]: feature/opp-172014
+                          - text: 分支，当前产物写在
+                          - code [ref=e442]: master
+                          - text: 工作树。
+                        - listitem [ref=e443]:
+                          - text: PRD 指向
+                          - code [ref=e444]: opp-admin-learn-vue
+                          - text: ，但代码探索显示自定义微页编辑器主要在
+                          - code [ref=e445]: opp-admin-news-vue
+                          - text: ；实现前必须确认前端实际工程。
+                        - listitem [ref=e446]:
+                          - text: 新平衡生活+ 的
+                          - code [ref=e447]: miniAppType=6
+                          - text: 已在 V4 Query 注释中出现，但
+                          - code [ref=e448]: TenantCodeEnum
+                          - text: 当前只包含
+                          - code [ref=e449]: JMEETING/JNEWS/JLEARN/JTEST
+                          - text: ；用户端详情的
+                          - code [ref=e450]: tenantCode
+                          - text: 映射需确认。
+                        - listitem [ref=e451]: 纯图片样式下标题是否必填、图片宽高默认值和范围、滚动偏移是否扣除顶部导航高度，仍需产品/视觉确认。
+                        - listitem [ref=e452]: 后端无法仅凭 URL 校验图片 200KB，需要明确是否接 DAM 元数据或仅由上传控件保证。
+        - complementary [ref=e453]:
+          - generic [ref=e454]:
+            - strong [ref=e455]: 产物与问题
+            - button "刷新" [ref=e456] [cursor=pointer]:
+              - img [ref=e458]
+              - generic [ref=e460]: 刷新
+          - generic [ref=e464]:
+            - button "PRD 分析文档 docs/172014/prd/analysis.md" [ref=e465] [cursor=pointer]:
+              - generic [ref=e466]: PRD 分析文档
+              - generic [ref=e467]: docs/172014/prd/analysis.md
+            - button "技术方案评审文档 docs/172014/technical-design/design_review.md" [ref=e468] [cursor=pointer]:
+              - generic [ref=e469]: 技术方案评审文档
+              - generic [ref=e470]: docs/172014/technical-design/design_review.md
+            - button "OpenSpec Change openspec/changes/req-172014" [ref=e471] [cursor=pointer]:
+              - generic [ref=e472]: OpenSpec Change
+              - generic [ref=e473]: openspec/changes/req-172014
+            - button "OpenSpec Proposal openspec/changes/req-172014/proposal.md" [ref=e474] [cursor=pointer]:
+              - generic [ref=e475]: OpenSpec Proposal
+              - generic [ref=e476]: openspec/changes/req-172014/proposal.md
+            - button "OpenSpec Design openspec/changes/req-172014/design.md" [ref=e477] [cursor=pointer]:
+              - generic [ref=e478]: OpenSpec Design
+              - generic [ref=e479]: openspec/changes/req-172014/design.md
+            - button "OpenSpec Tasks openspec/changes/req-172014/tasks.md" [ref=e480] [cursor=pointer]:
+              - generic [ref=e481]: OpenSpec Tasks
+              - generic [ref=e482]: openspec/changes/req-172014/tasks.md
+            - button "OpenSpec location-menu-component openspec/changes/req-172014/specs/location-menu-component/spec.md" [ref=e483] [cursor=pointer]:
+              - generic [ref=e484]: OpenSpec location-menu-component
+              - generic [ref=e485]: openspec/changes/req-172014/specs/location-menu-component/spec.md
+          - generic [ref=e486]:
+            - strong [ref=e487]: 评审问题
+            - generic [ref=e488]:
+              - img [ref=e490]
+              - paragraph [ref=e507]: 暂无问题

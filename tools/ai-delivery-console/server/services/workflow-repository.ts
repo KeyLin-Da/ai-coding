@@ -4,6 +4,7 @@ import type { RequirementInput, RequirementType, RequirementWorkflow, WorkflowSt
 import { createEmptyImplementationSteps, createEmptyStages, defaultBranchName, ensureImplementationSteps } from '../../shared/workflow';
 import { deriveCurrentStage } from '../../shared/stage-rules';
 import { normalizeRequirementId } from './workspace';
+import { normalizeWorkflowProjects, saveProjectHistory } from './project-history';
 
 export function normalizePrdClarification(value?: string): string | undefined {
   const withoutControls = Array.from(String(value || ''))
@@ -26,6 +27,7 @@ function hasInputField(input: RequirementInput, key: keyof RequirementInput): bo
 function withWorkflowDefaults(workflow: RequirementWorkflow): RequirementWorkflow {
   return {
     ...workflow,
+    projects: workflow.projects || [],
     implementationSteps: ensureImplementationSteps(workflow.implementationSteps)
   };
 }
@@ -88,11 +90,16 @@ export class WorkflowRepository {
       const techDesignClarification = hasInputField(input, 'techDesignClarification')
         ? input.techDesignClarification
         : existing.techDesignClarification;
+      const projects = hasInputField(input, 'projects')
+        ? await normalizeWorkflowProjects(this.workspaceRoot, input.projects || [])
+        : existing.projects || [];
+      await saveProjectHistory(this.workspaceRoot, projects);
       return this.save({
         ...existing,
         title: input.title || existing.title,
         requirementType,
         branchName,
+        projects,
         prdClarification,
         techDesignDocument,
         techDesignClarification,
@@ -101,11 +108,14 @@ export class WorkflowRepository {
     }
     const now = new Date().toISOString();
     const requirementType: RequirementType = input.requirementType || 'REQUIREMENT';
+    const projects = await normalizeWorkflowProjects(this.workspaceRoot, input.projects || []);
+    await saveProjectHistory(this.workspaceRoot, projects);
     const workflow: RequirementWorkflow = {
       requirementId,
       title: input.title || `需求 ${requirementId}`,
       requirementType,
       branchName: input.branchName || defaultBranchName(requirementId, requirementType),
+      projects,
       prdClarification: normalizePrdClarification(input.prdClarification),
       techDesignDocument: input.techDesignDocument,
       techDesignClarification: input.techDesignClarification,

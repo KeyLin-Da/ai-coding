@@ -1,0 +1,4 @@
+[     330ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5178/api/ai-delivery/artifacts?path=docs%2F171634%2Fprd%2Fanalysis.md:0
+[     336ms] Error: ENOENT: no such file or directory, open '/Users/key.lin/work/Projects/ai-coding/docs/171634/prd/analysis.md'
+    at request (http://127.0.0.1:5178/src/api/client.ts?t=1779677325671:12:11)
+    at async load (http://127.0.0.1:5178/src/components/MarkdownEditor.vue?t=1779677325671:114:22)

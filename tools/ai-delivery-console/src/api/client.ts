@@ -1,4 +1,4 @@
-import type { ActionInput, AgentProvider, GitChangeSummary, OpenSpecSummary, RequirementInput, RequirementWorkflow, ReviewInput, RunEvent } from '@shared/workflow';
+import type { ActionInput, AgentProvider, GitChangeSummary, OpenSpecSummary, RequirementInput, RequirementWorkflow, ReviewInput, RunEvent, WorkflowProject } from '@shared/workflow';
 
 interface ApiResult<T> {
   data: T;
@@ -29,6 +29,9 @@ export const apiClient = {
   },
   listAgents() {
     return request<AgentProvider[]>('/api/ai-delivery/agents');
+  },
+  listProjectHistory() {
+    return request<WorkflowProject[]>('/api/ai-delivery/project-history');
   },
   createRequirement(input: RequirementInput) {
     return request<RequirementWorkflow>('/api/ai-delivery/requirements', {

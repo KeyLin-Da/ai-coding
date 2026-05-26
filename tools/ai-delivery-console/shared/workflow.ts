@@ -122,6 +122,11 @@ export interface PrdSourceFile {
   uploadedAt: string;
 }
 
+export interface WorkflowProject {
+  name: string;
+  path: string;
+}
+
 export type OpenSpecArtifactType = 'proposal' | 'design' | 'tasks' | 'spec';
 
 export interface OpenSpecArtifactRef {
@@ -167,12 +172,31 @@ export interface GitChangedFile {
   status: string;
   staged: boolean;
   unstaged: boolean;
+  additions?: number;
+  deletions?: number;
+}
+
+export interface GitProjectChangeSummary {
+  project: WorkflowProject;
+  currentBranch?: string;
+  expectedBranch?: string;
+  branchMatches: boolean;
+  files: GitChangedFile[];
+  stagedDiff: string;
+  unstagedDiff: string;
+  diff: string;
+  additions: number;
+  deletions: number;
+  error?: string;
 }
 
 export interface GitChangeSummary {
   updatedAt: string;
   files: GitChangedFile[];
   diff: string;
+  projects: GitProjectChangeSummary[];
+  additions: number;
+  deletions: number;
 }
 
 export type AgentInputMode = 'PROMPT_FILE' | 'STDIN' | 'ARGUMENTS' | 'MANUAL';
@@ -212,6 +236,7 @@ export interface RequirementWorkflow {
   title: string;
   requirementType?: RequirementType;
   branchName?: string;
+  projects?: WorkflowProject[];
   prdClarification?: string;
   techDesignDocument?: string;
   techDesignClarification?: string;
@@ -234,6 +259,7 @@ export interface RequirementInput {
   title?: string;
   requirementType?: RequirementType;
   branchName?: string;
+  projects?: WorkflowProject[];
   prdClarification?: string;
   techDesignDocument?: string;
   techDesignClarification?: string;

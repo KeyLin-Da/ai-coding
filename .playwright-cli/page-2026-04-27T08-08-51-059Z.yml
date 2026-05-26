@@ -1,0 +1,161 @@
+- generic [ref=e1]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - generic "Collapse" [ref=e6] [cursor=pointer]
+      - generic "Project Pages" [ref=e9]:
+        - generic [ref=e10]:
+          - list:
+            - listitem [ref=e11]:
+              - generic "Project Pages" [ref=e12] [cursor=pointer]
+        - generic [ref=e13] [cursor=pointer]:
+          - generic [ref=e14]: 组队学习（极易学）
+          - generic [ref=e15]: (7 of 8)
+    - generic [ref=e16]:
+      - list [ref=e18]:
+        - listitem [ref=e19]:
+          - generic "View Options" [ref=e20] [cursor=pointer]
+        - listitem [ref=e21]:
+          - generic "Documentation" [ref=e22] [cursor=pointer]
+      - link [ref=e26] [cursor=pointer]:
+        - /url: https://www.axure.com
+  - generic [ref=e27]:
+    - generic [ref=e28]:
+      - generic [ref=e35]: Pages
+      - list [ref=e37]:
+        - listitem [ref=e38]:
+          - generic [ref=e41] [cursor=pointer]: 更新记录
+        - listitem [ref=e43]:
+          - generic [ref=e46] [cursor=pointer]: 用户故事
+        - listitem [ref=e48]:
+          - generic [ref=e51] [cursor=pointer]: 业务流程&业务功能
+        - listitem [ref=e53]:
+          - generic [ref=e55] [cursor=pointer]: "#160461-APP"
+          - list [ref=e59]:
+            - listitem [ref=e60]:
+              - generic [ref=e63] [cursor=pointer]: 文化推广专区
+            - listitem [ref=e65]:
+              - generic [ref=e68] [cursor=pointer]: 埋点需求
+        - listitem [ref=e70]:
+          - generic [ref=e72] [cursor=pointer]: "#160461-OPP后台"
+          - list [ref=e76]:
+            - listitem [ref=e77]:
+              - generic [ref=e80] [cursor=pointer]: 组队学习（极易学）
+        - listitem [ref=e82]:
+          - generic [ref=e84] [cursor=pointer]: "#167023-用户权限配置对接会员中心"
+          - list [ref=e88]:
+            - listitem [ref=e89]:
+              - generic [ref=e92] [cursor=pointer]: 组队学习（极易学）
+            - listitem [ref=e94]:
+              - generic [ref=e97] [cursor=pointer]: 历史数据处理方案
+      - generic [ref=e99]:
+        - text: Use
+        - text: and
+        - text: keys
+        - text: to move between pages
+    - iframe [active] [ref=e106]:
+      - generic [active] [ref=f1e1]:
+        - generic:
+          - generic [ref=f1e5]:
+            - paragraph [ref=f1e6]: 【APP】【学习】O1-学习活动参与范围对接会员中心人群包（含历史数据处理）
+            - paragraph [ref=f1e7]: https://infinitus-devops.coding.net/p/opp/requirements/issues/167023/detail
+            - paragraph [ref=f1e8]: 需求概述：
+            - paragraph [ref=f1e9]: 1、组队学习（极易学）用户权限配置对接会员中心
+            - paragraph [ref=f1e10]
+          - paragraph [ref=f1e14]: 活动管理-组队打卡-组队学习（极易学）-列表页
+          - img [ref=f1e16]
+          - img [ref=f1e18]
+          - img [ref=f1e20]
+          - img [ref=f1e22]
+          - img [ref=f1e24]
+          - img [ref=f1e26]
+          - paragraph [ref=f1e30]: 活动管理-组队打卡-组队学习（极易学）-打卡学习类型-新增/编辑
+          - generic:
+            - img "u1037_seg0" [ref=f1e31]
+            - img "u1037_seg1" [ref=f1e32]
+            - img "u1037_seg2" [ref=f1e33]
+            - img "u1037_seg3" [ref=f1e34]
+            - paragraph [ref=f1e36]: 打卡学习
+          - img [ref=f1e38]
+          - img [ref=f1e40]
+          - img [ref=f1e42]
+          - img [ref=f1e44]
+          - paragraph [ref=f1e48]: 活动管理-组队打卡-组队学习（极易学）-社群学习类型-新增/编辑
+          - generic:
+            - img "u1043_seg0" [ref=f1e49]
+            - img "u1043_seg1" [ref=f1e50]
+            - img "u1043_seg2" [ref=f1e51]
+            - paragraph [ref=f1e53]: 社群学习
+          - generic [ref=f1e54]:
+            - img [ref=f1e55]
+            - paragraph [ref=f1e57]: "1"
+          - generic [ref=f1e60]:
+            - paragraph [ref=f1e61]: 组队学习（极易学）-列表页
+            - paragraph [ref=f1e62]: 1、路径：opp后台-活动管理-组队打卡-组队学习（极易学）-全部类型，即打卡学习和社群学习
+            - paragraph [ref=f1e63]
+            - paragraph [ref=f1e64]: 2、组队学习权限配置，改为调用会员中心的人群包（数据来源，查询：会员中心，应用场景为展业平台的人群包）
+            - paragraph [ref=f1e65]
+            - paragraph [ref=f1e66]: 3、「变更」新增/编辑组队学习时，对应的「发起人权限对应的请选择」和「参与人权限对应的请选择」改为：「选择投放对象」，点击弹窗「选择人群包」（数据来源，查询：会员中心，应用场景为展业平台的人群包），支持多选。
+            - paragraph [ref=f1e67]: 3.1、会员中心的人群包分组下，需要显示人群包编码、名称、类型、备注和到期时间，并支持按「人群包名称、人群包编码、类型」查询会员中心分组下的人群包；人群包名称支持模糊查询，人群包编码不支持模糊查询
+            - paragraph [ref=f1e68]: 3.2、选中人群包后，在「选择投放对象」按钮下方显示，已选择：「人群包名称1」；「人群包名称2」
+            - paragraph [ref=f1e69]
+            - paragraph [ref=f1e70]: 4、上线后，需要对历史课程的课程权限做处理。见「历史数据处理方案」
+            - paragraph [ref=f1e71]
+            - paragraph [ref=f1e72]: 5、APP端的组队活动权限回归验证，是否生效最新配置的发起人和参与人权限，包含员工身份
+            - paragraph [ref=f1e73]
+          - generic [ref=f1e74]:
+            - img [ref=f1e75]
+            - paragraph [ref=f1e77]: 变更
+          - paragraph [ref=f1e81]: 选择投放对象
+          - paragraph [ref=f1e85]: 已选择：「人群包名称」；乐享一星；乐享二星；乐享三星
+          - paragraph [ref=f1e89]: （注：如未选择，默认所有登录用户可见）
+          - img [ref=f1e91]
+          - paragraph [ref=f1e95]: 路径：会员中心-人群包管理
+          - img [ref=f1e97]
+          - generic [ref=f1e98]:
+            - img [ref=f1e99]
+            - paragraph [ref=f1e101]: 变更
+          - generic:
+            - img "u1054_seg0" [ref=f1e102]
+            - img "u1054_seg1" [ref=f1e103]
+            - img "u1054_seg2" [ref=f1e104]
+            - paragraph [ref=f1e106]: 拉起选择人群包组件
+          - paragraph [ref=f1e110]: 选择投放对象
+          - paragraph [ref=f1e114]: 已选择：「人群包名称」；乐享一星；乐享二星；乐享三星
+          - paragraph [ref=f1e118]: （注：如未选择，默认所有登录用户可见）
+          - paragraph [ref=f1e122]: 选择投放对象
+          - paragraph [ref=f1e126]: 已选择：「人群包名称」；乐享一星；乐享二星；乐享三星
+          - paragraph [ref=f1e130]: （注：如未选择，默认所有登录用户可见）
+          - generic:
+            - img "u1061_seg0" [ref=f1e131]
+            - img "u1061_seg1" [ref=f1e132]
+            - img "u1061_seg2" [ref=f1e133]
+            - paragraph [ref=f1e135]: 拉起选择人群包组件
+          - generic:
+            - img "u1062_seg0" [ref=f1e136]
+            - img "u1062_seg1" [ref=f1e137]
+            - img "u1062_seg2" [ref=f1e138]
+            - paragraph [ref=f1e140]: 拉起选择人群包组件
+          - paragraph [ref=f1e144]: 人群包选择组件
+          - generic:
+            - img "u1064_seg0" [ref=f1e145]
+            - img "u1064_seg1" [ref=f1e146]
+            - img "u1064_seg2" [ref=f1e147]
+            - img "u1064_seg3" [ref=f1e148]
+            - generic [ref=f1e149]:
+              - paragraph [ref=f1e150]: 数据来源
+              - paragraph [ref=f1e151]: 会员中心
+          - paragraph [ref=f1e155] [cursor=pointer]: 历史数据处理方案
+          - img [ref=f1e158]
+          - generic [ref=f1e159]:
+            - img [ref=f1e160]
+            - generic [ref=f1e161]:
+              - paragraph [ref=f1e162]: 同步获取
+              - paragraph [ref=f1e163]: 会员中心的
+              - paragraph [ref=f1e164]: 人群包分组
+          - generic [ref=f1e165]:
+            - img [ref=f1e166]
+            - paragraph [ref=f1e168]: "1"
+          - generic [ref=f1e169]:
+            - img [ref=f1e170]
+            - paragraph [ref=f1e172]: "1"
+          - paragraph [ref=f1e176]: 展业平台

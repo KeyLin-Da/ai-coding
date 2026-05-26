@@ -159,6 +159,24 @@ describe('action-adapters', () => {
     expect(run.commandText).not.toContain(' c=');
   });
 
+  it('技术方案生成把涉及工程作为 p 参数传入', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-action-'));
+    const current = {
+      ...workflow(),
+      projects: [
+        { name: 'opp-gateway', path: 'opp-gateway' },
+        { name: 'opp-learn', path: 'opp-learn' }
+      ]
+    };
+    const run = await executeAction(root, current, {
+      actionType: 'DESIGN_GENERATE',
+      params: {
+        documentPath: 'docs/172014/prd/analysis.md'
+      }
+    });
+    expect(run.commandText).toContain('p=opp-gateway,opp-learn');
+  });
+
   it('技术方案生成使用默认文档路径', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-action-'));
     const run = await executeAction(root, workflow(), {

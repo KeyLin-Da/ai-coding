@@ -208,20 +208,7 @@
                   <el-button :disabled="!canInspectChanges" :icon="DocumentChecked" @click="openReview">审核本步骤</el-button>
                 </div>
                 <el-alert v-if="!canInspectChanges" type="warning" show-icon title="请先完成并审核开始实施步骤" />
-                <section class="git-change-panel">
-                  <div class="section-title">
-                    <strong>变更文件</strong>
-                    <span class="muted">{{ gitChanges ? `${gitChanges.files.length} 个文件 · ${gitChanges.updatedAt}` : '未读取' }}</span>
-                  </div>
-                  <div v-if="gitChanges?.files.length" class="git-file-list">
-                    <div v-for="file in gitChanges.files" :key="`${file.status}-${file.path}`" class="git-file-row">
-                      <el-tag size="small" effect="plain">{{ file.status }}</el-tag>
-                      <span>{{ file.path }}</span>
-                    </div>
-                  </div>
-                  <el-empty v-else description="暂无 Git 变更" />
-                  <pre v-if="gitChanges?.diff" class="git-diff">{{ gitChanges.diff }}</pre>
-                </section>
+                <GitChangeInspector :summary="gitChanges" />
               </template>
 
               <template v-if="activeImplementationStep === 'UNIT_TEST'">
@@ -304,6 +291,7 @@ import ReviewDialog from '@/components/ReviewDialog.vue';
 import RunLogDrawer from '@/components/RunLogDrawer.vue';
 import ArtifactSidebar from '@/components/ArtifactSidebar.vue';
 import ArtifactPreviewDialog from '@/components/ArtifactPreviewDialog.vue';
+import GitChangeInspector from '@/components/GitChangeInspector.vue';
 import { useWorkflowStore } from '@/stores/workflow';
 import { apiClient } from '@/api/client';
 
@@ -993,50 +981,6 @@ onMounted(async () => {
   padding: 12px;
   border: 1px solid #e3e8f2;
   border-radius: 8px;
-}
-
-.git-change-panel {
-  display: grid;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid #e3e8f2;
-  border-radius: 8px;
-}
-
-.git-file-list {
-  display: grid;
-  gap: 6px;
-  max-height: 220px;
-  overflow: auto;
-}
-
-.git-file-row {
-  display: grid;
-  grid-template-columns: 64px minmax(0, 1fr);
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border: 1px solid #eef2f7;
-  border-radius: 6px;
-}
-
-.git-file-row span:last-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.git-diff {
-  max-height: 520px;
-  overflow: auto;
-  padding: 12px;
-  border: 1px solid #dbe3ef;
-  border-radius: 6px;
-  background: #0f172a;
-  color: #dbeafe;
-  font-size: 12px;
-  line-height: 1.6;
-  white-space: pre-wrap;
 }
 
 .section-title {

@@ -4,9 +4,9 @@
       <el-alert v-if="implementationStepLabel" :title="implementationStepLabel" type="info" show-icon />
       <el-form-item label="结论">
         <el-radio-group v-model="decision">
-          <el-radio-button label="APPROVED">通过</el-radio-button>
-          <el-radio-button label="REJECTED">打回</el-radio-button>
-          <el-radio-button label="RISK_ACCEPTED">带风险通过</el-radio-button>
+          <el-radio-button value="APPROVED">通过</el-radio-button>
+          <el-radio-button value="REJECTED">打回</el-radio-button>
+          <el-radio-button value="RISK_ACCEPTED">带风险通过</el-radio-button>
         </el-radio-group>
       </el-form-item>
       <el-form-item label="审核意见">

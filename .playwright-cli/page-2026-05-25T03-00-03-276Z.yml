@@ -1,0 +1,368 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - paragraph [ref=e6]: OpenSpec Delivery Console
+      - heading "AI 需求交付控制台" [level=1] [ref=e7]
+    - button "刷新" [ref=e8] [cursor=pointer]:
+      - img [ref=e10]
+      - generic [ref=e12]: 刷新
+  - main [ref=e13]:
+    - generic [ref=e14]:
+      - generic [ref=e15]:
+        - generic [ref=e16]:
+          - generic [ref=e17]:
+            - strong [ref=e18]: 【opp】【装修】新增定位菜单组件
+            - paragraph [ref=e19]: 需求号 172014 · feature/opp-172014
+          - generic [ref=e20]:
+            - button "刷新产物" [ref=e21] [cursor=pointer]:
+              - img [ref=e23]
+              - generic [ref=e25]: 刷新产物
+            - button "返回列表" [ref=e26] [cursor=pointer]:
+              - img [ref=e28]
+              - generic [ref=e31]: 返回列表
+        - generic "阶段时间线" [ref=e32]:
+          - button "1 PRD 已通过" [ref=e33] [cursor=pointer]:
+            - generic [ref=e34]: "1"
+            - generic [ref=e35]:
+              - strong [ref=e36]: PRD
+              - generic [ref=e37]: 已通过
+          - button "2 技术方案 草稿" [ref=e38] [cursor=pointer]:
+            - generic [ref=e39]: "2"
+            - generic [ref=e40]:
+              - strong [ref=e41]: 技术方案
+              - generic [ref=e42]: 草稿
+          - button "3 实施验证 未开始" [active] [ref=e43] [cursor=pointer]:
+            - generic [ref=e44]: "3"
+            - generic [ref=e45]:
+              - strong [ref=e46]: 实施验证
+              - generic [ref=e47]: 未开始
+          - button "4 代码评审 未开始" [ref=e48] [cursor=pointer]:
+            - generic [ref=e49]: "4"
+            - generic [ref=e50]:
+              - strong [ref=e51]: 代码评审
+              - generic [ref=e52]: 未开始
+      - generic [ref=e53]:
+        - main [ref=e54]:
+          - generic [ref=e55]:
+            - generic [ref=e56]:
+              - generic [ref=e57]:
+                - strong [ref=e58]: 实施验证
+                - paragraph [ref=e59]: 查看 OpenSpec 状态、发起验证和单元测试报告。
+              - generic [ref=e60]:
+                - generic [ref=e62] [cursor=pointer]:
+                  - generic:
+                    - combobox [ref=e64]
+                    - generic [ref=e65]: Codex
+                  - img [ref=e68]
+                - generic [ref=e71] [cursor=pointer]:
+                  - generic:
+                    - combobox [ref=e73]
+                    - generic [ref=e74]: 后台执行
+                  - img [ref=e77]
+                - button "审核" [ref=e79] [cursor=pointer]:
+                  - img [ref=e81]
+                  - generic [ref=e83]: 审核
+                - button "本步骤日志" [ref=e84] [cursor=pointer]:
+                  - img [ref=e86]
+                  - generic [ref=e88]: 本步骤日志
+            - generic [ref=e694]:
+              - generic [ref=e695]:
+                - textbox "OpenSpec change name，例如 req-172014" [ref=e698]: req-172014
+                - button "查看 OpenSpec 状态" [ref=e699] [cursor=pointer]:
+                  - img [ref=e701]
+                  - generic [ref=e703]: 查看 OpenSpec 状态
+                - button "发起验证" [ref=e704] [cursor=pointer]:
+                  - img [ref=e706]
+                  - generic [ref=e708]: 发起验证
+              - generic [ref=e709]:
+                - textbox "单测模块，例如 opp-diy" [ref=e712]
+                - button "生成/关联单测" [ref=e713] [cursor=pointer]:
+                  - img [ref=e715]
+                  - generic [ref=e718]: 生成/关联单测
+              - table [ref=e721]:
+                - rowgroup [ref=e722]:
+                  - row "OpenSpec openspec/changes/req-172014 归档状态 进行中" [ref=e723]:
+                    - cell "OpenSpec" [ref=e724]
+                    - cell "openspec/changes/req-172014" [ref=e725]
+                    - cell "归档状态" [ref=e726]
+                    - cell "进行中" [ref=e727]:
+                      - generic [ref=e729]: 进行中
+                  - row "任务进度 0 / 25 待处理问题 0" [ref=e730]:
+                    - cell "任务进度" [ref=e731]
+                    - cell "0 / 25" [ref=e732]
+                    - cell "待处理问题" [ref=e733]
+                    - cell "0" [ref=e734]
+              - generic [ref=e735]:
+                - generic [ref=e736]:
+                  - strong [ref=e737]: 任务完成情况
+                  - generic [ref=e738]: 0%
+                - progressbar [ref=e739]:
+                  - generic [ref=e742]: 0%
+                - generic [ref=e743]:
+                  - generic [ref=e744]:
+                    - strong [ref=e745]: 1. 后台编辑器
+                    - generic [ref=e746]:
+                      - generic [ref=e748] [cursor=pointer]:
+                        - checkbox
+                      - generic [ref=e750]: "1.1"
+                      - generic [ref=e751]: "确认实际前端工程和编辑器入口：`opp-admin-learn-vue` 或 `opp-admin-news-vue/PageDesigner`。"
+                    - generic [ref=e752]:
+                      - generic [ref=e754] [cursor=pointer]:
+                        - checkbox
+                      - generic [ref=e756]: "1.2"
+                      - generic [ref=e757]: "在组件列表新增 `locationMenu`，仅对新平衡生活+自定义微页展示。"
+                    - generic [ref=e758]:
+                      - generic [ref=e760] [cursor=pointer]:
+                        - checkbox
+                      - generic [ref=e762]: "1.3"
+                      - generic [ref=e763]: 新增默认配置：图文样式、2 个菜单项、默认颜色。
+                    - generic [ref=e764]:
+                      - generic [ref=e766] [cursor=pointer]:
+                        - checkbox
+                      - generic [ref=e768]: "1.4"
+                      - generic [ref=e769]: 实现拖拽/复制/导入唯一性校验，提示“同一页面内最多添加一个定位菜单组件”。
+                    - generic [ref=e770]:
+                      - generic [ref=e772] [cursor=pointer]:
+                        - checkbox
+                      - generic [ref=e774]: "1.5"
+                      - generic [ref=e775]: 新增画布预览组件，支持图文、纯文字、纯图片三种样式。
+                    - generic [ref=e776]:
+                      - generic [ref=e778] [cursor=pointer]:
+                        - checkbox
+                      - generic [ref=e780]: "1.6"
+                      - generic [ref=e781]: 新增右侧配置面板，支持颜色、图片、标题、宽高、菜单项增删和目标选择。
+                    - generic [ref=e782]:
+                      - generic [ref=e784] [cursor=pointer]:
+                        - checkbox
+                      - generic [ref=e786]: "1.7"
+                      - generic [ref=e787]: 目标下拉只展示当前子页面中排序在定位菜单之后的组件，同类型按序号展示。
+                    - generic [ref=e788]:
+                      - generic [ref=e790] [cursor=pointer]:
+                        - checkbox
+                      - generic [ref=e792]: "1.8"
+                      - generic [ref=e793]: 删除或排序变化时同步标记/清空失效目标。
+                  - generic [ref=e794]:
+                    - strong [ref=e795]: 2. 后端与共享 API
+                    - generic [ref=e796]:
+                      - generic [ref=e798] [cursor=pointer]:
+                        - checkbox
+                      - generic [ref=e800]: "2.1"
+                      - generic [ref=e801]: "在 `MiniPageTemplateEnum` 新增 `LOCATION_MENU(\"locationMenu\", 0)`。"
+                    - generic [ref=e802]:
+                      - generic [ref=e804] [cursor=pointer]:
+                        - checkbox
+                      - generic [ref=e806]: "2.2"
+                      - generic [ref=e807]: "新增 `TemplateLocationMenu` 和内部 `MenuItem` VO。"
+                    - generic [ref=e808]:
+                      - generic [ref=e810] [cursor=pointer]:
+                        - checkbox
+                      - generic [ref=e812]: "2.3"
+                      - generic [ref=e813]: "更新 `RenderingBase` 和 `RenderingOldEnum`，支持 V4 详情转换。"
+                    - generic [ref=e814]:
+                      - generic [ref=e816] [cursor=pointer]:
+                        - checkbox
+                      - generic [ref=e818]: "2.4"
+                      - generic [ref=e819]: "新增 `LocationMenuValidator`，校验唯一性、数量、样式、必填、图片、目标合法性。"
+                    - generic [ref=e820]:
+                      - generic [ref=e822] [cursor=pointer]:
+                        - checkbox
+                      - generic [ref=e824]: "2.5"
+                      - generic [ref=e825]: "在 `MiniPageConfigServiceImpl.save` 保存前调用校验器。"
+                    - generic [ref=e826]:
+                      - generic [ref=e828] [cursor=pointer]:
+                        - checkbox
+                      - generic [ref=e830]: "2.6"
+                      - generic [ref=e831]: 确认装修缓存刷新后新组件字段完整保留。
+                    - generic [ref=e832]:
+                      - generic [ref=e834] [cursor=pointer]:
+                        - checkbox
+                      - generic [ref=e836]: "2.7"
+                      - generic [ref=e837]: "准备 `mini_page_template_classify` 元数据 SQL。"
+                  - generic [ref=e838]:
+                    - strong [ref=e839]: 3. 用户端渲染
+                    - generic [ref=e840]:
+                      - generic [ref=e842] [cursor=pointer]:
+                        - checkbox
+                      - generic [ref=e844]: "3.1"
+                      - generic [ref=e845]: "新增 `locationMenu` 渲染组件。"
+                    - generic [ref=e846]:
+                      - generic [ref=e848] [cursor=pointer]:
+                        - checkbox
+                      - generic [ref=e850]: "3.2"
+                      - generic [ref=e851]: 渲染三种样式和选中/未选中态。
+                    - generic [ref=e852]:
+                      - generic [ref=e854] [cursor=pointer]:
+                        - checkbox
+                      - generic [ref=e856]: "3.3"
+                      - generic [ref=e857]: 实现吸顶和滚动选中态。
+                    - generic [ref=e858]:
+                      - generic [ref=e860] [cursor=pointer]:
+                        - checkbox
+                      - generic [ref=e862]: "3.4"
+                      - generic [ref=e863]: 点击菜单项滚动到目标组件，处理目标缺失和图片加载后的偏移重算。
+                    - generic [ref=e864]:
+                      - generic [ref=e866] [cursor=pointer]:
+                        - checkbox
+                      - generic [ref=e868]: "3.5"
+                      - generic [ref=e869]: 明确顶部导航偏移和是否平滑滚动。
+                  - generic [ref=e870]:
+                    - strong [ref=e871]: 4. 测试验证
+                    - generic [ref=e872]:
+                      - generic [ref=e874] [cursor=pointer]:
+                        - checkbox
+                      - generic [ref=e876]: "4.1"
+                      - generic [ref=e877]: "后端单测覆盖 `LocationMenuValidator` 成功和失败场景。"
+                    - generic [ref=e878]:
+                      - generic [ref=e880] [cursor=pointer]:
+                        - checkbox
+                      - generic [ref=e882]: "4.2"
+                      - generic [ref=e883]: "后端单测覆盖 V4 转换 `locationMenu` 不被过滤。"
+                    - generic [ref=e884]:
+                      - generic [ref=e886] [cursor=pointer]:
+                        - checkbox
+                      - generic [ref=e888]: "4.3"
+                      - generic [ref=e889]: 前端单测或手工验证组件入口、唯一性、样式切换、菜单项数量和目标下拉。
+                    - generic [ref=e890]:
+                      - generic [ref=e892] [cursor=pointer]:
+                        - checkbox
+                      - generic [ref=e894]: "4.4"
+                      - generic [ref=e895]: 用户端验证吸顶、点击定位、滚动选中、目标缺失降级。
+                    - generic [ref=e896]:
+                      - generic [ref=e898] [cursor=pointer]:
+                        - checkbox
+                      - generic [ref=e900]: "4.5"
+                      - generic [ref=e901]: "在相关模块执行最小测试命令：后端 `mvn test`，前端按实际工程执行 `npm run lint` 或目标单测。"
+              - generic [ref=e902]:
+                - generic [ref=e903]:
+                  - strong [ref=e904]: OpenSpec 文档预览
+                  - generic [ref=e905]: openspec/changes/req-172014/proposal.md
+                - generic [ref=e906]:
+                  - tablist [ref=e910]:
+                    - tab "Proposal" [selected] [ref=e912]
+                    - tab "Design" [ref=e913]
+                    - tab "Tasks" [ref=e914]
+                    - tab "location-menu-component/spec.md" [ref=e915]
+                  - generic:
+                    - tabpanel "Proposal"
+              - generic [ref=e916]:
+                - generic [ref=e917]:
+                  - generic [ref=e918]:
+                    - strong [ref=e919]: OpenSpec 文档预览
+                    - paragraph [ref=e920]: openspec/changes/req-172014/proposal.md
+                  - generic [ref=e921]:
+                    - button "读取" [ref=e922] [cursor=pointer]:
+                      - img [ref=e924]
+                      - generic [ref=e926]: 读取
+                    - button "下载" [ref=e927] [cursor=pointer]:
+                      - img [ref=e929]
+                      - generic [ref=e931]: 下载
+                    - button "保存" [ref=e932] [cursor=pointer]:
+                      - img [ref=e934]
+                      - generic [ref=e936]: 保存
+                - generic [ref=e937]:
+                  - textbox [ref=e940]: "## Why 新平衡生活+ 自定义微页需要新增“定位菜单”组件，用于长页面内快速跳转到后续组件，提升非首屏内容曝光。现有装修组件体系没有 `locationMenu` 类型，后台编辑器、后端保存校验、详情回显和用户端 V4 渲染链路都无法识别该组件。 ## What Changes - 新增装修组件类型 `locationMenu`，并在共享枚举、组件元数据、后台编辑器和用户端渲染链路中统一识别。 - 后台编辑器支持定位菜单拖拽、唯一性拦截、三种样式配置、菜单项 1-10 个配置、目标组件下拉和画布预览。 - 后端保存接口对 `locationMenu` 做唯一性、数量、必填、图片字段和目标合法性兜底校验。 - V3/V4 装修详情返回定位菜单配置；V4 新增 `TemplateLocationMenu`，避免新组件被过滤。 - 不新增业务表，沿用 `mini_page_template` 现有 JSON 承载方式。 ## Non-goals - 不调整微页上下架、投放对象、人群包、分享、主题和二维码逻辑。 - 不新增 Redis/MQ/分布式锁。 - 不做历史微页数据迁移；旧页面没有定位菜单时保持原样。 - 不改造定位菜单目标之外的组件交互。 ## Capabilities ### New Capabilities - `location-menu-component`: 支持自定义微页定位菜单组件的配置、保存、回显和用户端渲染。 ### Modified Capabilities - 微页装修组件管理：新增 `locationMenu` 类型。 - 自定义装修 V4 详情：新增 `locationMenu` 渲染转换。 ## Impact - 前端：`opp-admin-learn-vue` 需确认真实装修编辑器位置；当前工作区检索到的主要实现点在 `opp-admin-news-vue/src/components/PageDesigner`。 - 后端：`opp-diy` 的保存、详情、缓存刷新和 V4 转换链路。 - 共享 API：`opp-api/opp-diy-api` 的枚举和 VO。 - 数据库：仅新增 `mini_page_template_classify` 元数据，无 DDL。"
+                  - generic [ref=e941]:
+                    - generic [ref=e942]:
+                      - generic [ref=e943]: 预览
+                      - button "全屏预览" [ref=e944] [cursor=pointer]:
+                        - img [ref=e946]
+                    - article [ref=e948]:
+                      - heading "Why" [level=2] [ref=e949]
+                      - paragraph [ref=e950]:
+                        - text: 新平衡生活+ 自定义微页需要新增“定位菜单”组件，用于长页面内快速跳转到后续组件，提升非首屏内容曝光。现有装修组件体系没有
+                        - code [ref=e951]: locationMenu
+                        - text: 类型，后台编辑器、后端保存校验、详情回显和用户端 V4 渲染链路都无法识别该组件。
+                      - heading "What Changes" [level=2] [ref=e952]
+                      - list [ref=e953]:
+                        - listitem [ref=e954]:
+                          - text: 新增装修组件类型
+                          - code [ref=e955]: locationMenu
+                          - text: ，并在共享枚举、组件元数据、后台编辑器和用户端渲染链路中统一识别。
+                        - listitem [ref=e956]: 后台编辑器支持定位菜单拖拽、唯一性拦截、三种样式配置、菜单项 1-10 个配置、目标组件下拉和画布预览。
+                        - listitem [ref=e957]:
+                          - text: 后端保存接口对
+                          - code [ref=e958]: locationMenu
+                          - text: 做唯一性、数量、必填、图片字段和目标合法性兜底校验。
+                        - listitem [ref=e959]:
+                          - text: V3/V4 装修详情返回定位菜单配置；V4 新增
+                          - code [ref=e960]: TemplateLocationMenu
+                          - text: ，避免新组件被过滤。
+                        - listitem [ref=e961]:
+                          - text: 不新增业务表，沿用
+                          - code [ref=e962]: mini_page_template
+                          - text: 现有 JSON 承载方式。
+                      - heading "Non-goals" [level=2] [ref=e963]
+                      - list [ref=e964]:
+                        - listitem [ref=e965]: 不调整微页上下架、投放对象、人群包、分享、主题和二维码逻辑。
+                        - listitem [ref=e966]: 不新增 Redis/MQ/分布式锁。
+                        - listitem [ref=e967]: 不做历史微页数据迁移；旧页面没有定位菜单时保持原样。
+                        - listitem [ref=e968]: 不改造定位菜单目标之外的组件交互。
+                      - heading "Capabilities" [level=2] [ref=e969]
+                      - heading "New Capabilities" [level=3] [ref=e970]
+                      - list [ref=e971]:
+                        - listitem [ref=e972]:
+                          - code [ref=e973]: location-menu-component
+                          - text: ": 支持自定义微页定位菜单组件的配置、保存、回显和用户端渲染。"
+                      - heading "Modified Capabilities" [level=3] [ref=e974]
+                      - list [ref=e975]:
+                        - listitem [ref=e976]:
+                          - text: 微页装修组件管理：新增
+                          - code [ref=e977]: locationMenu
+                          - text: 类型。
+                        - listitem [ref=e978]:
+                          - text: 自定义装修 V4 详情：新增
+                          - code [ref=e979]: locationMenu
+                          - text: 渲染转换。
+                      - heading "Impact" [level=2] [ref=e980]
+                      - list [ref=e981]:
+                        - listitem [ref=e982]:
+                          - text: 前端：
+                          - code [ref=e983]: opp-admin-learn-vue
+                          - text: 需确认真实装修编辑器位置；当前工作区检索到的主要实现点在
+                          - code [ref=e984]: opp-admin-news-vue/src/components/PageDesigner
+                          - text: 。
+                        - listitem [ref=e985]:
+                          - text: 后端：
+                          - code [ref=e986]: opp-diy
+                          - text: 的保存、详情、缓存刷新和 V4 转换链路。
+                        - listitem [ref=e987]:
+                          - text: 共享 API：
+                          - code [ref=e988]: opp-api/opp-diy-api
+                          - text: 的枚举和 VO。
+                        - listitem [ref=e989]:
+                          - text: 数据库：仅新增
+                          - code [ref=e990]: mini_page_template_classify
+                          - text: 元数据，无 DDL。
+        - complementary [ref=e453]:
+          - generic [ref=e454]:
+            - strong [ref=e455]: 产物与问题
+            - button "刷新" [ref=e456] [cursor=pointer]:
+              - img [ref=e458]
+              - generic [ref=e460]: 刷新
+          - generic [ref=e464]:
+            - button "PRD 分析文档 docs/172014/prd/analysis.md" [ref=e465] [cursor=pointer]:
+              - generic [ref=e466]: PRD 分析文档
+              - generic [ref=e467]: docs/172014/prd/analysis.md
+            - button "技术方案评审文档 docs/172014/technical-design/design_review.md" [ref=e468] [cursor=pointer]:
+              - generic [ref=e469]: 技术方案评审文档
+              - generic [ref=e470]: docs/172014/technical-design/design_review.md
+            - button "OpenSpec Change openspec/changes/req-172014" [ref=e471] [cursor=pointer]:
+              - generic [ref=e472]: OpenSpec Change
+              - generic [ref=e473]: openspec/changes/req-172014
+            - button "OpenSpec Proposal openspec/changes/req-172014/proposal.md" [ref=e474] [cursor=pointer]:
+              - generic [ref=e475]: OpenSpec Proposal
+              - generic [ref=e476]: openspec/changes/req-172014/proposal.md
+            - button "OpenSpec Design openspec/changes/req-172014/design.md" [ref=e477] [cursor=pointer]:
+              - generic [ref=e478]: OpenSpec Design
+              - generic [ref=e479]: openspec/changes/req-172014/design.md
+            - button "OpenSpec Tasks openspec/changes/req-172014/tasks.md" [ref=e480] [cursor=pointer]:
+              - generic [ref=e481]: OpenSpec Tasks
+              - generic [ref=e482]: openspec/changes/req-172014/tasks.md
+            - button "OpenSpec location-menu-component openspec/changes/req-172014/specs/location-menu-component/spec.md" [ref=e483] [cursor=pointer]:
+              - generic [ref=e484]: OpenSpec location-menu-component
+              - generic [ref=e485]: openspec/changes/req-172014/specs/location-menu-component/spec.md
+          - generic [ref=e486]:
+            - strong [ref=e487]: 评审问题
+            - generic [ref=e488]:
+              - img [ref=e490]
+              - paragraph [ref=e507]: 暂无问题

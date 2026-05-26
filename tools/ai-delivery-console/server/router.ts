@@ -13,6 +13,7 @@ import { applyReview, refreshCodeReviewIssues, returnToImplementation } from './
 import { cancelAgentRun, listAgentProviders, refreshTerminalRunStatuses } from './services/agent-providers';
 import { normalizeOpenSpecChangeName, readOpenSpecSummary, updateOpenSpecTaskStatus } from './services/openspec-summary';
 import { readGitChanges } from './services/git-changes';
+import { readProjectHistory } from './services/project-history';
 import {
   assertAllowedPrdSourceFile,
   deletePrdSourceFileSnapshot,
@@ -180,6 +181,11 @@ export function createRouter(workspaceRoot: string) {
         return;
       }
 
+      if (request.method === 'GET' && pathname === '/api/ai-delivery/project-history') {
+        send(response, 200, { data: await readProjectHistory(workspaceRoot) });
+        return;
+      }
+
       if (request.method === 'GET' && pathname === '/api/ai-delivery/requirements') {
         const workflows = await Promise.all(
           (await repository.list()).map(async (workflow) => {
@@ -259,7 +265,7 @@ export function createRouter(workspaceRoot: string) {
           send(response, 404, { message: '需求不存在' });
           return;
         }
-        send(response, 200, { data: await readGitChanges(workspaceRoot) });
+        send(response, 200, { data: await readGitChanges(workspaceRoot, workflow.projects || [], workflow.branchName) });
         return;
       }
 

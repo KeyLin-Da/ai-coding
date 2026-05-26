@@ -1,0 +1,71 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - paragraph [ref=e6]: OpenSpec Delivery Console
+      - heading "AI 需求交付控制台" [level=1] [ref=e7]
+    - button "刷新" [ref=e8] [cursor=pointer]:
+      - img [ref=e10]
+      - generic [ref=e12]: 刷新
+  - main [ref=e13]:
+    - generic [ref=e14]:
+      - generic [ref=e15]:
+        - generic [ref=e16]:
+          - strong [ref=e17]: 需求工作流
+          - paragraph [ref=e18]: 按需求号聚合 PRD、技术方案、OpenSpec、单测和代码评审。
+        - button "创建/导入" [ref=e19] [cursor=pointer]:
+          - img [ref=e21]
+          - generic [ref=e23]: 创建/导入
+      - generic [ref=e24]:
+        - generic [ref=e25]:
+          - table [ref=e27]:
+            - rowgroup [ref=e35]:
+              - row "需求号 标题 分支 阶段 最近运行 操作" [ref=e36]:
+                - columnheader "需求号" [ref=e37]:
+                  - generic [ref=e38]: 需求号
+                - columnheader "标题" [ref=e39]:
+                  - generic [ref=e40]: 标题
+                - columnheader "分支" [ref=e41]:
+                  - generic [ref=e42]: 分支
+                - columnheader "阶段" [ref=e43]:
+                  - generic [ref=e44]: 阶段
+                - columnheader "最近运行" [ref=e45]:
+                  - generic [ref=e46]: 最近运行
+                - columnheader "操作" [ref=e47]:
+                  - generic [ref=e48]: 操作
+          - table [ref=e53]:
+            - rowgroup [ref=e61]:
+              - row "171634 【无需求】api/v2/coursePlan/getPlanCoursePage接口优化 bugfix/opp-171634 PRD REFRESH_ARTIFACTS 查看" [ref=e62]:
+                - cell "171634" [ref=e63]:
+                  - generic [ref=e64]: "171634"
+                - cell "【无需求】api/v2/coursePlan/getPlanCoursePage接口优化" [ref=e65]:
+                  - generic [ref=e66]: 【无需求】api/v2/coursePlan/getPlanCoursePage接口优化
+                - cell "bugfix/opp-171634" [ref=e67]:
+                  - generic [ref=e68]: bugfix/opp-171634
+                - cell "PRD" [ref=e69]:
+                  - generic [ref=e70]:
+                    - generic:
+                      - generic: PRD
+                - cell "REFRESH_ARTIFACTS" [ref=e71]:
+                  - generic [ref=e72]: REFRESH_ARTIFACTS
+                - cell "查看" [ref=e73]:
+                  - button "查看" [ref=e75] [cursor=pointer]:
+                    - img [ref=e77]
+                    - generic [ref=e79]: 查看
+              - row "172014 【opp】【装修】新增定位菜单组件 feature/opp-172014 PRD OPENSPEC_STATUS 查看" [ref=e80]:
+                - cell "172014" [ref=e81]:
+                  - generic [ref=e82]: "172014"
+                - cell "【opp】【装修】新增定位菜单组件" [ref=e83]:
+                  - generic [ref=e84]: 【opp】【装修】新增定位菜单组件
+                - cell "feature/opp-172014" [ref=e85]:
+                  - generic [ref=e86]: feature/opp-172014
+                - cell "PRD" [ref=e87]:
+                  - generic [ref=e88]:
+                    - generic:
+                      - generic: PRD
+                - cell "OPENSPEC_STATUS" [ref=e89]:
+                  - generic [ref=e90]: OPENSPEC_STATUS
+                - cell "查看" [ref=e91]:
+                  - button "查看" [ref=e93] [cursor=pointer]:
+                    - img [ref=e95]
+                    - generic [ref=e97]: 查看
+        - img [ref=e100]

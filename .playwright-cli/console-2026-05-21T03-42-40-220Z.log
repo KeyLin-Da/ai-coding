@@ -1,0 +1,22 @@
+[    5359ms] [WARNING] Statsig is not ready to log exposures, will retry in 1 seconds @ https://www.figma.com/webpack-artifacts/assets/vendor-core-1e44c283e4ec92dd.min.js.br:53
+[    5791ms] [ERROR] Failed to load resource: the server responded with a status of 401 () @ https://www.figma.com/api/statsig/v1_ruleset:0
+[    5791ms] [ERROR] Failed to fetch v1 ruleset: w: XHR for "/api/statsig/v1_ruleset" failed with status 401
+    at P (https://www.figma.com/webpack-artifacts/assets/3730-3b7f1ccd632c68eb.min.js.br:1418:10906)
+    at async Object.O [as get] (https://www.figma.com/webpack-artifacts/assets/3730-3b7f1ccd632c68eb.min.js.br:1418:11289)
+    at async https://www.figma.com/webpack-artifacts/assets/9820-8b06d26d1428f771.min.js.br:145:93709
+    at async g.validate (https://www.figma.com/webpack-artifacts/assets/3730-3b7f1ccd632c68eb.min.js.br:1398:5067)
+    at async b (https://www.figma.com/webpack-artifacts/assets/3730-3b7f1ccd632c68eb.min.js.br:1379:170174)
+    at async A (https://www.figma.com/webpack-artifacts/assets/3730-3b7f1ccd632c68eb.min.js.br:1379:169378)
+    at async Object.write (https://www.figma.com/webpack-artifacts/assets/3730-3b7f1ccd632c68eb.min.js.br:1379:168997) @ https://www.figma.com/webpack-artifacts/assets/vendor-core-1e44c283e4ec92dd.min.js.br:53
+[   17071ms] [ERROR] Failed to load resource: the server responded with a status of 401 () @ https://www.figma.com/api/files/w4SWNBKZc84H07MktT2mtR/prototype/view:0
+[  398820ms] [WARNING] Statsig is not ready to log exposures, will retry in 1 seconds @ https://www.figma.com/webpack-artifacts/assets/vendor-core-1e44c283e4ec92dd.min.js.br:53
+[  400793ms] [ERROR] Failed to load resource: the server responded with a status of 401 () @ https://www.figma.com/api/statsig/v1_ruleset:0
+[  400793ms] [ERROR] Failed to fetch v1 ruleset: w: XHR for "/api/statsig/v1_ruleset" failed with status 401
+    at P (https://www.figma.com/webpack-artifacts/assets/3730-3b7f1ccd632c68eb.min.js.br:1418:10906)
+    at async Object.O [as get] (https://www.figma.com/webpack-artifacts/assets/3730-3b7f1ccd632c68eb.min.js.br:1418:11289)
+    at async https://www.figma.com/webpack-artifacts/assets/9820-8b06d26d1428f771.min.js.br:145:93709
+    at async g.validate (https://www.figma.com/webpack-artifacts/assets/3730-3b7f1ccd632c68eb.min.js.br:1398:5067)
+    at async b (https://www.figma.com/webpack-artifacts/assets/3730-3b7f1ccd632c68eb.min.js.br:1379:170174)
+    at async A (https://www.figma.com/webpack-artifacts/assets/3730-3b7f1ccd632c68eb.min.js.br:1379:169378)
+    at async Object.write (https://www.figma.com/webpack-artifacts/assets/3730-3b7f1ccd632c68eb.min.js.br:1379:168997) @ https://www.figma.com/webpack-artifacts/assets/vendor-core-1e44c283e4ec92dd.min.js.br:53
+[  407930ms] [ERROR] Failed to load resource: the server responded with a status of 401 () @ https://www.figma.com/api/files/w4SWNBKZc84H07MktT2mtR/prototype/view:0

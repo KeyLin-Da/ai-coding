@@ -11,6 +11,7 @@ metadata:
 **输入**: `/coding-design` 之后的参数：
 - `d=需求描述或文档路径`（必填）- 可以是文本描述、本地文件路径或飞书文档链接
 - `r=需求编号`（必填）- 需求编号，如 171635，将自动生成 change-name 为 req-171635
+- `p=涉及工程模块`（可选）- 指定涉及的工程模块名称，多个模块用逗号分隔，如 opp-user,opp-material。用于精准定位相关代码
 - `c=评审意见或补充说明`（可选）- 用于二次评审时提供评审意见、修改建议或补充说明
 
 ## 角色定位
@@ -35,6 +36,12 @@ metadata:
   /coding-design d=需求描述 r=171635
   ```
 - 只有在校验通过后，才继续执行后续步骤
+
+**解析涉及工程模块（如果提供了 p= 参数）：**
+- 如果提供了 `p=` 参数，解析出涉及的工程模块列表
+- 这些模块将作为代码搜索的优先范围，提高代码查找效率
+- 支持的模块包括：opp-user、opp-material、opp-task、opp-learn、opp-admin-bff、opp-openapi、opp-gateway 等
+- 示例：`p=opp-user,opp-material` 表示需求涉及用户服务和素材服务两个模块
 
 **二次评审模式检测：**
 - 如果提供了 `c=` 参数，则进入二次评审模式
@@ -74,7 +81,25 @@ read_file({
 
 #### 2.2 首次设计模式（未提供 c= 参数）
 
-使用Skill工具调用openspec-explore进行需求探索和技术分析：
+**代码探索策略：**
+
+**如果提供了 `p=` 参数（涉及工程模块）：**
+- 优先在指定的工程模块中进行代码搜索和分析
+- 使用 `search_codebase` 工具时，通过 `target_directories` 参数限定搜索范围
+- 示例：
+  ```javascript
+  search_codebase({
+    query: "用户认证相关逻辑",
+    key_words: "authentication,login,token",
+    target_directories: ["/Users/key.lin/work/Projects/ai-coding/opp-user", "/Users/key.lin/work/Projects/ai-coding/opp-admin-bff"]
+  })
+  ```
+
+**如果未提供 `p=` 参数：**
+- 在整个工作区范围内进行代码搜索
+- 根据需求描述自动识别可能涉及的模块
+
+**调用 openspec-explore 进行需求探索：**
 
 ```javascript
 Skill({
