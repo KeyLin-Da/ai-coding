@@ -231,7 +231,7 @@ watch(
 <style scoped>
 .editor-layout {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 12px;
   align-items: stretch;
   min-height: 450px;
@@ -241,6 +241,7 @@ watch(
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-width: 0;
 }
 
 .editor-panel :deep(.el-textarea) {
@@ -266,6 +267,7 @@ watch(
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-width: 0;
   border: 1px solid #dfe6f1;
   border-radius: 6px;
   overflow: hidden;
@@ -338,5 +340,20 @@ watch(
   max-height: calc(100vh - 120px);
   margin: 20px auto;
   object-fit: contain;
+}
+
+@media (max-width: 760px) {
+  .editor-layout {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+
+  .editor-panel :deep(.el-textarea__inner) {
+    min-height: 260px;
+  }
+
+  .preview-container {
+    min-height: 320px;
+  }
 }
 </style>

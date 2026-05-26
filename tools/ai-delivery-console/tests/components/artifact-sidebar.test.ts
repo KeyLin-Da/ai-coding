@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import ArtifactSidebar from '../../src/components/ArtifactSidebar.vue';
 
 describe('ArtifactSidebar', () => {
-  it('展示产物和阻断问题，并允许选择产物', async () => {
+  it('按阶段展示文件产物和阻断问题，并过滤目录产物', async () => {
     const wrapper = mount(ArtifactSidebar, {
       props: {
         artifacts: [
@@ -13,6 +13,22 @@ describe('ArtifactSidebar', () => {
             label: 'PRD 分析文档',
             path: 'docs/172014/prd/analysis.md',
             kind: 'markdown',
+            exists: true
+          },
+          {
+            id: 'openspec-proposal',
+            stage: 'IMPLEMENTATION',
+            label: 'OpenSpec Proposal',
+            path: 'openspec/changes/req-172014/proposal.md',
+            kind: 'markdown',
+            exists: true
+          },
+          {
+            id: 'openspec-change',
+            stage: 'IMPLEMENTATION',
+            label: 'OpenSpec Change',
+            path: 'openspec/changes/req-172014',
+            kind: 'directory',
             exists: true
           }
         ],
@@ -28,9 +44,12 @@ describe('ArtifactSidebar', () => {
       }
     });
 
+    expect(wrapper.text()).toContain('产物');
     expect(wrapper.text()).toContain('PRD 分析文档');
+    expect(wrapper.text()).toContain('Proposal');
+    expect(wrapper.text()).not.toContain('OpenSpec Change');
     expect(wrapper.text()).toContain('阻断问题');
     await wrapper.find('.artifact-row').trigger('click');
-    expect(wrapper.emitted('select')?.[0]).toEqual(['docs/172014/prd/analysis.md']);
+    expect(wrapper.emitted('select')?.[0][0]).toMatchObject({ path: 'docs/172014/prd/analysis.md' });
   });
 });

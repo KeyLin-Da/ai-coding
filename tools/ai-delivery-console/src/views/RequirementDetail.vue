@@ -1,23 +1,30 @@
 <template>
   <div v-if="workflow" class="detail-page">
-    <section class="workspace-band">
-      <div class="toolbar">
-        <div>
-          <strong>{{ workflow.title }}</strong>
-          <p class="muted">需求号 {{ workflow.requirementId }} · {{ workflow.branchName || '未绑定分支' }}</p>
+    <section class="workspace-band requirement-hero">
+      <div class="requirement-hero-top">
+        <div class="requirement-breadcrumb">
+          <span>需求</span>
+          <span>/</span>
+          <strong>{{ workflow.requirementId }}</strong>
         </div>
-        <div>
+        <div class="requirement-hero-actions">
           <el-button :icon="Refresh" @click="runRefresh">刷新产物</el-button>
           <el-button :icon="Back" @click="$router.push('/')">返回列表</el-button>
         </div>
       </div>
+      <h2 class="requirement-title">{{ workflow.title }}</h2>
+      <div class="requirement-meta">
+        <el-tag size="small" :type="requirementTypeTagType(workflow.requirementType)" effect="light">{{ requirementTypeText }}</el-tag>
+        <el-tag size="small" :type="statusTagType(workflow.status)" effect="light">{{ statusLabels[workflow.status] }}</el-tag>
+        <span class="branch-pill">{{ workflow.branchName || '未绑定分支' }}</span>
+      </div>
       <StageTimeline v-model="activeStage" :workflow="workflow" />
     </section>
 
-    <div class="stage-grid" style="margin-top: 16px">
+    <div class="stage-grid">
       <main>
         <section class="workspace-band stage-panel">
-          <div class="toolbar">
+          <div class="toolbar stage-panel-header">
             <div>
               <strong>{{ stageLabels[activeStage] }}</strong>
               <p class="muted">{{ stageHint }}</p>
@@ -109,26 +116,36 @@
                   </span>
                 </button>
               </nav>
-              <div class="implementation-summary-strip" aria-label="实施验证摘要">
-                <span class="summary-item">
-                  <span class="summary-label">OpenSpec</span>
-                  <strong class="summary-value">{{ implementationOpenSpecPath }}</strong>
-                </span>
-                <span class="summary-item">
-                  <span class="summary-label">状态</span>
-                  <el-tag :type="openSpecSummary?.archived ? 'success' : 'info'" size="small">
-                    {{ implementationArchiveStatus }}
-                  </el-tag>
-                </span>
-                <span class="summary-item">
-                  <span class="summary-label">任务</span>
-                  <strong class="summary-value">{{ implementationTaskProgress }}</strong>
-                </span>
-                <span class="summary-item">
-                  <span class="summary-label">问题</span>
-                  <strong class="summary-value">{{ openIssueCount }}</strong>
-                </span>
-              </div>
+              <section class="implementation-summary-strip" aria-label="实施验证摘要">
+                <div class="summary-main">
+                  <div class="summary-heading">
+                    <strong>OpenSpec</strong>
+                    <el-tag :type="openSpecSummary?.archived ? 'success' : 'primary'" size="small" effect="light">
+                      {{ implementationArchiveStatus }}
+                    </el-tag>
+                  </div>
+                  <p class="summary-path">{{ implementationOpenSpecPath }}</p>
+                  <el-progress :percentage="openSpecTaskPercentage" :stroke-width="8" />
+                </div>
+                <div class="summary-metrics">
+                  <span class="metric-card done">
+                    <small>已完成</small>
+                    <strong>{{ openSpecSummary?.tasks.completed || 0 }}</strong>
+                  </span>
+                  <span class="metric-card pending">
+                    <small>待完成</small>
+                    <strong>{{ openSpecPendingTaskCount }}</strong>
+                  </span>
+                  <span class="metric-card issue">
+                    <small>问题</small>
+                    <strong>{{ openIssueCount }}</strong>
+                  </span>
+                  <span class="metric-card total">
+                    <small>总任务</small>
+                    <strong>{{ openSpecSummary?.tasks.total || 0 }}</strong>
+                  </span>
+                </div>
+              </section>
 
               <template v-if="activeImplementationStep === 'ARTIFACT_REVIEW'">
                 <div class="action-line">
@@ -242,11 +259,12 @@
         </section>
       </main>
 
-      <ArtifactSidebar :artifacts="workflow.artifacts" :issues="workflow.issues" @refresh="runRefresh" @select="selectArtifact" />
+      <ArtifactSidebar :artifacts="workflow.artifacts" :issues="workflow.issues" @refresh="runRefresh" @select="previewArtifact" />
     </div>
 
     <ReviewDialog ref="reviewDialog" @submit="submitReview" />
     <RunLogDrawer ref="runLogDrawer" :events="store.runEvents" />
+    <ArtifactPreviewDialog ref="artifactPreviewDialog" />
   </div>
   <el-empty v-else description="需求加载中" />
 </template>
@@ -256,12 +274,25 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { Back, CopyDocument, Cpu, DataAnalysis, Delete, DocumentChecked, Operation, Refresh, Tickets, Upload } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
-import type { ActionInput, ExecutionMode, GitChangeSummary, ImplementationStep, OpenSpecSummary, OpenSpecTaskItem, RunRecord, WorkflowStage } from '@shared/workflow';
+import type {
+  ActionInput,
+  ArtifactRef,
+  ExecutionMode,
+  GitChangeSummary,
+  ImplementationStep,
+  OpenSpecSummary,
+  OpenSpecTaskItem,
+  RequirementType,
+  RunRecord,
+  WorkflowStage,
+  WorkflowStatus
+} from '@shared/workflow';
 import {
   ensureImplementationSteps,
   implementationStepForAction,
   implementationStepLabels,
   implementationSteps,
+  requirementTypeLabels,
   stageForAction,
   stageLabels,
   statusLabels
@@ -272,6 +303,7 @@ import OpenSpecDocuments from '@/components/OpenSpecDocuments.vue';
 import ReviewDialog from '@/components/ReviewDialog.vue';
 import RunLogDrawer from '@/components/RunLogDrawer.vue';
 import ArtifactSidebar from '@/components/ArtifactSidebar.vue';
+import ArtifactPreviewDialog from '@/components/ArtifactPreviewDialog.vue';
 import { useWorkflowStore } from '@/stores/workflow';
 import { apiClient } from '@/api/client';
 
@@ -280,6 +312,7 @@ const store = useWorkflowStore();
 const activeStage = ref<WorkflowStage>('PRD');
 const reviewDialog = ref<InstanceType<typeof ReviewDialog>>();
 const runLogDrawer = ref<InstanceType<typeof RunLogDrawer>>();
+const artifactPreviewDialog = ref<InstanceType<typeof ArtifactPreviewDialog>>();
 const prdFileInput = ref<HTMLInputElement>();
 const selectedArtifactPath = ref('');
 const sourceText = ref('');
@@ -325,6 +358,7 @@ const openSpecTaskPercentage = computed(() => {
   }
   return Math.round(((openSpecSummary.value?.tasks.completed || 0) / total) * 100);
 });
+const openSpecPendingTaskCount = computed(() => Math.max(0, (openSpecSummary.value?.tasks.total || 0) - (openSpecSummary.value?.tasks.completed || 0)));
 const canArchiveOpenSpec = computed(() => Boolean(workflow.value?.stages.CODE_REVIEW.status === 'APPROVED' && !openSpecSummary.value?.archived));
 const canRunOpenSpecApply = computed(() => implementationStepStates.value.ARTIFACT_REVIEW.status === 'APPROVED');
 const canInspectChanges = computed(() => implementationStepStates.value.APPLY.status === 'APPROVED');
@@ -332,9 +366,7 @@ const canRunJunit = computed(() => implementationStepStates.value.CHANGE_INSPECT
 const openIssueCount = computed(() => workflow.value?.issues.filter((item) => item.status === 'OPEN').length || 0);
 const implementationOpenSpecPath = computed(() => openSpecSummary.value?.rootPath || stageArtifactPath('IMPLEMENTATION') || '未关联');
 const implementationArchiveStatus = computed(() => (openSpecSummary.value?.archived ? '已归档' : '进行中'));
-const implementationTaskProgress = computed(() =>
-  openSpecSummary.value ? `${openSpecSummary.value.tasks.completed} / ${openSpecSummary.value.tasks.total}` : '未读取'
-);
+const requirementTypeText = computed(() => requirementTypeLabels[workflow.value?.requirementType || 'REQUIREMENT']);
 const junitArtifactPath = computed(
   () =>
     workflow.value?.artifacts.find((artifact) => artifact.stage === 'IMPLEMENTATION' && artifact.exists && artifact.kind !== 'directory' && artifact.path.includes('/junit/'))?.path ||
@@ -396,12 +428,8 @@ async function loadOpenSpecSummary() {
   }
 }
 
-function selectArtifact(path: string) {
-  selectedArtifactPath.value = path;
-  const artifact = workflow.value?.artifacts.find((item) => item.path === path);
-  if (artifact) {
-    activeStage.value = artifact.stage;
-  }
+function previewArtifact(artifact: ArtifactRef) {
+  artifactPreviewDialog.value?.open(artifact);
 }
 
 async function runRefresh() {
@@ -469,6 +497,26 @@ function actionButtonText(label: string) {
 
 function primaryActionIcon(icon: unknown) {
   return manualCopyMode.value ? CopyDocument : icon;
+}
+
+function requirementTypeTagType(type?: RequirementType) {
+  return type === 'DEFECT' ? 'primary' : 'success';
+}
+
+function statusTagType(status?: WorkflowStatus) {
+  if (status === 'APPROVED' || status === 'DONE') {
+    return 'success';
+  }
+  if (status === 'REJECTED' || status === 'BLOCKED') {
+    return 'danger';
+  }
+  if (status === 'IN_PROGRESS' || status === 'IN_REVIEW') {
+    return 'primary';
+  }
+  if (status === 'READY_FOR_REVIEW') {
+    return 'warning';
+  }
+  return 'info';
 }
 
 async function copyToClipboard(text: string) {
@@ -685,8 +733,95 @@ onMounted(async () => {
   gap: 16px;
 }
 
+.detail-page > *,
+.stage-grid > * {
+  min-width: 0;
+}
+
+.requirement-hero {
+  overflow: hidden;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
+}
+
+.requirement-hero-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 16px 8px;
+}
+
+.requirement-breadcrumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.requirement-breadcrumb strong {
+  color: #334155;
+  font-weight: 600;
+}
+
+.requirement-hero-actions {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 10px;
+}
+
+.requirement-title {
+  margin: 0;
+  padding: 0 16px;
+  color: #111827;
+  font-size: 20px;
+  font-weight: 650;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.requirement-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 16px 14px;
+}
+
+.branch-pill {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid #dbe3ef;
+  border-radius: 6px;
+  color: #475569;
+  background: #f8fafc;
+  font-size: 12px;
+  line-height: 22px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stage-grid {
+  margin-top: 0;
+}
+
+.stage-panel {
+  overflow: hidden;
+}
+
+.stage-panel-header {
+  background: #fff;
+}
+
 .stage-content {
-  padding: 14px;
+  padding: 16px;
 }
 
 .stage-actions {
@@ -716,7 +851,7 @@ onMounted(async () => {
 .implementation-step-nav {
   display: grid;
   grid-template-columns: repeat(4, minmax(150px, 1fr));
-  gap: 8px;
+  gap: 10px;
 }
 
 .implementation-step-button {
@@ -724,8 +859,8 @@ onMounted(async () => {
   align-items: center;
   gap: 10px;
   min-width: 0;
-  min-height: 62px;
-  padding: 10px;
+  min-height: 68px;
+  padding: 12px;
   border: 1px solid #dbe3ef;
   border-radius: 8px;
   background: #fff;
@@ -736,45 +871,82 @@ onMounted(async () => {
 
 .implementation-step-button.active {
   border-color: #2563eb;
-  background: #f0f6ff;
+  background: #f8fbff;
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.08);
 }
 
 .implementation-step-button.approved .step-index {
-  background: #16875a;
+  background: #16a36a;
 }
 
 .implementation-summary-strip {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) auto;
+  gap: 18px;
+  padding: 14px 16px;
   border: 1px solid #e3e8f2;
   border-radius: 8px;
-  background: #fbfcff;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
 }
 
-.summary-item {
-  display: inline-flex;
+.summary-main {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.summary-heading {
+  display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
-  max-width: 100%;
-  color: #52637a;
 }
 
-.summary-label {
-  color: #697891;
-  white-space: nowrap;
-}
-
-.summary-value {
+.summary-path {
+  margin: 0;
   min-width: 0;
-  color: #1f2a3d;
-  font-weight: 600;
+  color: #64748b;
+  font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.summary-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(72px, 1fr));
+  gap: 10px;
+  min-width: 360px;
+}
+
+.metric-card {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border-left: 1px solid #e3e8f2;
+}
+
+.metric-card small {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.metric-card strong {
+  color: #172033;
+  font-size: 20px;
+  line-height: 1.15;
+}
+
+.metric-card.done strong {
+  color: #16a36a;
+}
+
+.metric-card.pending strong {
+  color: #f59e0b;
+}
+
+.metric-card.issue strong {
+  color: #ef4444;
 }
 
 .step-index {
@@ -968,6 +1140,19 @@ onMounted(async () => {
 }
 
 @media (max-width: 760px) {
+  .requirement-hero-top {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .requirement-hero-actions {
+    justify-content: flex-start;
+  }
+
+  .requirement-title {
+    font-size: 18px;
+  }
+
   .action-line {
     align-items: stretch;
     flex-direction: column;
@@ -988,12 +1173,17 @@ onMounted(async () => {
   }
 
   .implementation-summary-strip {
-    align-items: stretch;
-    flex-direction: column;
+    grid-template-columns: 1fr;
   }
 
-  .summary-item {
-    justify-content: space-between;
+  .summary-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    min-width: 0;
+  }
+
+  .metric-card {
+    border-left: 0;
+    border-top: 1px solid #e3e8f2;
   }
 }
 </style>

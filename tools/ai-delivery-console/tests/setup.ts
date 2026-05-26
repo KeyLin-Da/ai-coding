@@ -4,6 +4,9 @@ config.global.stubs = {
   ElButton: {
     template: '<button><slot /></button>'
   },
+  ElDialog: {
+    template: '<div><slot name="header" /><slot /></div>'
+  },
   ElEmpty: {
     template: '<div><slot /></div>'
   },
@@ -28,4 +31,8 @@ config.global.stubs = {
   ElTimelineItem: {
     template: '<div><slot /></div>'
   }
+};
+
+config.global.directives = {
+  loading: {}
 };

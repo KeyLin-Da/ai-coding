@@ -548,6 +548,17 @@ export function createRouter(workspaceRoot: string) {
           // 根据文件扩展名设置 Content-Type
           const ext = pathModule.extname(filePath).toLowerCase();
           const mimeTypes: Record<string, string> = {
+            '.html': 'text/html; charset=utf-8',
+            '.htm': 'text/html; charset=utf-8',
+            '.md': 'text/markdown; charset=utf-8',
+            '.markdown': 'text/markdown; charset=utf-8',
+            '.json': 'application/json; charset=utf-8',
+            '.txt': 'text/plain; charset=utf-8',
+            '.log': 'text/plain; charset=utf-8',
+            '.xml': 'application/xml; charset=utf-8',
+            '.yaml': 'text/yaml; charset=utf-8',
+            '.yml': 'text/yaml; charset=utf-8',
+            '.pdf': 'application/pdf',
             '.png': 'image/png',
             '.jpg': 'image/jpeg',
             '.jpeg': 'image/jpeg',
