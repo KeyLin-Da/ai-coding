@@ -182,6 +182,7 @@ export interface GitProjectChangeSummary {
   expectedBranch?: string;
   branchMatches: boolean;
   files: GitChangedFile[];
+  untrackedFiles: GitChangedFile[];
   stagedDiff: string;
   unstagedDiff: string;
   diff: string;
@@ -193,6 +194,7 @@ export interface GitProjectChangeSummary {
 export interface GitChangeSummary {
   updatedAt: string;
   files: GitChangedFile[];
+  untrackedFiles: GitChangedFile[];
   diff: string;
   projects: GitProjectChangeSummary[];
   additions: number;

@@ -19,6 +19,14 @@ describe('GitChangeInspector', () => {
           deletions: 1
         }
       ],
+      untrackedFiles: [
+        {
+          path: 'opp-gateway/src/generated.ts',
+          status: '??',
+          staged: false,
+          unstaged: true
+        }
+      ],
       diff: '',
       projects: [
         {
@@ -39,6 +47,14 @@ describe('GitChangeInspector', () => {
               unstaged: true,
               additions: 1,
               deletions: 1
+            }
+          ],
+          untrackedFiles: [
+            {
+              path: 'src/generated.ts',
+              status: '??',
+              staged: false,
+              unstaged: true
             }
           ],
           stagedDiff: '',
@@ -73,6 +89,8 @@ describe('GitChangeInspector', () => {
     expect(wrapper.text()).toContain('工程变更概览');
     expect(wrapper.text()).toContain('opp-gateway');
     expect(wrapper.text()).toContain('src/a.ts');
+    expect(wrapper.text()).toContain('待确认新文件');
+    expect(wrapper.text()).toContain('src/generated.ts');
     expect(wrapper.html()).toContain('d2h-file-wrapper');
   });
 });

@@ -40,6 +40,7 @@ describe('git-changes', () => {
     await git(projectRoot, ['-c', 'user.email=test@example.com', '-c', 'user.name=Test', 'commit', '-m', 'init']);
     await git(projectRoot, ['checkout', '-b', 'feature/opp#172014']);
     await fs.writeFile(path.join(projectRoot, 'src', 'a.txt'), 'old\nnew\n', 'utf8');
+    await fs.writeFile(path.join(projectRoot, 'src', 'generated.txt'), 'generated\n', 'utf8');
 
     const summary = await readGitChanges(
       workspace,
@@ -56,8 +57,11 @@ describe('git-changes', () => {
     expect(summary.projects[0].currentBranch).toBe('feature/opp#172014');
     expect(summary.projects[0].branchMatches).toBe(true);
     expect(summary.projects[0].files[0].path).toBe('src/a.txt');
+    expect(summary.projects[0].files.map((file) => file.path)).not.toContain('src/generated.txt');
+    expect(summary.projects[0].untrackedFiles[0].path).toBe('src/generated.txt');
     expect(summary.projects[0].additions).toBeGreaterThan(0);
     expect(summary.projects[0].diff).toContain('diff --git');
     expect(summary.files[0].path).toBe('opp-gateway/src/a.txt');
+    expect(summary.untrackedFiles[0].path).toBe('opp-gateway/src/generated.txt');
   });
 });

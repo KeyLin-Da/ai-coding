@@ -102,13 +102,16 @@ async function readProjectGitChanges(workspaceRoot: string, project: WorkflowPro
   try {
     const [currentBranch, status, unstagedDiff, stagedDiff, unstagedNumstat, stagedNumstat] = await Promise.all([
       runGit(projectRoot, ['branch', '--show-current']),
-      runGit(projectRoot, ['status', '--short']),
+      runGit(projectRoot, ['status', '--short', '--untracked-files=all']),
       runGit(projectRoot, ['diff', '--no-ext-diff']),
       runGit(projectRoot, ['diff', '--cached', '--no-ext-diff']),
       runGit(projectRoot, ['diff', '--numstat']),
       runGit(projectRoot, ['diff', '--cached', '--numstat'])
     ]);
-    const files = mergeStats(parseGitStatusShort(status), parseNumstat(unstagedNumstat), parseNumstat(stagedNumstat));
+    const statusFiles = parseGitStatusShort(status);
+    const trackedFiles = statusFiles.filter((file) => file.status !== '??');
+    const untrackedFiles = statusFiles.filter((file) => file.status === '??');
+    const files = mergeStats(trackedFiles, parseNumstat(unstagedNumstat), parseNumstat(stagedNumstat));
     const diff = truncateDiff([stagedDiff, unstagedDiff].filter(Boolean).join('\n'));
     const additions = files.reduce((sum, file) => sum + (file.additions || 0), 0);
     const deletions = files.reduce((sum, file) => sum + (file.deletions || 0), 0);
@@ -119,6 +122,7 @@ async function readProjectGitChanges(workspaceRoot: string, project: WorkflowPro
       expectedBranch,
       branchMatches: !expectedBranch || branch === expectedBranch,
       files,
+      untrackedFiles,
       stagedDiff: truncateDiff(stagedDiff),
       unstagedDiff: truncateDiff(unstagedDiff),
       diff,
@@ -131,6 +135,7 @@ async function readProjectGitChanges(workspaceRoot: string, project: WorkflowPro
       expectedBranch,
       branchMatches: false,
       files: [],
+      untrackedFiles: [],
       stagedDiff: '',
       unstagedDiff: '',
       diff: '',
@@ -152,10 +157,17 @@ export async function readGitChanges(workspaceRoot: string, projects: WorkflowPr
       path: summary.project.path === '.' ? file.path : `${summary.project.path}/${file.path}`
     }))
   );
+  const untrackedFiles = projectSummaries.flatMap((summary) =>
+    summary.untrackedFiles.map((file) => ({
+      ...file,
+      path: summary.project.path === '.' ? file.path : `${summary.project.path}/${file.path}`
+    }))
+  );
   const diff = projectSummaries.map((summary) => summary.diff).filter(Boolean).join('\n');
   return {
     updatedAt: new Date().toISOString(),
     files,
+    untrackedFiles,
     diff: truncateDiff(diff),
     projects: projectSummaries,
     additions: projectSummaries.reduce((sum, summary) => sum + summary.additions, 0),

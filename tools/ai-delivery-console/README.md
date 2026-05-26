@@ -2,6 +2,8 @@
 
 **OpenSpec + 自定义技能可视化交付台**
 
+> **当前版本：** v0.1.0 | **最后更新：** 2026-05-26
+
 面向本地工作区的可视化工具，用于按需求号聚合 PRD、技术方案、OpenSpec 实施验证、单元测试报告和代码评审报告。让 AI 辅助编程的整个流程清晰可见、可控可追溯。
 
 ## 🎯 解决的核心痛点
@@ -57,8 +59,9 @@
 - 📊 **可视化工作流**：直观展示每个阶段的进度和状态
 - 🔄 **实时反馈**：SSE 技术实时展示 Agent 执行日志
 - 🔒 **安全可靠**：工作区路径限制、锁文件机制、hash 校验三重保障
-- ⚡ **灵活集成**：支持 Codex CLI 自动化或手动模式
+- ⚡ **灵活集成**：支持 Codex CLI 自动化或自定义 Agent Provider
 - 📈 **产物聚合**：自动索引所有相关文档和报告
+- 📥 **便捷导出**：支持 Markdown 文档一键下载到本地
 
 ## 🚀 快速启动
 
@@ -83,7 +86,7 @@ AI_DELIVERY_WORKSPACE_ROOT=/Users/key.lin/work/Projects/ai-coding npm run server
 
 ![需求列表页面](screenshots/01-requirement-list.png)
 
-> 💡 **提示**：截图待补充。请按照 [screenshots/README.md](screenshots/README.md) 中的指南准备截图。
+> 💡 **功能亮点**：展示所有需求的当前阶段、完成度和最后更新时间，通过彩色状态标签快速识别瓶颈。
 
 ---
 
@@ -91,7 +94,7 @@ AI_DELIVERY_WORKSPACE_ROOT=/Users/key.lin/work/Projects/ai-coding npm run server
 
 ![PRD 分析阶段](screenshots/02-prd-analysis.png)
 
-> 💡 **提示**：截图待补充。展示 Markdown 实时预览和 Agent Provider 选择器。
+> 💡 **功能亮点**：支持 Markdown 实时预览、Agent Provider 选择器、澄清描述填写和本地 PRD 来源文件上传。
 
 ---
 
@@ -99,7 +102,7 @@ AI_DELIVERY_WORKSPACE_ROOT=/Users/key.lin/work/Projects/ai-coding npm run server
 
 ![技术方案阶段](screenshots/03-technical-design.png)
 
-> 💡 **提示**：截图待补充。突出数据库查询和 Mermaid 图表渲染功能。
+> 💡 **功能亮点**：集成数据库查询能力、Mermaid 图表渲染、二次评审意见输入和文档下载功能。
 
 ---
 
@@ -107,7 +110,7 @@ AI_DELIVERY_WORKSPACE_ROOT=/Users/key.lin/work/Projects/ai-coding npm run server
 
 ![实施验证阶段](screenshots/04-implementation-verify.png)
 
-> 💡 **提示**：截图待补充。显示任务完成度和测试报告统计。
+> 💡 **功能亮点**：任务清单可视化、测试覆盖率统计、运行日志实时展示（SSE）。
 
 ---
 
@@ -115,7 +118,15 @@ AI_DELIVERY_WORKSPACE_ROOT=/Users/key.lin/work/Projects/ai-coding npm run server
 
 ![代码评审阶段](screenshots/05-code-review.png)
 
-> 💡 **提示**：截图待补充。展示问题分类和严重程度标识。
+> 💡 **功能亮点**：问题分级标识（严重/警告/建议）、增量代码对比、外部文档约束核对。
+
+---
+
+### 运行日志 - SSE 实时终端输出
+
+![运行日志](screenshots/06-run-log-sse.png)
+
+> 💡 **功能亮点**：告别黑盒执行，实时查看 Agent 执行的每一步操作，彩色高亮关键信息，支持滚动查看历史日志。
 
 ---
 
@@ -207,15 +218,30 @@ AI_DELIVERY_WORKSPACE_ROOT=/Users/key.lin/work/Projects/ai-coding npm run server
 - **代码评审**：`docs/code_review/code_review_{分支名}/summary.md`
 - **工作流元数据**：`docs/{需求号}/workflow/state.json`
 - **运行日志**：`docs/{需求号}/workflow/runs/{runId}.jsonl`
+- **阶段命令日志**：`docs/{需求号}/workflow/logs/{stage}/command.log`
 
-PRD 阶段的“澄清描述”会保存到 workflow 的 `prdClarification` 字段，并在调用 `coding-prd-analyzer` 时作为 `/coding-prd-analyzer` 的 `c` 参数传递；未填写时不会使用需求标题兜底。本地上传的 PDF、图片、Markdown 会快照到 `docs/{需求号}/prd/file/`，并作为 PRD 来源路径传入技能调用，可在页面删除。
+PRD 阶段的「澄清描述」会保存到 workflow 的 `prdClarification` 字段，并在调用 `coding-prd-analyzer` 时作为 `/coding-prd-analyzer` 的 `c` 参数传递；未填写时不会使用需求标题兜底。本地上传的 PDF、图片、Markdown 会快照到 `docs/{需求号}/prd/file/`，并作为 PRD 来源路径传入技能调用，可在页面删除。
+
+### 新增：流程独立命令行日志
+
+从 v0.1.0 开始，每个工作流阶段维护独立的命令执行日志文件，便于追踪和审计：
+
+```
+docs/{需求号}/workflow/logs/
+├── prd/command.log          # PRD 阶段的命令日志
+├── tech-design/command.log  # 技术方案阶段的命令日志
+├── implementation/command.log  # 实施阶段的命令日志
+└── code-review/command.log  # 代码评审阶段的命令日志
+```
+
+每条日志记录为 JSON 格式，包含时间戳、命令内容、运行 ID、Agent ID 和执行状态。
 
 ## 🤖 Agent Provider 机制
 
 `coding-prd-analyzer`、`coding-design`、`coding-junit`、`coding-review` 不是普通 CLI。Runner 支持选择 Agent Provider 执行技能，默认包含：
 
-- **`manual`**：只生成标准调用文本，由用户手动执行。
-- **`codex`**：使用 `CODEX_COMMAND` 配置的 Codex CLI 命令执行 Prompt Envelope。
+- **`codex`**：使用 `CODEX_COMMAND` 配置的 Codex CLI 命令执行 Prompt Envelope（默认选中）。
+- **自定义 Agent**：可通过配置文件注册其他 Agent Provider。
 
 ### 默认 Codex 命令
 
@@ -245,17 +271,11 @@ CODEX_COMMAND='codex exec -C {workspaceRoot} -'
 1. Runner 会把技能动作包装成 `docs/{需求号}/workflow/prompts/{runId}.md`
 2. 将 stdout/stderr 写入 `docs/{需求号}/workflow/runs/{runId}.jsonl`
 3. 页面通过 SSE 实时展示终端输出
-4. 如果用户选择手动模式，或 Agent Provider 不可用，运行状态会变为 `WAITING_FOR_AGENT`，并展示标准调用文本，例如：
-
-```text
-/coding-design d=docs/172014/prd/analysis.md r=172014
-```
-
-5. 用户可以复制该文本交给 Agent 执行；执行完成后在页面点击“刷新产物”重新索引文件。
+4. 用户可以复制生成的命令文本交给 Agent 执行；执行完成后在页面点击「刷新产物」重新索引文件。
 
 ### 本地终端执行
 
-对于需要真实 TTY 交互、确认权限或使用 Agent 原生界面的动作，可以在页面执行方式中选择“本地终端”。Runner 会：
+对于需要真实 TTY 交互、确认权限或使用 Agent 原生界面的动作，可以在页面执行方式中选择「本地终端」。Runner 会：
 
 1. 生成 Prompt Envelope：`docs/{需求号}/workflow/prompts/{runId}.md`
 2. 生成可执行脚本：`docs/{需求号}/workflow/scripts/{runId}.command`
@@ -305,7 +325,7 @@ CODEX_COMMAND='codex exec -C {workspaceRoot} -'
 A: 在每个需求详情页，点击「运行日志」按钮，会打开抽屉展示 SSE 实时输出的终端日志。
 
 ### Q: 支持哪些 Agent Provider？
-A: 默认支持 `manual`（手动模式）和 `codex`（Codex CLI）。可通过配置文件注册其他自定义 Agent。
+A: 默认支持 `codex`（Codex CLI）。可通过配置文件注册其他自定义 Agent。下拉框默认选中 Codex，简化了用户操作流程。
 
 ### Q: 如何处理并发冲突？
 A: 系统会自动使用需求级锁文件，当某个需求正在执行修改操作时，其他操作会被阻塞，直到锁释放。
