@@ -1,4 +1,4 @@
-import type { ActionInput, AgentProvider, OpenSpecSummary, RequirementInput, RequirementWorkflow, ReviewInput, RunEvent } from '@shared/workflow';
+import type { ActionInput, AgentProvider, GitChangeSummary, OpenSpecSummary, RequirementInput, RequirementWorkflow, ReviewInput, RunEvent } from '@shared/workflow';
 
 interface ApiResult<T> {
   data: T;
@@ -50,8 +50,17 @@ export const apiClient = {
       body: JSON.stringify(input)
     });
   },
+  getGitChanges(requirementId: string) {
+    return request<GitChangeSummary>(`/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/git-changes`);
+  },
   runAction(requirementId: string, input: ActionInput) {
     return request<{ workflow: RequirementWorkflow }>('/api/ai-delivery/requirements/' + encodeURIComponent(requirementId) + '/actions', {
+      method: 'POST',
+      body: JSON.stringify(input)
+    });
+  },
+  previewActionCommand(requirementId: string, input: ActionInput) {
+    return request<{ commandText: string }>('/api/ai-delivery/requirements/' + encodeURIComponent(requirementId) + '/actions/command', {
       method: 'POST',
       body: JSON.stringify(input)
     });

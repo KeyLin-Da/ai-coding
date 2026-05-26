@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RequirementWorkflow } from '../../shared/workflow';
-import { createEmptyStages, stageForAction } from '../../shared/workflow';
+import { createEmptyStages, implementationStepForAction, stageForAction } from '../../shared/workflow';
 import { canApproveStage, canEnterStage, deriveCurrentStage, nextStage } from '../../shared/stage-rules';
 
 function workflow(): RequirementWorkflow {
@@ -58,5 +58,13 @@ describe('stage-rules', () => {
     expect(stageForAction('OPENSPEC_ARCHIVE')).toBe('CODE_REVIEW');
     expect(stageForAction('RETURN_TO_IMPLEMENTATION')).toBe('CODE_REVIEW');
     expect(stageForAction('REFRESH_ARTIFACTS')).toBeUndefined();
+  });
+
+  it('按动作归属实施验证子步骤', () => {
+    expect(implementationStepForAction('OPENSPEC_FF')).toBe('ARTIFACT_REVIEW');
+    expect(implementationStepForAction('OPENSPEC_APPLY')).toBe('APPLY');
+    expect(implementationStepForAction('OPENSPEC_VERIFY')).toBe('APPLY');
+    expect(implementationStepForAction('JUNIT_GENERATE')).toBe('UNIT_TEST');
+    expect(implementationStepForAction('CODE_REVIEW')).toBeUndefined();
   });
 });

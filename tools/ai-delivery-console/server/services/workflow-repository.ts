@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { RequirementInput, RequirementType, RequirementWorkflow, WorkflowStage } from '../../shared/workflow';
-import { createEmptyStages, defaultBranchName } from '../../shared/workflow';
+import { createEmptyImplementationSteps, createEmptyStages, defaultBranchName, ensureImplementationSteps } from '../../shared/workflow';
 import { deriveCurrentStage } from '../../shared/stage-rules';
 import { normalizeRequirementId } from './workspace';
 
@@ -23,6 +23,13 @@ function hasInputField(input: RequirementInput, key: keyof RequirementInput): bo
   return Object.prototype.hasOwnProperty.call(input, key);
 }
 
+function withWorkflowDefaults(workflow: RequirementWorkflow): RequirementWorkflow {
+  return {
+    ...workflow,
+    implementationSteps: ensureImplementationSteps(workflow.implementationSteps)
+  };
+}
+
 export class WorkflowRepository {
   constructor(private readonly workspaceRoot: string) {}
 
@@ -37,7 +44,7 @@ export class WorkflowRepository {
   async load(requirementId: string): Promise<RequirementWorkflow | null> {
     try {
       const content = await fs.readFile(this.getStatePath(requirementId), 'utf8');
-      return JSON.parse(content) as RequirementWorkflow;
+      return withWorkflowDefaults(JSON.parse(content) as RequirementWorkflow);
     } catch (error: any) {
       if (error.code === 'ENOENT') {
         return null;
@@ -51,6 +58,7 @@ export class WorkflowRepository {
     await fs.mkdir(workflowDir, { recursive: true });
     const updated = {
       ...workflow,
+      implementationSteps: ensureImplementationSteps(workflow.implementationSteps),
       currentStage: deriveCurrentStage(workflow),
       updatedAt: new Date().toISOString()
     };
@@ -108,6 +116,7 @@ export class WorkflowRepository {
       createdAt: now,
       updatedAt: now,
       stages: createEmptyStages(),
+      implementationSteps: createEmptyImplementationSteps(),
       artifacts: [],
       runs: [],
       reviews: [],

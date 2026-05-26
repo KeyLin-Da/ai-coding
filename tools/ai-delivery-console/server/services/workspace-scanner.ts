@@ -58,7 +58,6 @@ export async function scanRequirementArtifacts(workspaceRoot: string, requiremen
   const id = normalizeRequirementId(requirementId);
   const artifacts: ArtifactRef[] = [];
   artifacts.push(await fileArtifact(workspaceRoot, 'prd-analysis', 'PRD', 'PRD 分析文档', `docs/${id}/prd/analysis.md`, 'markdown'));
-  artifacts.push(await fileArtifact(workspaceRoot, 'prd-analysis-legacy', 'PRD', 'PRD 分析文档（旧路径）', `docs/prd/${id}/analysis.md`, 'markdown'));
   artifacts.push(await fileArtifact(workspaceRoot, 'technical-design', 'TECH_DESIGN', '技术方案评审文档', `docs/${id}/technical-design/design_review.md`, 'markdown'));
 
   const openSpecChangeName = normalizeOpenSpecChangeName(changeName || `req-${id}`, `req-${id}`);

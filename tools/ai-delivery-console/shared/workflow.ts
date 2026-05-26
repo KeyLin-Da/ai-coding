@@ -26,7 +26,11 @@ export type ReviewDecision = 'APPROVED' | 'REJECTED' | 'RISK_ACCEPTED';
 
 export type RequirementType = 'REQUIREMENT' | 'DEFECT';
 
-export type ExecutionMode = 'BACKGROUND' | 'TERMINAL';
+export type ExecutionMode = 'BACKGROUND' | 'TERMINAL' | 'MANUAL_COPY';
+
+export const implementationSteps = ['ARTIFACT_REVIEW', 'APPLY', 'CHANGE_INSPECTION', 'UNIT_TEST'] as const;
+
+export type ImplementationStep = (typeof implementationSteps)[number];
 
 export type ActionType =
   | 'PRD_ANALYZE'
@@ -68,6 +72,7 @@ export interface ReviewIssue {
 export interface ReviewRecord {
   id: string;
   stage: WorkflowStage;
+  implementationStep?: ImplementationStep;
   decision: ReviewDecision;
   comment: string;
   actor: string;
@@ -91,6 +96,7 @@ export interface RunRecord {
   requirementId: string;
   actionType: ActionType;
   stage?: WorkflowStage;
+  implementationStep?: ImplementationStep;
   status: RunStatus;
   startedAt: string;
   finishedAt?: string;
@@ -156,6 +162,19 @@ export interface OpenSpecSummary {
   tasks: OpenSpecTaskSummary;
 }
 
+export interface GitChangedFile {
+  path: string;
+  status: string;
+  staged: boolean;
+  unstaged: boolean;
+}
+
+export interface GitChangeSummary {
+  updatedAt: string;
+  files: GitChangedFile[];
+  diff: string;
+}
+
 export type AgentInputMode = 'PROMPT_FILE' | 'STDIN' | 'ARGUMENTS' | 'MANUAL';
 
 export interface AgentProvider {
@@ -179,6 +198,15 @@ export interface StageState {
   comment?: string;
 }
 
+export interface ImplementationStepState {
+  step: ImplementationStep;
+  status: WorkflowStatus;
+  runId?: string;
+  approvedAt?: string;
+  rejectedAt?: string;
+  comment?: string;
+}
+
 export interface RequirementWorkflow {
   requirementId: string;
   title: string;
@@ -194,6 +222,7 @@ export interface RequirementWorkflow {
   createdAt: string;
   updatedAt: string;
   stages: Record<WorkflowStage, StageState>;
+  implementationSteps?: Record<ImplementationStep, ImplementationStepState>;
   artifacts: ArtifactRef[];
   runs: RunRecord[];
   reviews: ReviewRecord[];
@@ -219,6 +248,7 @@ export interface ActionInput {
 export interface ReviewInput {
   requirementId: string;
   stage: WorkflowStage;
+  implementationStep?: ImplementationStep;
   decision: ReviewDecision;
   comment: string;
   actor?: string;
@@ -256,6 +286,13 @@ export const statusLabels: Record<WorkflowStatus | RunStatus, string> = {
   CANCELLED: '已取消'
 };
 
+export const implementationStepLabels: Record<ImplementationStep, string> = {
+  ARTIFACT_REVIEW: '工件生成与评审',
+  APPLY: '开始实施',
+  CHANGE_INSPECTION: '查看变更文件及代码',
+  UNIT_TEST: '执行单测并生成报告'
+};
+
 export function createEmptyStages(): Record<WorkflowStage, StageState> {
   return {
     PRD: { stage: 'PRD', status: 'DRAFT' },
@@ -263,6 +300,29 @@ export function createEmptyStages(): Record<WorkflowStage, StageState> {
     IMPLEMENTATION: { stage: 'IMPLEMENTATION', status: 'NOT_STARTED' },
     CODE_REVIEW: { stage: 'CODE_REVIEW', status: 'NOT_STARTED' }
   };
+}
+
+export function createEmptyImplementationSteps(): Record<ImplementationStep, ImplementationStepState> {
+  return {
+    ARTIFACT_REVIEW: { step: 'ARTIFACT_REVIEW', status: 'DRAFT' },
+    APPLY: { step: 'APPLY', status: 'NOT_STARTED' },
+    CHANGE_INSPECTION: { step: 'CHANGE_INSPECTION', status: 'NOT_STARTED' },
+    UNIT_TEST: { step: 'UNIT_TEST', status: 'NOT_STARTED' }
+  };
+}
+
+export function ensureImplementationSteps(
+  steps?: Partial<Record<ImplementationStep, Partial<ImplementationStepState>>>
+): Record<ImplementationStep, ImplementationStepState> {
+  const defaults = createEmptyImplementationSteps();
+  for (const step of implementationSteps) {
+    defaults[step] = {
+      ...defaults[step],
+      ...(steps?.[step] || {}),
+      step
+    };
+  }
+  return defaults;
 }
 
 export const actionStageMap: Partial<Record<ActionType, WorkflowStage>> = {
@@ -280,8 +340,27 @@ export const actionStageMap: Partial<Record<ActionType, WorkflowStage>> = {
   RETURN_TO_IMPLEMENTATION: 'CODE_REVIEW'
 };
 
+export const actionImplementationStepMap: Partial<Record<ActionType, ImplementationStep>> = {
+  OPENSPEC_STATUS: 'ARTIFACT_REVIEW',
+  OPENSPEC_NEW_CHANGE: 'ARTIFACT_REVIEW',
+  OPENSPEC_INSTRUCTIONS: 'ARTIFACT_REVIEW',
+  OPENSPEC_FF: 'ARTIFACT_REVIEW',
+  OPENSPEC_APPLY: 'APPLY',
+  OPENSPEC_VERIFY: 'APPLY',
+  JUNIT_GENERATE: 'UNIT_TEST'
+};
+
 export function stageForAction(actionType: ActionType): WorkflowStage | undefined {
   return actionStageMap[actionType];
+}
+
+export function implementationStepForAction(actionType: ActionType): ImplementationStep | undefined {
+  return actionImplementationStepMap[actionType];
+}
+
+export function nextImplementationStep(step: ImplementationStep): ImplementationStep | undefined {
+  const index = implementationSteps.indexOf(step);
+  return index >= 0 ? implementationSteps[index + 1] : undefined;
 }
 
 export function defaultBranchName(requirementId: string, requirementType: RequirementType = 'REQUIREMENT'): string {

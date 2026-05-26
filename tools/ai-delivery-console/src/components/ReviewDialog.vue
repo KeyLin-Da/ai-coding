@@ -1,6 +1,7 @@
 <template>
   <el-dialog v-model="visible" title="提交审核结论" width="520px">
     <el-form label-position="top">
+      <el-alert v-if="implementationStepLabel" :title="implementationStepLabel" type="info" show-icon />
       <el-form-item label="结论">
         <el-radio-group v-model="decision">
           <el-radio-button label="APPROVED">通过</el-radio-button>
@@ -22,20 +23,25 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { Check } from '@element-plus/icons-vue';
-import type { ReviewDecision, WorkflowStage } from '@shared/workflow';
+import type { ImplementationStep, ReviewDecision, WorkflowStage } from '@shared/workflow';
+import { implementationStepLabels } from '@shared/workflow';
 
 const visible = ref(false);
 const decision = ref<ReviewDecision>('APPROVED');
 const comment = ref('');
 const stage = ref<WorkflowStage>('PRD');
+const implementationStep = ref<ImplementationStep | undefined>();
 const artifactPath = ref<string | undefined>();
+const implementationStepLabel = ref('');
 
 const emit = defineEmits<{
-  (event: 'submit', value: { stage: WorkflowStage; decision: ReviewDecision; comment: string; artifactPath?: string }): void;
+  (event: 'submit', value: { stage: WorkflowStage; implementationStep?: ImplementationStep; decision: ReviewDecision; comment: string; artifactPath?: string }): void;
 }>();
 
-function open(nextStage: WorkflowStage, path?: string) {
+function open(nextStage: WorkflowStage, path?: string, nextImplementationStep?: ImplementationStep) {
   stage.value = nextStage;
+  implementationStep.value = nextImplementationStep;
+  implementationStepLabel.value = nextImplementationStep ? `实施验证子步骤：${implementationStepLabels[nextImplementationStep]}` : '';
   artifactPath.value = path;
   decision.value = 'APPROVED';
   comment.value = '';
@@ -45,6 +51,7 @@ function open(nextStage: WorkflowStage, path?: string) {
 function submit() {
   emit('submit', {
     stage: stage.value,
+    implementationStep: implementationStep.value,
     decision: decision.value,
     comment: comment.value,
     artifactPath: artifactPath.value

@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import type { ActionInput, ExecutionMode, RunRecord, RunStatus } from '../../shared/workflow';
-import { stageForAction } from '../../shared/workflow';
+import { implementationStepForAction, stageForAction } from '../../shared/workflow';
 import type { RequirementWorkflow } from '../../shared/workflow';
 import { createRunId, appendRunEvent } from './run-log';
 import { assertInsideWorkspace } from './workspace';
@@ -41,6 +41,15 @@ function prdDocumentPath(workflow: RequirementWorkflow, params: Record<string, u
   return artifactPath || workflow.stages.PRD.artifactPath || `docs/${workflow.requirementId}/prd/analysis.md`;
 }
 
+function technicalDesignDocumentPath(workflow: RequirementWorkflow, params: Record<string, unknown>): string {
+  const explicitPath = asString(params.documentPath);
+  if (explicitPath) {
+    return explicitPath;
+  }
+  const artifactPath = workflow.artifacts.find((artifact) => artifact.stage === 'TECH_DESIGN' && artifact.exists && artifact.kind !== 'directory')?.path;
+  return artifactPath || workflow.stages.TECH_DESIGN.artifactPath || `docs/${workflow.requirementId}/technical-design/design_review.md`;
+}
+
 function buildSkillCommand(workflow: RequirementWorkflow, action: ActionInput): string {
   const params = action.params || {};
   const requirementId = workflow.requirementId;
@@ -49,7 +58,7 @@ function buildSkillCommand(workflow: RequirementWorkflow, action: ActionInput): 
   const prdClarification = prdDescription(workflow, params);
   const moduleName = asString(params.moduleName);
   const branchName = asString(params.branchName, workflow.branchName || '');
-  const changeName = asString(params.changeName, `req-${requirementId}`);
+  const changeName = asString(params.changeName, workflow.stages.IMPLEMENTATION.changeName || `req-${requirementId}`);
   const clarification = asString(params.clarification);
 
   switch (action.actionType) {
@@ -62,7 +71,7 @@ function buildSkillCommand(workflow: RequirementWorkflow, action: ActionInput): 
     case 'CODE_REVIEW':
       return `/coding-review b=${branchName || '<branch-name>'}${params.docs ? ` d=${params.docs}` : ''}`;
     case 'OPENSPEC_FF':
-      return `/openspec-ff-change ${changeName}`;
+      return `/openspec-ff-change ${changeName} d=${technicalDesignDocumentPath(workflow, params)}`;
     case 'OPENSPEC_APPLY':
       return `/openspec-apply-change ${changeName}`;
     case 'OPENSPEC_VERIFY':
@@ -72,6 +81,27 @@ function buildSkillCommand(workflow: RequirementWorkflow, action: ActionInput): 
     default:
       return '';
   }
+}
+
+export function buildActionCommand(workflow: RequirementWorkflow, action: ActionInput): string {
+  validateActionInput('', action, { skipPathValidation: true });
+  const params = action.params || {};
+  const cliBase = cliActionMap[action.actionType];
+  if (cliBase) {
+    const changeName = asString(params.changeName, `req-${workflow.requirementId}`);
+    const artifactId = asString(params.artifactId, 'proposal');
+    const args =
+      action.actionType === 'OPENSPEC_STATUS'
+        ? [...cliBase, '--change', changeName, '--json']
+        : action.actionType === 'OPENSPEC_NEW_CHANGE'
+          ? [...cliBase, changeName]
+          : [...cliBase, artifactId, '--change', changeName, '--json'];
+    return args.join(' ');
+  }
+  if (isAgentAction(action.actionType)) {
+    return buildSkillCommand(workflow, action);
+  }
+  throw new Error(`动作不支持复制命令: ${action.actionType}`);
 }
 
 function isAgentAction(actionType: ActionInput['actionType']): boolean {
@@ -106,12 +136,14 @@ function runCli(workspaceRoot: string, args: string[]): Promise<{ status: RunSta
   });
 }
 
-export function validateActionInput(workspaceRoot: string, action: ActionInput): void {
+export function validateActionInput(workspaceRoot: string, action: ActionInput, options: { skipPathValidation?: boolean } = {}): void {
   const params = action.params || {};
-  for (const key of ['documentPath', 'artifactPath', 'outputPath']) {
-    const value = params[key];
-    if (typeof value === 'string' && value.trim()) {
-      assertInsideWorkspace(workspaceRoot, value);
+  if (!options.skipPathValidation) {
+    for (const key of ['documentPath', 'artifactPath', 'outputPath']) {
+      const value = params[key];
+      if (typeof value === 'string' && value.trim()) {
+        assertInsideWorkspace(workspaceRoot, value);
+      }
     }
   }
   const allowed = new Set<ActionInput['actionType']>([
@@ -149,6 +181,7 @@ export async function executeAction(
     requirementId: workflow.requirementId,
     actionType: action.actionType,
     stage: stageForAction(action.actionType),
+    implementationStep: implementationStepForAction(action.actionType),
     status: 'RUNNING',
     startedAt,
     params,

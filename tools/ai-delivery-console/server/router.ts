@@ -1,17 +1,18 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import path from 'node:path';
 import { URL } from 'node:url';
-import type { ActionInput, PrdSourceFile, RequirementInput, RequirementWorkflow, ReviewInput } from '../shared/workflow';
-import { stageForAction } from '../shared/workflow';
+import type { ActionInput, PrdSourceFile, RequirementInput, RequirementWorkflow, ReviewInput, RunRecord, WorkflowStatus } from '../shared/workflow';
+import { ensureImplementationSteps, stageForAction } from '../shared/workflow';
 import { normalizePrdClarification, WorkflowRepository } from './services/workflow-repository';
 import { scanRequirementArtifacts } from './services/workspace-scanner';
 import { WorkflowLock } from './services/workflow-lock';
-import { executeAction } from './services/action-adapters';
+import { buildActionCommand, executeAction, validateActionInput } from './services/action-adapters';
 import { readRunEvents, appendStageCommandLog } from './services/run-log';
 import { readArtifact, saveArtifact } from './services/markdown-service';
 import { applyReview, refreshCodeReviewIssues, returnToImplementation } from './services/review-service';
 import { cancelAgentRun, listAgentProviders, refreshTerminalRunStatuses } from './services/agent-providers';
 import { normalizeOpenSpecChangeName, readOpenSpecSummary, updateOpenSpecTaskStatus } from './services/openspec-summary';
+import { readGitChanges } from './services/git-changes';
 import {
   assertAllowedPrdSourceFile,
   deletePrdSourceFileSnapshot,
@@ -59,6 +60,40 @@ function designDocumentPath(workflow: RequirementWorkflow, params: Record<string
   }
   const prdArtifactPath = workflow.artifacts.find((artifact) => artifact.stage === 'PRD' && artifact.exists && artifact.kind !== 'directory')?.path;
   return prdArtifactPath || workflow.stages.PRD.artifactPath || `docs/${workflow.requirementId}/prd/analysis.md`;
+}
+
+function implementationStatusForRun(run: RunRecord): WorkflowStatus {
+  if (run.status === 'SUCCEEDED') {
+    return 'READY_FOR_REVIEW';
+  }
+  if (run.status === 'FAILED' || run.status === 'CANCELLED') {
+    return 'BLOCKED';
+  }
+  return 'IN_PROGRESS';
+}
+
+function applyImplementationRun(workflow: RequirementWorkflow, run: RunRecord): RequirementWorkflow {
+  if (!run.implementationStep) {
+    return workflow;
+  }
+  const implementationSteps = ensureImplementationSteps(workflow.implementationSteps);
+  implementationSteps[run.implementationStep] = {
+    ...implementationSteps[run.implementationStep],
+    status: implementationStatusForRun(run),
+    runId: run.id
+  };
+  return {
+    ...workflow,
+    implementationSteps,
+    stages: {
+      ...workflow.stages,
+      IMPLEMENTATION: {
+        ...workflow.stages.IMPLEMENTATION,
+        status: workflow.stages.IMPLEMENTATION.status === 'APPROVED' ? 'APPROVED' : 'IN_PROGRESS',
+        runId: run.id
+      }
+    }
+  };
 }
 
 async function parseMultipartFiles(request: IncomingMessage): Promise<UploadedPrdSourceFile[]> {
@@ -217,6 +252,17 @@ export function createRouter(workspaceRoot: string) {
         return;
       }
 
+      const gitChangesMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/git-changes$/);
+      if (request.method === 'GET' && gitChangesMatch) {
+        const workflow = await repository.load(gitChangesMatch[1]);
+        if (!workflow) {
+          send(response, 404, { message: '需求不存在' });
+          return;
+        }
+        send(response, 200, { data: await readGitChanges(workspaceRoot) });
+        return;
+      }
+
       const prdFilesMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/prd-files$/);
       if (request.method === 'POST' && prdFilesMatch) {
         const requirementId = prdFilesMatch[1];
@@ -275,6 +321,10 @@ export function createRouter(workspaceRoot: string) {
       if (request.method === 'POST' && actionMatch) {
         const requirementId = actionMatch[1];
         const action = await parseBody<ActionInput>(request);
+        if (action.params?.executionMode === 'MANUAL_COPY') {
+          send(response, 400, { message: '手动复制执行方式请使用命令预览接口' });
+          return;
+        }
         const lock = new WorkflowLock(workspaceRoot, requirementId);
         await lock.acquire();
         try {
@@ -341,12 +391,14 @@ export function createRouter(workspaceRoot: string) {
               {
                 runId: run.id,
                 actionType: run.actionType,
+                implementationStep: run.implementationStep,
                 agentId: run.agentId,
                 status: run.status
               }
             );
           }
           workflow.runs.unshift(run);
+          workflow = applyImplementationRun(workflow, run);
           if (action.actionType === 'REFRESH_ARTIFACTS') {
             workflow.artifacts = await scanRequirementArtifacts(workspaceRoot, workflow.requirementId, workflow.branchName, workflow.stages.IMPLEMENTATION.changeName);
           }
@@ -363,6 +415,41 @@ export function createRouter(workspaceRoot: string) {
         } finally {
           await lock.release();
         }
+        return;
+      }
+
+      const actionCommandMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/actions\/command$/);
+      if (request.method === 'POST' && actionCommandMatch) {
+        const requirementId = actionCommandMatch[1];
+        const action = await parseBody<ActionInput>(request);
+        let workflow = await repository.load(requirementId);
+        if (!workflow) {
+          send(response, 404, { message: '需求不存在' });
+          return;
+        }
+        validateActionInput(workspaceRoot, action);
+        const params = action.params || {};
+        if (action.actionType === 'DESIGN_GENERATE') {
+          workflow = {
+            ...workflow,
+            techDesignDocument: designDocumentPath(workflow, params)
+          };
+        }
+        if (['OPENSPEC_STATUS', 'OPENSPEC_FF', 'OPENSPEC_APPLY', 'OPENSPEC_VERIFY', 'OPENSPEC_ARCHIVE'].includes(action.actionType)) {
+          const fallbackChangeName = workflow.stages.IMPLEMENTATION.changeName || `req-${workflow.requirementId}`;
+          const changeName = normalizeOpenSpecChangeName(typeof params.changeName === 'string' ? params.changeName : '', fallbackChangeName);
+          workflow = {
+            ...workflow,
+            stages: {
+              ...workflow.stages,
+              IMPLEMENTATION: {
+                ...workflow.stages.IMPLEMENTATION,
+                changeName
+              }
+            }
+          };
+        }
+        send(response, 200, { data: { commandText: buildActionCommand(workflow, action) } });
         return;
       }
 

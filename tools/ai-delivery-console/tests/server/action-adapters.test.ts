@@ -4,7 +4,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { RequirementWorkflow } from '../../shared/workflow';
 import { createEmptyStages } from '../../shared/workflow';
-import { executeAction, validateActionInput } from '../../server/services/action-adapters';
+import { buildActionCommand, executeAction, validateActionInput } from '../../server/services/action-adapters';
 
 function workflow(): RequirementWorkflow {
   const now = new Date().toISOString();
@@ -43,6 +43,21 @@ describe('action-adapters', () => {
     expect(run.stage).toBe('PRD');
     expect(run.commandText).toContain('/coding-prd-analyzer id=172014');
     expect(run.commandText).not.toContain(' c=');
+  });
+
+  it('命令预览只生成标准调用文本，不创建运行记录', () => {
+    expect(
+      buildActionCommand(workflow(), {
+        actionType: 'PRD_ANALYZE',
+        params: { description: '只覆盖后台', sources: ['docs/172014/prd/file/source.pdf'] }
+      })
+    ).toBe('/coding-prd-analyzer id=172014 c=只覆盖后台 docs/172014/prd/file/source.pdf');
+    expect(
+      buildActionCommand(workflow(), {
+        actionType: 'OPENSPEC_STATUS',
+        params: { changeName: 'req-172014' }
+      })
+    ).toBe('openspec status --change req-172014 --json');
   });
 
   it('技能动作支持本地终端执行模式', async () => {
@@ -188,5 +203,26 @@ describe('action-adapters', () => {
     expect(run.status).toBe('WAITING_FOR_AGENT');
     expect(run.stage).toBe('CODE_REVIEW');
     expect(run.commandText).toBe('/openspec-archive-change req-172014');
+  });
+
+  it('OpenSpec 工件生成带上技术方案文档并归属工件评审子步骤', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-action-'));
+    const current = {
+      ...workflow(),
+      stages: {
+        ...workflow().stages,
+        TECH_DESIGN: {
+          ...workflow().stages.TECH_DESIGN,
+          artifactPath: 'docs/172014/technical-design/design_review.md'
+        }
+      }
+    };
+    const run = await executeAction(root, current, {
+      actionType: 'OPENSPEC_FF',
+      params: { changeName: 'req-172014' }
+    });
+    expect(run.stage).toBe('IMPLEMENTATION');
+    expect(run.implementationStep).toBe('ARTIFACT_REVIEW');
+    expect(run.commandText).toBe('/openspec-ff-change req-172014 d=docs/172014/technical-design/design_review.md');
   });
 });

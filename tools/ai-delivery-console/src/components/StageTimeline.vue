@@ -97,4 +97,10 @@ function stageIndex(stage: WorkflowStage) {
 .step-main small {
   color: #697891;
 }
+
+@media (max-width: 760px) {
+  .stage-timeline {
+    grid-template-columns: 1fr;
+  }
+}
 </style>

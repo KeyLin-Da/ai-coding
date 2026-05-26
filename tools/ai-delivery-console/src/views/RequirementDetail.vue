@@ -32,8 +32,9 @@
               <el-select v-model="selectedExecutionMode" style="width: 140px" placeholder="执行方式">
                 <el-option label="后台执行" value="BACKGROUND" />
                 <el-option label="本地终端" value="TERMINAL" />
+                <el-option label="手动复制" value="MANUAL_COPY" />
               </el-select>
-              <el-button :icon="DocumentChecked" @click="openReview">审核</el-button>
+              <el-button v-if="activeStage !== 'IMPLEMENTATION'" :icon="DocumentChecked" @click="openReview">审核</el-button>
               <el-button v-if="currentStageRun" :icon="Tickets" @click="openRunLog(currentStageRun.id)">本步骤日志</el-button>
               <el-button v-if="currentStageRun?.status === 'RUNNING'" type="danger" @click="cancelRun(currentStageRun.id)">取消</el-button>
             </div>
@@ -66,7 +67,7 @@
                   </div>
                 </div>
               </div>
-              <el-button type="primary" :icon="Operation" @click="runPrd">生成 PRD</el-button>
+              <el-button type="primary" :icon="primaryActionIcon(Operation)" @click="runPrd">{{ actionButtonText('生成 PRD') }}</el-button>
               <MarkdownEditor title="PRD 文档" :artifact-path="prdEditorPath" @saved="reload" />
             </div>
 
@@ -85,31 +86,83 @@
                 show-word-limit
                 placeholder="填写评审意见或补充说明，对应 coding-design 的 c 参数（可选），用于二次评审时提供修改建议"
               />
-              <el-button type="primary" :disabled="!prdApproved || !prdDesignSourcePath" :icon="Operation" @click="runDesign">生成技术方案</el-button>
+              <el-button type="primary" :disabled="!prdApproved || !prdDesignSourcePath" :icon="primaryActionIcon(Operation)" @click="runDesign">
+                {{ actionButtonText('生成技术方案') }}
+              </el-button>
               <MarkdownEditor title="技术方案" :artifact-path="stageArtifactPath('TECH_DESIGN')" @saved="reload" />
             </div>
 
             <div v-else-if="activeStage === 'IMPLEMENTATION'" class="stage-actions">
-              <div class="action-line">
-                <el-input v-model="changeName" placeholder="OpenSpec change name，例如 req-172014" />
-                <el-button :icon="DataAnalysis" @click="runOpenSpecStatus">查看 OpenSpec 状态</el-button>
-                <el-button type="primary" :icon="Operation" @click="runOpenSpecVerify">发起验证</el-button>
-              </div>
-              <div class="action-line">
-                <el-input v-model="moduleName" placeholder="单测模块，例如 opp-diy" />
-                <el-button :icon="Cpu" @click="runJunit">生成/关联单测</el-button>
-              </div>
-              <el-descriptions :column="2" border>
-                <el-descriptions-item label="OpenSpec">{{ openSpecSummary?.rootPath || stageArtifactPath('IMPLEMENTATION') || '未关联' }}</el-descriptions-item>
-                <el-descriptions-item label="归档状态">
+              <nav class="implementation-step-nav" aria-label="实施验证子步骤">
+                <button
+                  v-for="(step, index) in implementationStepItems"
+                  :key="step.step"
+                  class="implementation-step-button"
+                  :class="{ active: activeImplementationStep === step.step, approved: step.status === 'APPROVED' }"
+                  type="button"
+                  @click="activeImplementationStep = step.step"
+                >
+                  <span class="step-index">{{ index + 1 }}</span>
+                  <span class="step-main">
+                    <strong>{{ step.label }}</strong>
+                    <small>{{ statusLabels[step.status] }}</small>
+                  </span>
+                </button>
+              </nav>
+              <div class="implementation-summary-strip" aria-label="实施验证摘要">
+                <span class="summary-item">
+                  <span class="summary-label">OpenSpec</span>
+                  <strong class="summary-value">{{ implementationOpenSpecPath }}</strong>
+                </span>
+                <span class="summary-item">
+                  <span class="summary-label">状态</span>
                   <el-tag :type="openSpecSummary?.archived ? 'success' : 'info'" size="small">
-                    {{ openSpecSummary?.archived ? '已归档' : '进行中' }}
+                    {{ implementationArchiveStatus }}
                   </el-tag>
-                </el-descriptions-item>
-                <el-descriptions-item label="任务进度">{{ openSpecSummary ? `${openSpecSummary.tasks.completed} / ${openSpecSummary.tasks.total}` : '未读取' }}</el-descriptions-item>
-                <el-descriptions-item label="待处理问题">{{ workflow.issues.filter((item) => item.status === 'OPEN').length }}</el-descriptions-item>
-              </el-descriptions>
-              <section class="openspec-section">
+                </span>
+                <span class="summary-item">
+                  <span class="summary-label">任务</span>
+                  <strong class="summary-value">{{ implementationTaskProgress }}</strong>
+                </span>
+                <span class="summary-item">
+                  <span class="summary-label">问题</span>
+                  <strong class="summary-value">{{ openIssueCount }}</strong>
+                </span>
+              </div>
+
+              <template v-if="activeImplementationStep === 'ARTIFACT_REVIEW'">
+                <div class="action-line">
+                  <el-input v-model="changeName" placeholder="OpenSpec change name，例如 req-172014" />
+                  <el-button type="primary" :disabled="!techDesignApproved" :icon="primaryActionIcon(Operation)" @click="runOpenSpecArtifacts">
+                    {{ actionButtonText('生成 OpenSpec 工件') }}
+                  </el-button>
+                  <el-button :icon="primaryActionIcon(DataAnalysis)" @click="runOpenSpecStatus">{{ actionButtonText('查看 OpenSpec 状态') }}</el-button>
+                  <el-button :icon="DocumentChecked" @click="openReview">审核本步骤</el-button>
+                </div>
+                <el-alert v-if="!techDesignApproved" type="warning" show-icon title="需要先通过技术方案审核" />
+                <OpenSpecDocuments
+                  v-if="openSpecDocuments.length"
+                  v-model="selectedOpenSpecDocPath"
+                  :documents="openSpecDocuments"
+                  :root-path="openSpecSummary?.rootPath"
+                />
+              </template>
+
+              <template v-if="activeImplementationStep === 'APPLY'">
+                <div class="action-line">
+                  <el-input v-model="changeName" placeholder="OpenSpec change name，例如 req-172014" />
+                  <el-button type="primary" :disabled="!canRunOpenSpecApply" :icon="primaryActionIcon(Operation)" @click="runOpenSpecApply">
+                    {{ actionButtonText('开始实施') }}
+                  </el-button>
+                  <el-button :disabled="!canRunOpenSpecApply" :icon="primaryActionIcon(DataAnalysis)" @click="runOpenSpecVerify">
+                    {{ actionButtonText('发起验证') }}
+                  </el-button>
+                  <el-button :icon="DocumentChecked" @click="openReview">审核本步骤</el-button>
+                </div>
+                <el-alert v-if="!canRunOpenSpecApply" type="warning" show-icon title="请先通过 OpenSpec 工件评审" />
+              </template>
+
+              <section v-if="activeImplementationStep === 'APPLY'" class="openspec-section">
                 <div class="section-title">
                   <strong>任务完成情况</strong>
                   <span class="muted">{{ openSpecSummary ? `${openSpecTaskPercentage}%` : '未读取' }}</span>
@@ -131,19 +184,43 @@
                 </div>
                 <el-empty v-else description="暂无任务" />
               </section>
-              <div v-if="openSpecDocuments.length" class="openspec-preview-tabs">
-                <div class="section-title">
-                  <strong>OpenSpec 文档预览</strong>
-                  <span class="muted">{{ selectedOpenSpecDocPath || openSpecSummary?.rootPath || '未关联' }}</span>
+
+              <template v-if="activeImplementationStep === 'CHANGE_INSPECTION'">
+                <div class="action-line">
+                  <el-button :icon="Refresh" @click="loadGitChanges">刷新变更</el-button>
+                  <el-button :disabled="!canInspectChanges" :icon="DocumentChecked" @click="openReview">审核本步骤</el-button>
                 </div>
-                <el-tabs v-model="selectedOpenSpecDocPath" class="openspec-doc-tabs">
-                  <el-tab-pane v-for="doc in openSpecDocuments" :key="doc.id" :label="doc.label" :name="doc.path" :disabled="!doc.exists" />
-                </el-tabs>
-              </div>
+                <el-alert v-if="!canInspectChanges" type="warning" show-icon title="请先完成并审核开始实施步骤" />
+                <section class="git-change-panel">
+                  <div class="section-title">
+                    <strong>变更文件</strong>
+                    <span class="muted">{{ gitChanges ? `${gitChanges.files.length} 个文件 · ${gitChanges.updatedAt}` : '未读取' }}</span>
+                  </div>
+                  <div v-if="gitChanges?.files.length" class="git-file-list">
+                    <div v-for="file in gitChanges.files" :key="`${file.status}-${file.path}`" class="git-file-row">
+                      <el-tag size="small" effect="plain">{{ file.status }}</el-tag>
+                      <span>{{ file.path }}</span>
+                    </div>
+                  </div>
+                  <el-empty v-else description="暂无 Git 变更" />
+                  <pre v-if="gitChanges?.diff" class="git-diff">{{ gitChanges.diff }}</pre>
+                </section>
+              </template>
+
+              <template v-if="activeImplementationStep === 'UNIT_TEST'">
+                <div class="action-line">
+                  <el-input v-model="moduleName" placeholder="单测模块，例如 opp-diy" />
+                  <el-button :disabled="!canRunJunit" :icon="primaryActionIcon(Cpu)" @click="runJunit">{{ actionButtonText('执行单测并生成报告') }}</el-button>
+                  <el-button :icon="DocumentChecked" @click="openReview">审核本步骤</el-button>
+                </div>
+                <el-alert v-if="!canRunJunit" type="warning" show-icon title="请先通过变更文件及代码审核" />
+                <MarkdownEditor title="单元测试报告" :artifact-path="junitArtifactPath" @saved="reload" />
+              </template>
+
               <MarkdownEditor
-                v-if="selectedOpenSpecDocPath"
+                v-if="selectedOpenSpecDocPath && activeImplementationStep === 'ARTIFACT_REVIEW'"
                 :key="`${selectedOpenSpecDocPath}-${openSpecPreviewVersion}`"
-                title="OpenSpec 文档预览"
+                title="文档内容"
                 :artifact-path="selectedOpenSpecDocPath"
                 @saved="reload"
               />
@@ -152,9 +229,11 @@
             <div v-else class="stage-actions">
               <div class="action-line">
                 <el-input v-model="branchName" placeholder="分支名，例如 feature/opp-172014" />
-                <el-button type="primary" :icon="Operation" @click="runCodeReview">生成代码评审</el-button>
+                <el-button type="primary" :icon="primaryActionIcon(Operation)" @click="runCodeReview">{{ actionButtonText('生成代码评审') }}</el-button>
                 <el-button type="danger" :icon="Back" @click="returnToImplementation">打回实施</el-button>
-                <el-button v-if="canArchiveOpenSpec" type="success" :icon="DocumentChecked" @click="runOpenSpecArchive">归档 OpenSpec</el-button>
+                <el-button v-if="canArchiveOpenSpec" type="success" :icon="primaryActionIcon(DocumentChecked)" @click="runOpenSpecArchive">
+                  {{ actionButtonText('归档 OpenSpec') }}
+                </el-button>
               </div>
               <el-alert v-if="openSpecSummary?.archived" type="success" show-icon :title="`OpenSpec 已归档：${openSpecSummary.archivePath}`" />
               <MarkdownEditor title="代码评审汇总" :artifact-path="stageArtifactPath('CODE_REVIEW')" @saved="reload" />
@@ -175,12 +254,21 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { Back, Cpu, DataAnalysis, Delete, DocumentChecked, Operation, Refresh, Tickets, Upload } from '@element-plus/icons-vue';
+import { Back, CopyDocument, Cpu, DataAnalysis, Delete, DocumentChecked, Operation, Refresh, Tickets, Upload } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
-import type { ExecutionMode, OpenSpecSummary, OpenSpecTaskItem, RunRecord, WorkflowStage } from '@shared/workflow';
-import { stageForAction, stageLabels } from '@shared/workflow';
+import type { ActionInput, ExecutionMode, GitChangeSummary, ImplementationStep, OpenSpecSummary, OpenSpecTaskItem, RunRecord, WorkflowStage } from '@shared/workflow';
+import {
+  ensureImplementationSteps,
+  implementationStepForAction,
+  implementationStepLabels,
+  implementationSteps,
+  stageForAction,
+  stageLabels,
+  statusLabels
+} from '@shared/workflow';
 import StageTimeline from '@/components/StageTimeline.vue';
 import MarkdownEditor from '@/components/MarkdownEditor.vue';
+import OpenSpecDocuments from '@/components/OpenSpecDocuments.vue';
 import ReviewDialog from '@/components/ReviewDialog.vue';
 import RunLogDrawer from '@/components/RunLogDrawer.vue';
 import ArtifactSidebar from '@/components/ArtifactSidebar.vue';
@@ -205,14 +293,31 @@ const designClarification = ref('');
 const openSpecSummary = ref<OpenSpecSummary>();
 const selectedOpenSpecDocPath = ref('');
 const openSpecPreviewVersion = ref(0);
+const activeImplementationStep = ref<ImplementationStep>('ARTIFACT_REVIEW');
+const gitChanges = ref<GitChangeSummary>();
 
 const workflow = computed(() => store.current);
-const currentStageRun = computed<RunRecord | undefined>(() =>
-  workflow.value?.runs.find((run) => (run.stage || stageForAction(run.actionType)) === activeStage.value)
-);
+const implementationStepStates = computed(() => ensureImplementationSteps(workflow.value?.implementationSteps));
+const currentStageRun = computed<RunRecord | undefined>(() => {
+  if (activeStage.value === 'IMPLEMENTATION') {
+    return workflow.value?.runs.find(
+      (run) =>
+        (run.stage || stageForAction(run.actionType)) === 'IMPLEMENTATION' &&
+        (run.implementationStep || implementationStepForAction(run.actionType)) === activeImplementationStep.value
+    );
+  }
+  return workflow.value?.runs.find((run) => (run.stage || stageForAction(run.actionType)) === activeStage.value);
+});
 const prdSourceFiles = computed(() => workflow.value?.prdSourceFiles || []);
 const prdApproved = computed(() => workflow.value?.stages.PRD.status === 'APPROVED');
+const techDesignApproved = computed(() => workflow.value?.stages.TECH_DESIGN.status === 'APPROVED');
 const openSpecDocuments = computed(() => [...(openSpecSummary.value?.artifacts || []), ...(openSpecSummary.value?.specs || [])]);
+const implementationStepItems = computed(() =>
+  implementationSteps.map((step) => ({
+    ...implementationStepStates.value[step],
+    label: implementationStepLabels[step]
+  }))
+);
 const openSpecTaskPercentage = computed(() => {
   const total = openSpecSummary.value?.tasks.total || 0;
   if (!total) {
@@ -221,6 +326,20 @@ const openSpecTaskPercentage = computed(() => {
   return Math.round(((openSpecSummary.value?.tasks.completed || 0) / total) * 100);
 });
 const canArchiveOpenSpec = computed(() => Boolean(workflow.value?.stages.CODE_REVIEW.status === 'APPROVED' && !openSpecSummary.value?.archived));
+const canRunOpenSpecApply = computed(() => implementationStepStates.value.ARTIFACT_REVIEW.status === 'APPROVED');
+const canInspectChanges = computed(() => implementationStepStates.value.APPLY.status === 'APPROVED');
+const canRunJunit = computed(() => implementationStepStates.value.CHANGE_INSPECTION.status === 'APPROVED');
+const openIssueCount = computed(() => workflow.value?.issues.filter((item) => item.status === 'OPEN').length || 0);
+const implementationOpenSpecPath = computed(() => openSpecSummary.value?.rootPath || stageArtifactPath('IMPLEMENTATION') || '未关联');
+const implementationArchiveStatus = computed(() => (openSpecSummary.value?.archived ? '已归档' : '进行中'));
+const implementationTaskProgress = computed(() =>
+  openSpecSummary.value ? `${openSpecSummary.value.tasks.completed} / ${openSpecSummary.value.tasks.total}` : '未读取'
+);
+const junitArtifactPath = computed(
+  () =>
+    workflow.value?.artifacts.find((artifact) => artifact.stage === 'IMPLEMENTATION' && artifact.exists && artifact.kind !== 'directory' && artifact.path.includes('/junit/'))?.path ||
+    ''
+);
 const prdEditorPath = computed(() => {
   if (!workflow.value) {
     return '';
@@ -241,11 +360,12 @@ const stageHint = computed(() => {
   const hints: Record<WorkflowStage, string> = {
     PRD: '产品生成并二次编辑 PRD，审核通过后进入技术方案。',
     TECH_DESIGN: '架构师生成技术方案，审核通过后解锁实施。',
-    IMPLEMENTATION: '查看 OpenSpec 状态、发起验证和单元测试报告。',
+    IMPLEMENTATION: `实施验证分步骤推进：${implementationStepLabels[activeImplementationStep.value]}。`,
     CODE_REVIEW: '按分支生成评审报告，阻断问题可打回实施阶段。'
   };
   return hints[activeStage.value];
 });
+const manualCopyMode = computed(() => selectedExecutionMode.value === 'MANUAL_COPY');
 
 function stageArtifactPath(stage: WorkflowStage) {
   if (selectedArtifactPath.value) {
@@ -296,7 +416,7 @@ async function runPrd() {
     .map((item) => item.trim())
     .filter(Boolean);
   const fileSources = prdSourceFiles.value.map((file) => file.path);
-  await store.runAction({
+  await runOrCopyAction({
     actionType: 'PRD_ANALYZE',
     params: {
       ...agentActionParams(),
@@ -343,6 +463,44 @@ function agentActionParams() {
   };
 }
 
+function actionButtonText(label: string) {
+  return manualCopyMode.value ? `复制${label}命令` : label;
+}
+
+function primaryActionIcon(icon: unknown) {
+  return manualCopyMode.value ? CopyDocument : icon;
+}
+
+async function copyToClipboard(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', 'true');
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-9999px';
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textarea);
+  }
+}
+
+async function runOrCopyAction(action: ActionInput, afterRun?: () => Promise<void>) {
+  if (!workflow.value) {
+    return;
+  }
+  if (manualCopyMode.value) {
+    const { commandText } = await apiClient.previewActionCommand(workflow.value.requirementId, action);
+    await copyToClipboard(commandText);
+    ElMessage.success('命令已复制');
+    return;
+  }
+  await store.runAction(action);
+  await afterRun?.();
+}
+
 async function runDesign() {
   const documentPath = prdDesignSourcePath.value.trim();
   if (!prdApproved.value) {
@@ -353,7 +511,7 @@ async function runDesign() {
     ElMessage.warning('未找到 PRD 文档，请先刷新产物');
     return;
   }
-  await store.runAction({
+  await runOrCopyAction({
     actionType: 'DESIGN_GENERATE',
     params: {
       ...agentActionParams(),
@@ -364,26 +522,64 @@ async function runDesign() {
 }
 
 async function runOpenSpecStatus() {
-  await store.runAction({ actionType: 'OPENSPEC_STATUS', params: { changeName: changeName.value } });
-  await loadOpenSpecSummary();
+  await runOrCopyAction({ actionType: 'OPENSPEC_STATUS', params: { changeName: changeName.value } }, loadOpenSpecSummary);
+}
+
+async function runOpenSpecArtifacts() {
+  if (!techDesignApproved.value) {
+    ElMessage.warning('请先通过技术方案审核');
+    return;
+  }
+  await runOrCopyAction(
+    {
+    actionType: 'OPENSPEC_FF',
+    params: {
+      ...agentActionParams(),
+      changeName: changeName.value,
+      documentPath: stageArtifactPath('TECH_DESIGN') || workflow.value?.stages.TECH_DESIGN.artifactPath
+    }
+    },
+    loadOpenSpecSummary
+  );
+}
+
+async function runOpenSpecApply() {
+  if (!canRunOpenSpecApply.value) {
+    ElMessage.warning('请先通过 OpenSpec 工件评审');
+    return;
+  }
+  await runOrCopyAction({ actionType: 'OPENSPEC_APPLY', params: { ...agentActionParams(), changeName: changeName.value } }, loadOpenSpecSummary);
 }
 
 async function runOpenSpecVerify() {
-  await store.runAction({ actionType: 'OPENSPEC_VERIFY', params: { ...agentActionParams(), changeName: changeName.value } });
-  await loadOpenSpecSummary();
+  await runOrCopyAction({ actionType: 'OPENSPEC_VERIFY', params: { ...agentActionParams(), changeName: changeName.value } }, loadOpenSpecSummary);
 }
 
 async function runJunit() {
-  await store.runAction({ actionType: 'JUNIT_GENERATE', params: { ...agentActionParams(), moduleName: moduleName.value } });
+  if (!canRunJunit.value) {
+    ElMessage.warning('请先通过变更文件及代码审核');
+    return;
+  }
+  await runOrCopyAction({ actionType: 'JUNIT_GENERATE', params: { ...agentActionParams(), moduleName: moduleName.value } });
+}
+
+async function loadGitChanges() {
+  if (!workflow.value) {
+    return;
+  }
+  try {
+    gitChanges.value = await apiClient.getGitChanges(workflow.value.requirementId);
+  } catch (error: any) {
+    ElMessage.error(error.message || '读取 Git 变更失败');
+  }
 }
 
 async function runCodeReview() {
-  await store.runAction({ actionType: 'CODE_REVIEW', params: { ...agentActionParams(), branchName: branchName.value } });
+  await runOrCopyAction({ actionType: 'CODE_REVIEW', params: { ...agentActionParams(), branchName: branchName.value } });
 }
 
 async function runOpenSpecArchive() {
-  await store.runAction({ actionType: 'OPENSPEC_ARCHIVE', params: { ...agentActionParams(), changeName: changeName.value } });
-  await loadOpenSpecSummary();
+  await runOrCopyAction({ actionType: 'OPENSPEC_ARCHIVE', params: { ...agentActionParams(), changeName: changeName.value } }, loadOpenSpecSummary);
 }
 
 async function returnToImplementation() {
@@ -410,11 +606,33 @@ async function toggleOpenSpecTask(task: OpenSpecTaskItem, completed: boolean) {
   }
 }
 
-function openReview() {
-  reviewDialog.value?.open(activeStage.value, activeStage.value === 'PRD' ? prdEditorPath.value : stageArtifactPath(activeStage.value));
+function implementationReviewArtifactPath() {
+  if (activeImplementationStep.value === 'UNIT_TEST') {
+    return junitArtifactPath.value;
+  }
+  if (activeImplementationStep.value === 'ARTIFACT_REVIEW' || activeImplementationStep.value === 'APPLY') {
+    return selectedOpenSpecDocPath.value || stageArtifactPath('IMPLEMENTATION');
+  }
+  return undefined;
 }
 
-async function submitReview(input: { stage: WorkflowStage; decision: 'APPROVED' | 'REJECTED' | 'RISK_ACCEPTED'; comment: string; artifactPath?: string }) {
+function openReview() {
+  const path =
+    activeStage.value === 'PRD'
+      ? prdEditorPath.value
+      : activeStage.value === 'IMPLEMENTATION'
+        ? implementationReviewArtifactPath()
+        : stageArtifactPath(activeStage.value);
+  reviewDialog.value?.open(activeStage.value, path, activeStage.value === 'IMPLEMENTATION' ? activeImplementationStep.value : undefined);
+}
+
+async function submitReview(input: {
+  stage: WorkflowStage;
+  implementationStep?: ImplementationStep;
+  decision: 'APPROVED' | 'REJECTED' | 'RISK_ACCEPTED';
+  comment: string;
+  artifactPath?: string;
+}) {
   await store.submitReview(input);
   ElMessage.success('审核记录已保存');
 }
@@ -449,6 +667,12 @@ watch(
   { immediate: true }
 );
 
+watch(activeImplementationStep, (step) => {
+  if (step === 'CHANGE_INSPECTION') {
+    void loadGitChanges();
+  }
+});
+
 onMounted(async () => {
   await store.loadAgents();
   await reload();
@@ -470,6 +694,15 @@ onMounted(async () => {
   gap: 14px;
 }
 
+.detail-page .toolbar > div {
+  min-width: 0;
+}
+
+.detail-page .toolbar strong,
+.detail-page .toolbar .muted {
+  overflow-wrap: anywhere;
+}
+
 .action-line {
   display: flex;
   align-items: center;
@@ -478,6 +711,100 @@ onMounted(async () => {
 
 .action-line .el-input {
   max-width: 360px;
+}
+
+.implementation-step-nav {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.implementation-step-button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 62px;
+  padding: 10px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #fff;
+  color: #1f2a3d;
+  text-align: left;
+  cursor: pointer;
+}
+
+.implementation-step-button.active {
+  border-color: #2563eb;
+  background: #f0f6ff;
+}
+
+.implementation-step-button.approved .step-index {
+  background: #16875a;
+}
+
+.implementation-summary-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #e3e8f2;
+  border-radius: 8px;
+  background: #fbfcff;
+}
+
+.summary-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  color: #52637a;
+}
+
+.summary-label {
+  color: #697891;
+  white-space: nowrap;
+}
+
+.summary-value {
+  min-width: 0;
+  color: #1f2a3d;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.step-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #52637a;
+  color: #fff;
+  font-size: 13px;
+  flex: 0 0 auto;
+}
+
+.step-main {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.step-main strong,
+.step-main small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.step-main small {
+  color: #697891;
 }
 
 .design-source-summary {
@@ -496,24 +823,48 @@ onMounted(async () => {
   border-radius: 8px;
 }
 
-.openspec-preview-tabs {
+.git-change-panel {
   display: grid;
-  gap: 8px;
-  padding: 12px 12px 0;
+  gap: 10px;
+  padding: 12px;
   border: 1px solid #e3e8f2;
-  border-bottom: 0;
-  border-radius: 8px 8px 0 0;
-  background: #ffffff;
+  border-radius: 8px;
 }
 
-.openspec-doc-tabs :deep(.el-tabs__header) {
-  margin: 0;
+.git-file-list {
+  display: grid;
+  gap: 6px;
+  max-height: 220px;
+  overflow: auto;
 }
 
-.openspec-doc-tabs :deep(.el-tabs__item) {
-  max-width: 220px;
+.git-file-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #eef2f7;
+  border-radius: 6px;
+}
+
+.git-file-row span:last-child {
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-diff {
+  max-height: 520px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid #dbe3ef;
+  border-radius: 6px;
+  background: #0f172a;
+  color: #dbeafe;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
 }
 
 .section-title {
@@ -528,46 +879,6 @@ onMounted(async () => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.openspec-doc-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 8px;
-}
-
-.openspec-doc-row {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-  padding: 10px 12px;
-  border: 1px solid #dbe3ef;
-  border-radius: 6px;
-  background: #ffffff;
-  color: #172033;
-  text-align: left;
-  cursor: pointer;
-}
-
-.openspec-doc-row.active {
-  border-color: #2563eb;
-  background: #f0f6ff;
-}
-
-.openspec-doc-row.missing {
-  color: #8a96a8;
-  cursor: not-allowed;
-}
-
-.openspec-doc-row span,
-.openspec-doc-row small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.openspec-doc-row small {
-  color: #697891;
 }
 
 .openspec-task-list {
@@ -590,6 +901,11 @@ onMounted(async () => {
   padding: 8px 10px;
   border: 1px solid #eef2f7;
   border-radius: 6px;
+}
+
+.openspec-task-row span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .openspec-task-row.done {
@@ -665,6 +981,19 @@ onMounted(async () => {
     align-items: stretch;
     flex-direction: column;
     width: 100%;
+  }
+
+  .implementation-step-nav {
+    grid-template-columns: 1fr;
+  }
+
+  .implementation-summary-strip {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .summary-item {
+    justify-content: space-between;
   }
 }
 </style>
