@@ -26,7 +26,7 @@ export type ReviewDecision = 'APPROVED' | 'REJECTED' | 'RISK_ACCEPTED';
 
 export type RequirementType = 'REQUIREMENT' | 'DEFECT';
 
-export type ExecutionMode = 'BACKGROUND' | 'TERMINAL' | 'MANUAL_COPY';
+export type ExecutionMode = 'BACKGROUND' | 'TERMINAL' | 'INTERACTIVE_TERMINAL' | 'MANUAL_COPY';
 
 export const implementationSteps = ['ARTIFACT_REVIEW', 'APPLY', 'CHANGE_INSPECTION', 'UNIT_TEST'] as const;
 
@@ -122,6 +122,8 @@ export interface PrdSourceFile {
   uploadedAt: string;
 }
 
+export type TechDesignSourceFile = PrdSourceFile;
+
 export interface WorkflowProject {
   name: string;
   path: string;
@@ -209,8 +211,10 @@ export interface AgentProvider {
   description?: string;
   inputMode: AgentInputMode;
   command?: string[];
+  interactiveCommand?: string[];
   available: boolean;
   supportsStreaming: boolean;
+  supportsInteractive?: boolean;
 }
 
 export interface StageState {
@@ -243,6 +247,7 @@ export interface RequirementWorkflow {
   techDesignDocument?: string;
   techDesignClarification?: string;
   prdSourceFiles?: PrdSourceFile[];
+  techDesignSourceFiles?: TechDesignSourceFile[];
   sources: string[];
   currentStage: WorkflowStage | 'DONE';
   status: WorkflowStatus;
@@ -265,6 +270,7 @@ export interface RequirementInput {
   prdClarification?: string;
   techDesignDocument?: string;
   techDesignClarification?: string;
+  techDesignSourceFiles?: TechDesignSourceFile[];
   sources?: string[];
 }
 

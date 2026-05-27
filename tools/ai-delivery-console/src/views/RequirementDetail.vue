@@ -39,6 +39,7 @@
               <el-select v-model="selectedExecutionMode" style="width: 140px" placeholder="执行方式">
                 <el-option label="后台执行" value="BACKGROUND" />
                 <el-option label="本地终端" value="TERMINAL" />
+                <el-option label="交互终端" value="INTERACTIVE_TERMINAL" />
                 <el-option label="手动复制" value="MANUAL_COPY" />
               </el-select>
               <el-button v-if="activeStage !== 'IMPLEMENTATION'" :icon="DocumentChecked" @click="openReview">审核</el-button>
@@ -85,6 +86,29 @@
                   <span class="design-source-path">{{ prdDesignSourcePath || '未关联' }}</span>
                 </el-descriptions-item>
               </el-descriptions>
+              <div class="prd-file-panel">
+                <div class="action-line">
+                  <input
+                    ref="techDesignFileInput"
+                    class="hidden-file-input"
+                    type="file"
+                    multiple
+                    accept=".pdf,.md,.markdown,image/*"
+                    @change="uploadTechDesignFiles"
+                  />
+                  <el-button :disabled="!prdApproved" :icon="Upload" @click="chooseTechDesignFiles">上传补充材料</el-button>
+                  <span class="muted">支持 PDF、图片、Markdown，上传后快照到 technical-design/file 目录并追加到 d 参数。</span>
+                </div>
+                <div v-if="techDesignSourceFiles.length" class="prd-file-list">
+                  <div v-for="file in techDesignSourceFiles" :key="file.id" class="prd-file-item">
+                    <div class="prd-file-meta">
+                      <strong>{{ file.name }}</strong>
+                      <small class="muted">{{ file.path }} · {{ formatFileSize(file.size) }}</small>
+                    </div>
+                    <el-button type="danger" link :icon="Delete" @click="deleteTechDesignFile(file.id)">删除</el-button>
+                  </div>
+                </div>
+              </div>
               <el-input
                 v-model="designClarification"
                 type="textarea"
@@ -302,6 +326,7 @@ const reviewDialog = ref<InstanceType<typeof ReviewDialog>>();
 const runLogDrawer = ref<InstanceType<typeof RunLogDrawer>>();
 const artifactPreviewDialog = ref<InstanceType<typeof ArtifactPreviewDialog>>();
 const prdFileInput = ref<HTMLInputElement>();
+const techDesignFileInput = ref<HTMLInputElement>();
 const selectedArtifactPath = ref('');
 const sourceText = ref('');
 const prdClarification = ref('');
@@ -330,6 +355,7 @@ const currentStageRun = computed<RunRecord | undefined>(() => {
   return workflow.value?.runs.find((run) => (run.stage || stageForAction(run.actionType)) === activeStage.value);
 });
 const prdSourceFiles = computed(() => workflow.value?.prdSourceFiles || []);
+const techDesignSourceFiles = computed(() => workflow.value?.techDesignSourceFiles || []);
 const prdApproved = computed(() => workflow.value?.stages.PRD.status === 'APPROVED');
 const techDesignApproved = computed(() => workflow.value?.stages.TECH_DESIGN.status === 'APPROVED');
 const openSpecDocuments = computed(() => [...(openSpecSummary.value?.artifacts || []), ...(openSpecSummary.value?.specs || [])]);
@@ -375,6 +401,22 @@ const prdDesignSourcePath = computed(() => {
     return '';
   }
   return prdEditorPath.value;
+});
+const openSpecPrdDocumentPath = computed(() => {
+  if (!workflow.value) {
+    return '';
+  }
+  const selected = workflow.value.artifacts.find((artifact) => artifact.path === selectedArtifactPath.value);
+  if (selected?.stage === 'PRD' && selected.exists && selected.kind !== 'directory') {
+    return selected.path;
+  }
+  return stageArtifactPath('PRD') || workflow.value.stages.PRD.artifactPath || '';
+});
+const openSpecTechnicalDesignDocumentPath = computed(() => {
+  if (!workflow.value) {
+    return '';
+  }
+  return stageArtifactPath('TECH_DESIGN') || workflow.value.stages.TECH_DESIGN.artifactPath || '';
 });
 const stageHint = computed(() => {
   const hints: Record<WorkflowStage, string> = {
@@ -460,6 +502,26 @@ async function uploadPrdFiles(event: Event) {
 async function deletePrdFile(fileId: string) {
   await store.deletePrdFile(fileId);
   ElMessage.success('PRD 来源文件已删除');
+}
+
+function chooseTechDesignFiles() {
+  techDesignFileInput.value?.click();
+}
+
+async function uploadTechDesignFiles(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const files = Array.from(input.files || []);
+  if (!files.length) {
+    return;
+  }
+  await store.uploadTechDesignFiles(files);
+  input.value = '';
+  ElMessage.success('技术方案补充材料已上传');
+}
+
+async function deleteTechDesignFile(fileId: string) {
+  await store.deleteTechDesignFile(fileId);
+  ElMessage.success('技术方案补充材料已删除');
 }
 
 function formatFileSize(size: number) {
@@ -552,6 +614,7 @@ async function runDesign() {
     params: {
       ...agentActionParams(),
       documentPath,
+      sourceFiles: techDesignSourceFiles.value.map((file) => file.path),
       clarification: designClarification.value.trim()
     }
   });
@@ -566,14 +629,25 @@ async function runOpenSpecArtifacts() {
     ElMessage.warning('请先通过技术方案审核');
     return;
   }
+  const prdDocumentPath = openSpecPrdDocumentPath.value.trim();
+  const documentPath = openSpecTechnicalDesignDocumentPath.value.trim();
+  if (!prdDocumentPath) {
+    ElMessage.warning('请先生成、保存或刷新 PRD 产物');
+    return;
+  }
+  if (!documentPath) {
+    ElMessage.warning('请先生成、保存或刷新技术方案产物');
+    return;
+  }
   await runOrCopyAction(
     {
-    actionType: 'OPENSPEC_FF',
-    params: {
-      ...agentActionParams(),
-      changeName: changeName.value,
-      documentPath: stageArtifactPath('TECH_DESIGN') || workflow.value?.stages.TECH_DESIGN.artifactPath
-    }
+      actionType: 'OPENSPEC_FF',
+      params: {
+        ...agentActionParams(),
+        changeName: changeName.value,
+        prdDocumentPath,
+        documentPath
+      }
     },
     loadOpenSpecSummary
   );

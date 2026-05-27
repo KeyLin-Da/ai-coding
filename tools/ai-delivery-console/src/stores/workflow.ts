@@ -111,6 +111,20 @@ export const useWorkflowStore = defineStore('workflow', {
       }
       this.current = await apiClient.deletePrdFile(this.current.requirementId, fileId);
       await this.loadRequirements();
+    },
+    async uploadTechDesignFiles(files: File[]) {
+      if (!this.current) {
+        return;
+      }
+      this.current = await apiClient.uploadTechDesignFiles(this.current.requirementId, files);
+      await this.loadRequirements();
+    },
+    async deleteTechDesignFile(fileId: string) {
+      if (!this.current) {
+        return;
+      }
+      this.current = await apiClient.deleteTechDesignFile(this.current.requirementId, fileId);
+      await this.loadRequirements();
     }
   }
 });

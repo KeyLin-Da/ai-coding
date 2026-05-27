@@ -17,12 +17,22 @@ function asString(value: unknown, fallback = ''): string {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
 }
 
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((item) => (typeof item === 'string' ? item.trim() : '')).filter(Boolean);
+}
+
 function hasParam(params: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(params, key);
 }
 
 function executionMode(params: Record<string, unknown>): ExecutionMode {
-  return params.executionMode === 'TERMINAL' ? 'TERMINAL' : 'BACKGROUND';
+  if (params.executionMode === 'TERMINAL' || params.executionMode === 'INTERACTIVE_TERMINAL') {
+    return params.executionMode;
+  }
+  return 'BACKGROUND';
 }
 
 function prdDescription(workflow: RequirementWorkflow, params: Record<string, unknown>): string {
@@ -41,6 +51,27 @@ function prdDocumentPath(workflow: RequirementWorkflow, params: Record<string, u
   return artifactPath || workflow.stages.PRD.artifactPath || `docs/${workflow.requirementId}/prd/analysis.md`;
 }
 
+function openSpecPrdDocumentPath(workflow: RequirementWorkflow, params: Record<string, unknown>): string {
+  const explicitPath = asString(params.prdDocumentPath);
+  if (explicitPath) {
+    return explicitPath;
+  }
+  const artifactPath = workflow.artifacts.find((artifact) => artifact.stage === 'PRD' && artifact.exists && artifact.kind !== 'directory')?.path;
+  return artifactPath || workflow.stages.PRD.artifactPath || `docs/${workflow.requirementId}/prd/analysis.md`;
+}
+
+function techDesignSourcePaths(workflow: RequirementWorkflow, params: Record<string, unknown>): string[] {
+  const explicitPaths = asStringArray(params.sourceFiles);
+  if (explicitPaths.length) {
+    return explicitPaths;
+  }
+  return (workflow.techDesignSourceFiles || []).map((file) => file.path).filter(Boolean);
+}
+
+function designInputParam(workflow: RequirementWorkflow, params: Record<string, unknown>): string {
+  return [prdDocumentPath(workflow, params), ...techDesignSourcePaths(workflow, params)].filter(Boolean).join(',');
+}
+
 function technicalDesignDocumentPath(workflow: RequirementWorkflow, params: Record<string, unknown>): string {
   const explicitPath = asString(params.documentPath);
   if (explicitPath) {
@@ -48,6 +79,10 @@ function technicalDesignDocumentPath(workflow: RequirementWorkflow, params: Reco
   }
   const artifactPath = workflow.artifacts.find((artifact) => artifact.stage === 'TECH_DESIGN' && artifact.exists && artifact.kind !== 'directory')?.path;
   return artifactPath || workflow.stages.TECH_DESIGN.artifactPath || `docs/${workflow.requirementId}/technical-design/design_review.md`;
+}
+
+function openSpecInputParam(workflow: RequirementWorkflow, params: Record<string, unknown>): string {
+  return [openSpecPrdDocumentPath(workflow, params), technicalDesignDocumentPath(workflow, params)].filter(Boolean).join(',');
 }
 
 function projectParam(workflow: RequirementWorkflow): string {
@@ -70,13 +105,13 @@ function buildSkillCommand(workflow: RequirementWorkflow, action: ActionInput): 
     case 'PRD_ANALYZE':
       return `/coding-prd-analyzer id=${requirementId}${prdClarification ? ` c=${prdClarification}` : ''}${sources ? ` ${sources}` : ''}`;
     case 'DESIGN_GENERATE':
-      return `/coding-design d=${prdDocumentPath(workflow, params)} r=${requirementId}${projects ? ` p=${projects}` : ''}${clarification ? ` c=${clarification}` : ''}`;
+      return `/coding-design d=${designInputParam(workflow, params)} r=${requirementId}${projects ? ` p=${projects}` : ''}${clarification ? ` c=${clarification}` : ''}`;
     case 'JUNIT_GENERATE':
       return `generate-unit-test ${moduleName || '<module-name>'}${description ? ` "${description}"` : ''}`;
     case 'CODE_REVIEW':
       return `/coding-review b=${branchName || '<branch-name>'}${params.docs ? ` d=${params.docs}` : ''}`;
     case 'OPENSPEC_FF':
-      return `/openspec-ff-change ${changeName} d=${technicalDesignDocumentPath(workflow, params)}`;
+      return `/openspec-ff-change ${changeName} d=${openSpecInputParam(workflow, params)}`;
     case 'OPENSPEC_APPLY':
       return `/openspec-apply-change ${changeName}`;
     case 'OPENSPEC_VERIFY':
@@ -144,11 +179,14 @@ function runCli(workspaceRoot: string, args: string[]): Promise<{ status: RunSta
 export function validateActionInput(workspaceRoot: string, action: ActionInput, options: { skipPathValidation?: boolean } = {}): void {
   const params = action.params || {};
   if (!options.skipPathValidation) {
-    for (const key of ['documentPath', 'artifactPath', 'outputPath']) {
+    for (const key of ['documentPath', 'prdDocumentPath', 'artifactPath', 'outputPath']) {
       const value = params[key];
       if (typeof value === 'string' && value.trim()) {
         assertInsideWorkspace(workspaceRoot, value);
       }
+    }
+    for (const value of asStringArray(params.sourceFiles)) {
+      assertInsideWorkspace(workspaceRoot, value);
     }
   }
   const allowed = new Set<ActionInput['actionType']>([
@@ -264,7 +302,7 @@ export async function executeAction(
     return run;
   }
 
-  return executionMode(params) === 'TERMINAL'
+  return ['TERMINAL', 'INTERACTIVE_TERMINAL'].includes(executionMode(params))
     ? startAgentInTerminal(workspaceRoot, workflow, run, provider, commandText)
     : startAgentProcess(workspaceRoot, workflow, run, provider, commandText, onRunUpdate);
 }

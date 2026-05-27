@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import path from 'node:path';
 import { URL } from 'node:url';
-import type { ActionInput, PrdSourceFile, RequirementInput, RequirementWorkflow, ReviewInput, RunRecord, WorkflowStatus } from '../shared/workflow';
+import type { ActionInput, PrdSourceFile, RequirementInput, RequirementWorkflow, ReviewInput, RunRecord, TechDesignSourceFile, WorkflowStatus } from '../shared/workflow';
 import { ensureImplementationSteps, stageForAction } from '../shared/workflow';
 import { normalizePrdClarification, WorkflowRepository } from './services/workflow-repository';
 import { scanRequirementArtifacts } from './services/workspace-scanner';
@@ -17,7 +17,9 @@ import { readProjectHistory } from './services/project-history';
 import {
   assertAllowedPrdSourceFile,
   deletePrdSourceFileSnapshot,
+  deleteTechDesignSourceFileSnapshot,
   savePrdSourceFileSnapshot,
+  saveTechDesignSourceFileSnapshot,
   type UploadedPrdSourceFile
 } from './services/prd-source-files';
 
@@ -316,6 +318,66 @@ export function createRouter(workspaceRoot: string) {
             return;
           }
           workflow = await repository.save(await deletePrdSourceFileSnapshot(workspaceRoot, workflow, fileId));
+          send(response, 200, { data: workflow });
+        } finally {
+          await lock.release();
+        }
+        return;
+      }
+
+      const techDesignFilesMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/tech-design-files$/);
+      if (request.method === 'POST' && techDesignFilesMatch) {
+        const requirementId = techDesignFilesMatch[1];
+        const files = await parseMultipartFiles(request);
+        if (!files.length) {
+          send(response, 400, { message: '请至少选择一个技术方案补充材料' });
+          return;
+        }
+        const lock = new WorkflowLock(workspaceRoot, requirementId);
+        await lock.acquire();
+        try {
+          let workflow = await repository.load(requirementId);
+          if (!workflow) {
+            send(response, 404, { message: '需求不存在' });
+            return;
+          }
+          files.forEach(assertAllowedPrdSourceFile);
+          const snapshots: TechDesignSourceFile[] = [];
+          for (const file of files) {
+            snapshots.push(await saveTechDesignSourceFileSnapshot(workspaceRoot, workflow.requirementId, file));
+          }
+          const nextWorkflow = {
+            ...workflow,
+            techDesignSourceFiles: [...(workflow.techDesignSourceFiles || []), ...snapshots]
+          };
+          workflow = await repository.save({
+            ...nextWorkflow,
+            artifacts: await scanRequirementArtifacts(workspaceRoot, nextWorkflow.requirementId, nextWorkflow.branchName, nextWorkflow.stages.IMPLEMENTATION.changeName)
+          });
+          send(response, 200, { data: workflow });
+        } finally {
+          await lock.release();
+        }
+        return;
+      }
+
+      const techDesignFileDeleteMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/tech-design-files\/([^/]+)$/);
+      if (request.method === 'DELETE' && techDesignFileDeleteMatch) {
+        const requirementId = techDesignFileDeleteMatch[1];
+        const fileId = decodeURIComponent(techDesignFileDeleteMatch[2]);
+        const lock = new WorkflowLock(workspaceRoot, requirementId);
+        await lock.acquire();
+        try {
+          let workflow = await repository.load(requirementId);
+          if (!workflow) {
+            send(response, 404, { message: '需求不存在' });
+            return;
+          }
+          const nextWorkflow = await deleteTechDesignSourceFileSnapshot(workspaceRoot, workflow, fileId);
+          workflow = await repository.save({
+            ...nextWorkflow,
+            artifacts: await scanRequirementArtifacts(workspaceRoot, nextWorkflow.requirementId, nextWorkflow.branchName, nextWorkflow.stages.IMPLEMENTATION.changeName)
+          });
           send(response, 200, { data: workflow });
         } finally {
           await lock.release();

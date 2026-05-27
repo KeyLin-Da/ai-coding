@@ -109,5 +109,23 @@ export const apiClient = {
         method: 'DELETE'
       }
     );
+  },
+  uploadTechDesignFiles(requirementId: string, files: File[]) {
+    const formData = new FormData();
+    for (const file of files) {
+      formData.append('files', file);
+    }
+    return request<RequirementWorkflow>(`/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/tech-design-files`, {
+      method: 'POST',
+      body: formData
+    });
+  },
+  deleteTechDesignFile(requirementId: string, fileId: string) {
+    return request<RequirementWorkflow>(
+      `/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/tech-design-files/${encodeURIComponent(fileId)}`,
+      {
+        method: 'DELETE'
+      }
+    );
   }
 };

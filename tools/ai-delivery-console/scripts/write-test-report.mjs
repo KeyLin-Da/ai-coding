@@ -3,7 +3,7 @@ import path from 'node:path';
 
 const root = process.cwd();
 const resultPath = path.join(root, 'coverage', 'vitest-results.json');
-const reportDir = path.resolve(root, '..', '..', 'docs', 'ai-skill-delivery-console', 'junit');
+const reportDir = path.resolve(root, process.env.AI_DELIVERY_TEST_REPORT_DIR || path.join('..', '..', 'docs', 'ai-skill-delivery-console', 'junit'));
 const reportPath = path.join(reportDir, 'index.html');
 
 const result = fs.existsSync(resultPath) ? JSON.parse(fs.readFileSync(resultPath, 'utf8')) : {};

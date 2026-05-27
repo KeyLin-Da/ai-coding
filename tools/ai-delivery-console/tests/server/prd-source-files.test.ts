@@ -2,7 +2,12 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { deletePrdSourceFileSnapshot, savePrdSourceFileSnapshot } from '../../server/services/prd-source-files';
+import {
+  deletePrdSourceFileSnapshot,
+  deleteTechDesignSourceFileSnapshot,
+  savePrdSourceFileSnapshot,
+  saveTechDesignSourceFileSnapshot
+} from '../../server/services/prd-source-files';
 import { WorkflowRepository } from '../../server/services/workflow-repository';
 
 async function tmpWorkspace() {
@@ -53,6 +58,30 @@ describe('prd-source-files', () => {
 
     expect(updated.prdSourceFiles).toHaveLength(0);
     expect(updated.sources).toEqual(['https://example.feishu.cn/docx/xxx']);
+    await expect(fs.stat(path.join(workspace, snapshot.path))).rejects.toThrow();
+  });
+
+  it('将技术方案补充材料快照到 technical-design/file 目录并可删除', async () => {
+    const workspace = await tmpWorkspace();
+    const repository = new WorkflowRepository(workspace);
+    const workflow = await repository.upsert({ requirementId: '172014', title: '定位菜单' });
+    const snapshot = await saveTechDesignSourceFileSnapshot(workspace, '172014', {
+      filename: '旧方案.md',
+      mimeType: 'text/markdown',
+      content: Buffer.from('# old design')
+    });
+
+    expect(snapshot.name).toBe('旧方案.md');
+    expect(snapshot.path).toContain('docs/172014/technical-design/file/');
+    await expect(fs.stat(path.join(workspace, snapshot.path))).resolves.toBeTruthy();
+
+    const withFile = await repository.save({
+      ...workflow,
+      techDesignSourceFiles: [snapshot]
+    });
+    const updated = await deleteTechDesignSourceFileSnapshot(workspace, withFile, snapshot.id);
+
+    expect(updated.techDesignSourceFiles).toHaveLength(0);
     await expect(fs.stat(path.join(workspace, snapshot.path))).rejects.toThrow();
   });
 });

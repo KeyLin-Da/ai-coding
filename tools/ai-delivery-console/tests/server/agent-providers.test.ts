@@ -8,6 +8,7 @@ import {
   cancelAgentRun,
   createPromptEnvelope,
   createTerminalRunScript,
+  interactiveTerminalCommandLine,
   listAgentProviders,
   refreshTerminalRunStatuses,
   startAgentProcess,
@@ -53,6 +54,8 @@ describe('agent-providers', () => {
     const codex = providers.find((provider) => provider.id === 'codex');
     expect(codex?.inputMode).toBe('STDIN');
     expect(codex?.command).toEqual(['codex', 'exec', '-C', '{workspaceRoot}', '-']);
+    expect(codex?.interactiveCommand).toEqual(['codex', '-C', '{workspaceRoot}', '--no-alt-screen', '{prompt}']);
+    expect(codex?.supportsInteractive).toBe(true);
   });
 
   it('生成 Prompt Envelope 并包含技能调用文本', async () => {
@@ -128,6 +131,10 @@ describe('agent-providers', () => {
     );
   });
 
+  it('交互终端命令按参数数组安全转义', () => {
+    expect(interactiveTerminalCommandLine(['codex', '-C', '/workspace', "hello 'user'"])).toBe("'codex' '-C' '/workspace' 'hello '\\''user'\\'''");
+  });
+
   it('生成本地终端脚本并记录 transcript 和状态路径', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-terminal-'));
     const provider: AgentProvider = {
@@ -152,6 +159,33 @@ describe('agent-providers', () => {
     expect(script).toContain('AI Delivery');
     expect(script).toContain('/coding-prd-analyzer id=172014');
     expect(script).toContain('terminal-status.json');
+  });
+
+  it('生成交互终端脚本时使用 interactiveCommand 模板', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-terminal-'));
+    const provider: AgentProvider = {
+      id: 'interactive-agent',
+      name: 'Interactive Agent',
+      inputMode: 'PROMPT_FILE',
+      command: ['background-agent'],
+      interactiveCommand: ['interactive-agent', '--workspace', '{workspaceRoot}', '--prompt', '{prompt}'],
+      available: true,
+      supportsStreaming: true,
+      supportsInteractive: true
+    };
+    const run = {
+      ...runRecord('run-interactive-script'),
+      executionMode: 'INTERACTIVE_TERMINAL' as const
+    };
+
+    const terminal = await createTerminalRunScript(root, workflow(), run, provider, '/coding-prd-analyzer id=172014');
+    const script = await fs.readFile(path.join(root, terminal.scriptPath), 'utf8');
+
+    expect(terminal.commandLine).toContain("'interactive-agent'");
+    expect(terminal.commandLine).not.toContain('background-agent');
+    expect(script).toContain("EXECUTION_MODE='INTERACTIVE_TERMINAL'");
+    expect(script).toContain("EXECUTION_MODE_LABEL='交互终端'");
+    expect(script).toContain('script -q -a "$TRANSCRIPT_FILE" zsh -lc "$COMMAND_PREVIEW"');
   });
 
   it('刷新本地终端状态文件并更新运行记录', async () => {
@@ -182,6 +216,37 @@ describe('agent-providers', () => {
     expect(refreshed.changed).toBe(true);
     expect(refreshed.workflow.runs[0].status).toBe('SUCCEEDED');
     expect(events.some((event) => event.type === 'EXIT' && event.message.includes('终端 Agent'))).toBe(true);
+  });
+
+  it('刷新交互终端状态文件并保留交互终端语义', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-terminal-'));
+    const item = workflow();
+    const run: RunRecord = {
+      ...runRecord('run-interactive-finished'),
+      status: 'TERMINAL_OPENED',
+      executionMode: 'INTERACTIVE_TERMINAL',
+      terminalStatusPath: 'docs/172014/workflow/runs/run-interactive-finished.terminal-status.json',
+      terminalTranscriptPath: 'docs/172014/workflow/runs/run-interactive-finished.terminal.log'
+    };
+    item.runs.push(run);
+    await fs.mkdir(path.join(root, 'docs', '172014', 'workflow', 'runs'), { recursive: true });
+    await fs.writeFile(
+      path.join(root, run.terminalStatusPath),
+      JSON.stringify({
+        status: 'SUCCEEDED',
+        exitCode: 0,
+        finishedAt: '2026-05-22T00:00:00.000Z',
+        transcriptPath: run.terminalTranscriptPath
+      })
+    );
+
+    const refreshed = await refreshTerminalRunStatuses(root, item);
+    const events = await readRunEvents(root, '172014', run.id);
+
+    expect(refreshed.changed).toBe(true);
+    expect(refreshed.workflow.runs[0].executionMode).toBe('INTERACTIVE_TERMINAL');
+    expect(refreshed.workflow.runs[0].status).toBe('SUCCEEDED');
+    expect(events.some((event) => event.type === 'EXIT' && event.message.includes('交互终端 Agent'))).toBe(true);
   });
 
   it('可以取消正在运行的 Agent', async () => {

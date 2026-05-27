@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { PrdSourceFile, RequirementWorkflow } from '../../shared/workflow';
+import type { PrdSourceFile, RequirementWorkflow, TechDesignSourceFile } from '../../shared/workflow';
 import { assertInsideWorkspace, createId, normalizeRequirementId, toRelativePath } from './workspace';
 
 export interface UploadedPrdSourceFile {
@@ -36,15 +36,18 @@ export function getPrdSourceFileDir(workspaceRoot: string, requirementId: string
   return path.join(workspaceRoot, 'docs', normalizeRequirementId(requirementId), 'workflow', 'file');
 }
 
-export async function savePrdSourceFileSnapshot(
+export function getTechDesignSourceFileDir(workspaceRoot: string, requirementId: string): string {
+  return path.join(workspaceRoot, 'docs', normalizeRequirementId(requirementId), 'technical-design', 'file');
+}
+
+async function saveSourceFileSnapshot(
   workspaceRoot: string,
-  requirementId: string,
-  file: UploadedPrdSourceFile
+  file: UploadedPrdSourceFile,
+  fileDir: string
 ): Promise<PrdSourceFile> {
   assertAllowedPrdSourceFile(file);
   const id = createId('file');
   const filename = `${id}-${safeFileName(file.filename)}`;
-  const fileDir = getPrdSourceFileDir(workspaceRoot, requirementId);
   await fs.mkdir(fileDir, { recursive: true });
   const absolutePath = path.join(fileDir, filename);
   await fs.writeFile(absolutePath, file.content);
@@ -56,6 +59,22 @@ export async function savePrdSourceFileSnapshot(
     mimeType: file.mimeType,
     uploadedAt: new Date().toISOString()
   };
+}
+
+export async function savePrdSourceFileSnapshot(
+  workspaceRoot: string,
+  requirementId: string,
+  file: UploadedPrdSourceFile
+): Promise<PrdSourceFile> {
+  return saveSourceFileSnapshot(workspaceRoot, file, getPrdSourceFileDir(workspaceRoot, requirementId));
+}
+
+export async function saveTechDesignSourceFileSnapshot(
+  workspaceRoot: string,
+  requirementId: string,
+  file: UploadedPrdSourceFile
+): Promise<TechDesignSourceFile> {
+  return saveSourceFileSnapshot(workspaceRoot, file, getTechDesignSourceFileDir(workspaceRoot, requirementId));
 }
 
 export async function deletePrdSourceFileSnapshot(
@@ -78,5 +97,27 @@ export async function deletePrdSourceFileSnapshot(
     ...workflow,
     prdSourceFiles: workflow.prdSourceFiles?.filter((item) => item.id !== fileId) || [],
     sources: workflow.sources.filter((source) => source !== file.path)
+  };
+}
+
+export async function deleteTechDesignSourceFileSnapshot(
+  workspaceRoot: string,
+  workflow: RequirementWorkflow,
+  fileId: string
+): Promise<RequirementWorkflow> {
+  const file = workflow.techDesignSourceFiles?.find((item) => item.id === fileId);
+  if (!file) {
+    throw new Error('技术方案补充材料不存在');
+  }
+  const absolutePath = assertInsideWorkspace(workspaceRoot, file.path);
+  const allowedDir = getTechDesignSourceFileDir(workspaceRoot, workflow.requirementId);
+  const relativeToDir = path.relative(allowedDir, absolutePath);
+  if (relativeToDir.startsWith('..') || path.isAbsolute(relativeToDir)) {
+    throw new Error('技术方案补充材料路径异常');
+  }
+  await fs.rm(absolutePath, { force: true });
+  return {
+    ...workflow,
+    techDesignSourceFiles: workflow.techDesignSourceFiles?.filter((item) => item.id !== fileId) || []
   };
 }

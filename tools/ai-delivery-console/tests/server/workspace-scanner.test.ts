@@ -7,12 +7,13 @@ import { scanRequirementArtifacts } from '../../server/services/workspace-scanne
 async function makeFixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-scan-'));
   await fs.mkdir(path.join(root, 'docs', '172014', 'prd'), { recursive: true });
-  await fs.mkdir(path.join(root, 'docs', '172014', 'technical-design'), { recursive: true });
+  await fs.mkdir(path.join(root, 'docs', '172014', 'technical-design', 'file'), { recursive: true });
   await fs.mkdir(path.join(root, 'docs', '172014', 'junit', 'req-172014'), { recursive: true });
   await fs.mkdir(path.join(root, 'openspec', 'changes', 'req-172014'), { recursive: true });
   await fs.mkdir(path.join(root, 'docs', 'code_review', 'code_review_feature_opp_172014'), { recursive: true });
   await fs.writeFile(path.join(root, 'docs', '172014', 'prd', 'analysis.md'), '# PRD');
   await fs.writeFile(path.join(root, 'docs', '172014', 'technical-design', 'design_review.md'), '# Design');
+  await fs.writeFile(path.join(root, 'docs', '172014', 'technical-design', 'file', 'old-design.md'), '# Old Design');
   await fs.writeFile(path.join(root, 'docs', '172014', 'junit', 'req-172014', 'report.md'), '# JUnit');
   await fs.writeFile(path.join(root, 'docs', 'code_review', 'code_review_feature_opp_172014', 'summary.md'), '# Review');
   return root;
@@ -26,6 +27,7 @@ describe('workspace-scanner', () => {
       expect.arrayContaining([
         'docs/172014/prd/analysis.md',
         'docs/172014/technical-design/design_review.md',
+        'docs/172014/technical-design/file/old-design.md',
         'openspec/changes/req-172014',
         'docs/172014/junit/req-172014/report.md',
         'docs/code_review/code_review_feature_opp_172014/summary.md'

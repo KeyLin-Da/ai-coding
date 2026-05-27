@@ -54,11 +54,30 @@ async function listFiles(dir: string, maxDepth = 2): Promise<string[]> {
   return walk(dir, 0);
 }
 
+function artifactKindForFile(filePath: string): ArtifactRef['kind'] {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === '.html') {
+    return 'html';
+  }
+  if (ext === '.md' || ext === '.markdown') {
+    return 'markdown';
+  }
+  if (ext === '.json') {
+    return 'json';
+  }
+  return 'text';
+}
+
 export async function scanRequirementArtifacts(workspaceRoot: string, requirementId: string, branchName?: string, changeName?: string): Promise<ArtifactRef[]> {
   const id = normalizeRequirementId(requirementId);
   const artifacts: ArtifactRef[] = [];
   artifacts.push(await fileArtifact(workspaceRoot, 'prd-analysis', 'PRD', 'PRD 分析文档', `docs/${id}/prd/analysis.md`, 'markdown'));
   artifacts.push(await fileArtifact(workspaceRoot, 'technical-design', 'TECH_DESIGN', '技术方案评审文档', `docs/${id}/technical-design/design_review.md`, 'markdown'));
+  const techDesignSourceFiles = await listFiles(path.join(workspaceRoot, 'docs', id, 'technical-design', 'file'), 2);
+  for (const file of techDesignSourceFiles) {
+    const relative = path.relative(workspaceRoot, file);
+    artifacts.push(await fileArtifact(workspaceRoot, `technical-design-source-${artifacts.length}`, 'TECH_DESIGN', path.basename(file), relative, artifactKindForFile(file)));
+  }
 
   const openSpecChangeName = normalizeOpenSpecChangeName(changeName || `req-${id}`, `req-${id}`);
   const openSpecRoot = await resolveOpenSpecRoot(workspaceRoot, openSpecChangeName);

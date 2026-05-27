@@ -21,8 +21,10 @@ function defaultProviders(): AgentProvider[] {
       description: '使用本机 Codex CLI 执行技能 Prompt。',
       inputMode: 'STDIN',
       command: splitCommand(serverConfig.codexCommand),
+      interactiveCommand: splitCommand(serverConfig.codexInteractiveCommand),
       available: Boolean(serverConfig.codexCommand),
-      supportsStreaming: true
+      supportsStreaming: true,
+      supportsInteractive: Boolean(serverConfig.codexInteractiveCommand)
     }
   ];
 }
@@ -40,7 +42,8 @@ async function configuredProviders(): Promise<AgentProvider[]> {
   return providers.map((provider) => ({
     ...provider,
     available: provider.available !== false,
-    supportsStreaming: provider.supportsStreaming !== false
+    supportsStreaming: provider.supportsStreaming !== false,
+    supportsInteractive: provider.supportsInteractive ?? Boolean(provider.interactiveCommand?.length)
   }));
 }
 
@@ -114,6 +117,26 @@ export function terminalCommandLine(provider: AgentProvider, renderedCommand: st
   return provider.inputMode === 'STDIN' ? `${command} < "$PROMPT_FILE"` : command;
 }
 
+export function interactiveTerminalCommandLine(renderedCommand: string[]): string {
+  return renderedCommand.map(shellQuote).join(' ');
+}
+
+function isInteractiveTerminalRun(run: RunRecord): boolean {
+  return run.executionMode === 'INTERACTIVE_TERMINAL';
+}
+
+function isTerminalExecutionMode(run: RunRecord): boolean {
+  return run.executionMode === 'TERMINAL' || run.executionMode === 'INTERACTIVE_TERMINAL';
+}
+
+function terminalCommandTemplate(provider: AgentProvider, run: RunRecord): string[] {
+  return isInteractiveTerminalRun(run) ? provider.interactiveCommand || [] : provider.command || [];
+}
+
+function terminalExecutionModeLabel(run: RunRecord): string {
+  return isInteractiveTerminalRun(run) ? '交互终端' : '本地终端';
+}
+
 interface TerminalRunScript {
   promptPath: string;
   scriptPath: string;
@@ -140,17 +163,25 @@ export async function createTerminalRunScript(
   const absoluteScriptPath = path.join(scriptDir, `${run.id}.command`);
   const absoluteTranscriptPath = path.join(runDir, `${run.id}.terminal.log`);
   const absoluteStatusPath = path.join(runDir, `${run.id}.terminal-status.json`);
-  const rendered = renderCommand(provider.command || [], {
+  const promptContent = await fs.readFile(absolutePromptPath, 'utf8');
+  const interactiveMode = isInteractiveTerminalRun(run);
+  const commandTemplate = terminalCommandTemplate(provider, run);
+  if (!commandTemplate.length) {
+    throw new Error(`${terminalExecutionModeLabel(run)}未配置可执行命令: ${provider.name}`);
+  }
+  const rendered = renderCommand(commandTemplate, {
     workspaceRoot,
     promptFile: absolutePromptPath,
     promptPath: absolutePromptPath,
+    prompt: promptContent,
     commandText,
     requirementId: workflow.requirementId,
     runId: run.id
   });
-  const commandLine = terminalCommandLine(provider, rendered);
+  const commandLine = interactiveMode ? interactiveTerminalCommandLine(rendered) : terminalCommandLine(provider, rendered);
   const transcriptPath = toRelativePath(workspaceRoot, absoluteTranscriptPath);
   const statusPath = toRelativePath(workspaceRoot, absoluteStatusPath);
+  const executionModeLabel = terminalExecutionModeLabel(run);
 
   const script = `#!/bin/zsh
 emulate -L zsh
@@ -165,14 +196,56 @@ REQUIREMENT_ID=${shellQuote(workflow.requirementId)}
 AGENT_NAME=${shellQuote(provider.name)}
 COMMAND_TEXT=${shellQuote(commandText)}
 COMMAND_PREVIEW=${shellQuote(commandLine)}
+EXECUTION_MODE=${shellQuote(run.executionMode || 'TERMINAL')}
+EXECUTION_MODE_LABEL=${shellQuote(executionModeLabel)}
 
 mkdir -p "$(dirname "$TRANSCRIPT_FILE")"
 cd "$WORKSPACE_ROOT" || exit 1
 
 printf '{"status":"RUNNING","startedAt":"%s","transcriptPath":"%s"}\\n' "$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")" ${shellQuote(transcriptPath)} > "$STATUS_FILE"
 
+if [[ "$EXECUTION_MODE" == "INTERACTIVE_TERMINAL" ]]; then
+  {
+    print "[AI Delivery] 开始$EXECUTION_MODE_LABEL执行"
+    print "[AI Delivery] 需求号: $REQUIREMENT_ID"
+    print "[AI Delivery] Run ID: $RUN_ID"
+    print "[AI Delivery] Agent: $AGENT_NAME"
+    print "[AI Delivery] Prompt: $PROMPT_FILE"
+    print "[AI Delivery] 标准调用: $COMMAND_TEXT"
+    print "[AI Delivery] 命令: $COMMAND_PREVIEW"
+    print ""
+  } | tee -a "$TRANSCRIPT_FILE"
+
+  if command -v script >/dev/null 2>&1; then
+    script -q -a "$TRANSCRIPT_FILE" zsh -lc "$COMMAND_PREVIEW"
+    command_exit=$?
+  else
+    print "[AI Delivery] 未找到 script 命令，将直接运行交互命令，transcript 可能不完整。" | tee -a "$TRANSCRIPT_FILE"
+    zsh -lc "$COMMAND_PREVIEW"
+    command_exit=$?
+  fi
+
+  {
+    print ""
+    if (( command_exit == 0 )); then
+      terminal_status="SUCCEEDED"
+      print "[AI Delivery] Agent 执行完成"
+    else
+      terminal_status="FAILED"
+      print "[AI Delivery] Agent 执行失败，退出码 $command_exit"
+    fi
+
+    finished_at="$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")"
+    printf '{"status":"%s","exitCode":%s,"finishedAt":"%s","transcriptPath":"%s"}\\n' "$terminal_status" "$command_exit" "$finished_at" ${shellQuote(transcriptPath)} > "$STATUS_FILE"
+    print "[AI Delivery] Transcript: $TRANSCRIPT_FILE"
+    print "[AI Delivery] Status: $STATUS_FILE"
+  } | tee -a "$TRANSCRIPT_FILE"
+
+  exit $command_exit
+fi
+
 {
-  print "[AI Delivery] 开始终端执行"
+  print "[AI Delivery] 开始$EXECUTION_MODE_LABEL执行"
   print "[AI Delivery] 需求号: $REQUIREMENT_ID"
   print "[AI Delivery] Run ID: $RUN_ID"
   print "[AI Delivery] Agent: $AGENT_NAME"
@@ -250,7 +323,7 @@ export async function refreshTerminalRunStatuses(
   let changed = false;
   const finalStatuses = new Set<RunStatus>(['SUCCEEDED', 'FAILED', 'CANCELLED']);
   for (const run of workflow.runs) {
-    if (run.executionMode !== 'TERMINAL' || !run.terminalStatusPath || finalStatuses.has(run.status)) {
+    if (!isTerminalExecutionMode(run) || !run.terminalStatusPath || finalStatuses.has(run.status)) {
       continue;
     }
     const absoluteStatusPath = assertInsideWorkspace(workspaceRoot, run.terminalStatusPath);
@@ -264,11 +337,12 @@ export async function refreshTerminalRunStatuses(
     }
     run.status = status.status;
     run.finishedAt = status.finishedAt || new Date().toISOString();
-    run.error = status.status === 'FAILED' ? `终端 Agent 退出码: ${status.exitCode ?? 'unknown'}` : undefined;
+    const terminalLabel = terminalExecutionModeLabel(run);
+    run.error = status.status === 'FAILED' ? `${terminalLabel} Agent 退出码: ${status.exitCode ?? 'unknown'}` : undefined;
     await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
       type: status.status === 'FAILED' ? 'ERROR' : 'EXIT',
       level: status.status === 'FAILED' ? 'ERROR' : 'INFO',
-      message: status.status === 'FAILED' ? `终端 Agent 执行失败，退出码 ${status.exitCode ?? 'unknown'}` : '终端 Agent 执行完成',
+      message: status.status === 'FAILED' ? `${terminalLabel} Agent 执行失败，退出码 ${status.exitCode ?? 'unknown'}` : `${terminalLabel} Agent 执行完成`,
       agentId: run.agentId,
       data: {
         exitCode: status.exitCode,
@@ -443,14 +517,21 @@ export async function startAgentInTerminal(
   provider: AgentProvider,
   commandText: string
 ): Promise<RunRecord> {
-  if (provider.inputMode === 'MANUAL' || !provider.command?.length) {
+  const requestedMode = isInteractiveTerminalRun(run) ? 'INTERACTIVE_TERMINAL' : 'TERMINAL';
+  run.executionMode = requestedMode;
+  const commandTemplate = terminalCommandTemplate(provider, run);
+
+  if (provider.inputMode === 'MANUAL' || !commandTemplate.length) {
     run.status = 'WAITING_FOR_AGENT';
     run.commandText = commandText;
     run.finishedAt = new Date().toISOString();
     await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
       type: 'WARN',
       level: 'WARN',
-      message: '当前 Agent 为手动模式，请复制标准调用文本执行',
+      message:
+        provider.inputMode === 'MANUAL'
+          ? '当前 Agent 为手动模式，请复制标准调用文本执行'
+          : `${terminalExecutionModeLabel(run)}未配置可执行命令: ${provider.name}`,
       agentId: provider.id,
       data: { commandText }
     });
@@ -471,7 +552,6 @@ export async function startAgentInTerminal(
     return run;
   }
 
-  run.executionMode = 'TERMINAL';
   run.commandText = commandText;
   const terminal = await createTerminalRunScript(workspaceRoot, workflow, run, provider, commandText);
   run.promptPath = terminal.promptPath;

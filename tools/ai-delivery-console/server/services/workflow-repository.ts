@@ -28,6 +28,8 @@ function withWorkflowDefaults(workflow: RequirementWorkflow): RequirementWorkflo
   return {
     ...workflow,
     projects: workflow.projects || [],
+    prdSourceFiles: workflow.prdSourceFiles || [],
+    techDesignSourceFiles: workflow.techDesignSourceFiles || [],
     implementationSteps: ensureImplementationSteps(workflow.implementationSteps)
   };
 }
@@ -90,6 +92,9 @@ export class WorkflowRepository {
       const techDesignClarification = hasInputField(input, 'techDesignClarification')
         ? input.techDesignClarification
         : existing.techDesignClarification;
+      const techDesignSourceFiles = hasInputField(input, 'techDesignSourceFiles')
+        ? input.techDesignSourceFiles || []
+        : existing.techDesignSourceFiles || [];
       const projects = hasInputField(input, 'projects')
         ? await normalizeWorkflowProjects(this.workspaceRoot, input.projects || [])
         : existing.projects || [];
@@ -103,6 +108,7 @@ export class WorkflowRepository {
         prdClarification,
         techDesignDocument,
         techDesignClarification,
+        techDesignSourceFiles,
         sources: input.sources?.length ? input.sources : existing.sources
       });
     }
@@ -120,6 +126,7 @@ export class WorkflowRepository {
       techDesignDocument: input.techDesignDocument,
       techDesignClarification: input.techDesignClarification,
       prdSourceFiles: [],
+      techDesignSourceFiles: input.techDesignSourceFiles || [],
       sources: input.sources || [],
       currentStage: 'PRD',
       status: 'DRAFT',
