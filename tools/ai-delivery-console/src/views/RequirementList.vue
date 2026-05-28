@@ -35,7 +35,7 @@
       <el-table-column label="操作" width="190" fixed="right">
         <template #default="{ row }">
           <el-button :icon="View" size="small" @click="openDetail(row.requirementId)">查看</el-button>
-          <el-button :icon="Edit" size="small" @click="openProjectEditDialog(row)">工程</el-button>
+          <el-button :icon="Edit" size="small" @click="openEditDialog(row)">编辑</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -44,13 +44,13 @@
   <el-dialog v-model="dialogVisible" :title="dialogTitle" width="620px">
     <el-form label-position="top">
       <el-form-item label="需求号" required>
-        <el-input v-model="form.requirementId" placeholder="例如 172014" :disabled="editingProjects" />
+        <el-input v-model="form.requirementId" placeholder="例如 172014" :disabled="isEditingWorkflow" />
       </el-form-item>
       <el-form-item label="标题" required>
-        <el-input v-model="form.title" placeholder="需求标题" :disabled="editingProjects" />
+        <el-input v-model="form.title" placeholder="需求标题" />
       </el-form-item>
       <el-form-item label="需求类型" required>
-        <el-radio-group v-model="form.requirementType" :disabled="editingProjects">
+        <el-radio-group v-model="form.requirementType" :disabled="isEditingWorkflow">
           <el-radio-button value="REQUIREMENT">{{ requirementTypeLabels.REQUIREMENT }}</el-radio-button>
           <el-radio-button value="DEFECT">{{ requirementTypeLabels.DEFECT }}</el-radio-button>
         </el-radio-group>
@@ -59,7 +59,6 @@
         <el-input
           v-model="form.branchName"
           :placeholder="branchNamePreview"
-          :disabled="editingProjects"
           @input="onBranchNameInput"
         />
       </el-form-item>
@@ -111,8 +110,8 @@ const branchNameEdited = ref(false);
 const selectedProjectPaths = ref<string[]>([]);
 const projectHistory = ref<WorkflowProject[]>([]);
 const editingWorkflow = ref<RequirementWorkflow>();
-const editingProjects = computed(() => Boolean(editingWorkflow.value));
-const dialogTitle = computed(() => (editingProjects.value ? '编辑涉及工程' : '创建或导入需求'));
+const isEditingWorkflow = computed(() => Boolean(editingWorkflow.value));
+const dialogTitle = computed(() => (isEditingWorkflow.value ? '编辑需求' : '创建或导入需求'));
 
 const branchNamePreview = computed(() => {
   const requirementId = form.requirementId.trim() || '需求号';
@@ -130,7 +129,7 @@ function syncBranchName() {
 watch(
   () => [form.requirementId, form.requirementType],
   () => {
-    if (!editingProjects.value) {
+    if (!isEditingWorkflow.value) {
       syncBranchName();
     }
   },
@@ -163,7 +162,7 @@ function openCreateDialog() {
   dialogVisible.value = true;
 }
 
-function openProjectEditDialog(workflow: RequirementWorkflow) {
+function openEditDialog(workflow: RequirementWorkflow) {
   editingWorkflow.value = workflow;
   form.requirementId = workflow.requirementId;
   form.title = workflow.title;
@@ -210,9 +209,9 @@ async function submit() {
   });
   dialogVisible.value = false;
   await loadProjectHistory();
-  if (editingProjects.value) {
+  if (isEditingWorkflow.value) {
     editingWorkflow.value = undefined;
-    ElMessage.success('涉及工程已保存');
+    ElMessage.success('需求信息已保存');
     return;
   }
   router.push(`/requirements/${workflow.requirementId}`);
