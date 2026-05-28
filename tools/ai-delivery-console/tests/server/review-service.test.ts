@@ -31,6 +31,23 @@ function workflow(): RequirementWorkflow {
 }
 
 describe('review-service implementation steps', () => {
+  it('开始变更审核通过后推进到工件评审子步骤', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-review-'));
+    const result = await applyReview(root, workflow(), {
+      requirementId: '172014',
+      stage: 'IMPLEMENTATION',
+      implementationStep: 'START_CHANGE',
+      decision: 'APPROVED',
+      comment: 'change 已创建'
+    });
+
+    expect(result.currentStage).toBe('IMPLEMENTATION');
+    expect(result.stages.IMPLEMENTATION.status).toBe('IN_PROGRESS');
+    expect(result.implementationSteps?.START_CHANGE.status).toBe('APPROVED');
+    expect(result.implementationSteps?.ARTIFACT_REVIEW.status).toBe('DRAFT');
+    expect(result.reviews[0].implementationStep).toBe('START_CHANGE');
+  });
+
   it('审核通过实施子步骤时只推进内部步骤', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-review-'));
     const result = await applyReview(root, workflow(), {
@@ -51,6 +68,7 @@ describe('review-service implementation steps', () => {
   it('单测子步骤审核通过后解锁代码评审', async () => {
     const item = workflow();
     item.implementationSteps = {
+      START_CHANGE: { step: 'START_CHANGE', status: 'APPROVED' },
       ARTIFACT_REVIEW: { step: 'ARTIFACT_REVIEW', status: 'APPROVED' },
       APPLY: { step: 'APPLY', status: 'APPROVED' },
       CHANGE_INSPECTION: { step: 'CHANGE_INSPECTION', status: 'APPROVED' },
@@ -73,6 +91,7 @@ describe('review-service implementation steps', () => {
   it('代码评审打回时回到开始实施子步骤', () => {
     const item = workflow();
     item.implementationSteps = {
+      START_CHANGE: { step: 'START_CHANGE', status: 'APPROVED' },
       ARTIFACT_REVIEW: { step: 'ARTIFACT_REVIEW', status: 'APPROVED' },
       APPLY: { step: 'APPLY', status: 'APPROVED' },
       CHANGE_INSPECTION: { step: 'CHANGE_INSPECTION', status: 'APPROVED' },
@@ -82,6 +101,7 @@ describe('review-service implementation steps', () => {
     const result = returnToImplementation(item, [{ id: 'issue-1', stage: 'CODE_REVIEW', severity: 'BLOCKER', title: '阻断问题', status: 'OPEN' }]);
 
     expect(result.currentStage).toBe('IMPLEMENTATION');
+    expect(result.implementationSteps?.START_CHANGE.status).toBe('APPROVED');
     expect(result.implementationSteps?.ARTIFACT_REVIEW.status).toBe('APPROVED');
     expect(result.implementationSteps?.APPLY.status).toBe('DRAFT');
     expect(result.implementationSteps?.CHANGE_INSPECTION.status).toBe('NOT_STARTED');

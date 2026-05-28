@@ -20,7 +20,8 @@ describe('WorkflowRepository', () => {
     expect(workflow.branchName).toBe('feature/opp#REQ_172014');
     const loaded = await repository.load('REQ_172014');
     expect(loaded?.title).toBe('定位菜单');
-    expect(loaded?.implementationSteps?.ARTIFACT_REVIEW.status).toBe('DRAFT');
+    expect(loaded?.implementationSteps?.START_CHANGE.status).toBe('DRAFT');
+    expect(loaded?.implementationSteps?.ARTIFACT_REVIEW.status).toBe('NOT_STARTED');
     expect(await fs.stat(path.join(workspace, 'docs', 'REQ_172014', 'workflow', 'state.json'))).toBeTruthy();
   });
 

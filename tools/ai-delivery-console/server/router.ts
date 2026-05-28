@@ -421,7 +421,7 @@ export function createRouter(workspaceRoot: string) {
               techDesignClarification: typeof params.clarification === 'string' ? params.clarification : workflow.techDesignClarification
             };
           }
-          if (['OPENSPEC_STATUS', 'OPENSPEC_FF', 'OPENSPEC_APPLY', 'OPENSPEC_VERIFY', 'OPENSPEC_ARCHIVE'].includes(action.actionType)) {
+          if (['OPENSPEC_STATUS', 'OPENSPEC_NEW_CHANGE', 'OPENSPEC_FF', 'OPENSPEC_APPLY', 'OPENSPEC_VERIFY', 'OPENSPEC_ARCHIVE'].includes(action.actionType)) {
             const params = action.params || {};
             const changeName = normalizeOpenSpecChangeName(typeof params.changeName === 'string' ? params.changeName : '', workflow.stages.IMPLEMENTATION.changeName || `req-${workflow.requirementId}`);
             workflow = {
@@ -471,7 +471,7 @@ export function createRouter(workspaceRoot: string) {
             workflow.artifacts = await scanRequirementArtifacts(workspaceRoot, workflow.requirementId, workflow.branchName, workflow.stages.IMPLEMENTATION.changeName);
           }
           // PRD分析、技术方案生成等可能产生产物的操作，执行完成后自动刷新产物索引
-          if (['PRD_ANALYZE', 'DESIGN_GENERATE', 'OPENSPEC_ARCHIVE'].includes(action.actionType)) {
+          if (['PRD_ANALYZE', 'DESIGN_GENERATE', 'OPENSPEC_NEW_CHANGE', 'OPENSPEC_ARCHIVE'].includes(action.actionType)) {
             workflow.artifacts = await scanRequirementArtifacts(workspaceRoot, workflow.requirementId, workflow.branchName, workflow.stages.IMPLEMENTATION.changeName);
           }
           if (action.actionType === 'RETURN_TO_IMPLEMENTATION') {
@@ -503,7 +503,7 @@ export function createRouter(workspaceRoot: string) {
             techDesignDocument: designDocumentPath(workflow, params)
           };
         }
-        if (['OPENSPEC_STATUS', 'OPENSPEC_FF', 'OPENSPEC_APPLY', 'OPENSPEC_VERIFY', 'OPENSPEC_ARCHIVE'].includes(action.actionType)) {
+        if (['OPENSPEC_STATUS', 'OPENSPEC_NEW_CHANGE', 'OPENSPEC_FF', 'OPENSPEC_APPLY', 'OPENSPEC_VERIFY', 'OPENSPEC_ARCHIVE'].includes(action.actionType)) {
           const fallbackChangeName = workflow.stages.IMPLEMENTATION.changeName || `req-${workflow.requirementId}`;
           const changeName = normalizeOpenSpecChangeName(typeof params.changeName === 'string' ? params.changeName : '', fallbackChangeName);
           workflow = {

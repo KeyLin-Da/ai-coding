@@ -28,7 +28,7 @@ export type RequirementType = 'REQUIREMENT' | 'DEFECT';
 
 export type ExecutionMode = 'BACKGROUND' | 'TERMINAL' | 'INTERACTIVE_TERMINAL' | 'MANUAL_COPY';
 
-export const implementationSteps = ['ARTIFACT_REVIEW', 'APPLY', 'CHANGE_INSPECTION', 'UNIT_TEST'] as const;
+export const implementationSteps = ['START_CHANGE', 'ARTIFACT_REVIEW', 'APPLY', 'CHANGE_INSPECTION', 'UNIT_TEST'] as const;
 
 export type ImplementationStep = (typeof implementationSteps)[number];
 
@@ -321,6 +321,7 @@ export const statusLabels: Record<WorkflowStatus | RunStatus, string> = {
 };
 
 export const implementationStepLabels: Record<ImplementationStep, string> = {
+  START_CHANGE: '开始变更',
   ARTIFACT_REVIEW: '工件生成与评审',
   APPLY: '开始实施',
   CHANGE_INSPECTION: '查看变更文件及代码',
@@ -338,7 +339,8 @@ export function createEmptyStages(): Record<WorkflowStage, StageState> {
 
 export function createEmptyImplementationSteps(): Record<ImplementationStep, ImplementationStepState> {
   return {
-    ARTIFACT_REVIEW: { step: 'ARTIFACT_REVIEW', status: 'DRAFT' },
+    START_CHANGE: { step: 'START_CHANGE', status: 'DRAFT' },
+    ARTIFACT_REVIEW: { step: 'ARTIFACT_REVIEW', status: 'NOT_STARTED' },
     APPLY: { step: 'APPLY', status: 'NOT_STARTED' },
     CHANGE_INSPECTION: { step: 'CHANGE_INSPECTION', status: 'NOT_STARTED' },
     UNIT_TEST: { step: 'UNIT_TEST', status: 'NOT_STARTED' }
@@ -376,7 +378,7 @@ export const actionStageMap: Partial<Record<ActionType, WorkflowStage>> = {
 
 export const actionImplementationStepMap: Partial<Record<ActionType, ImplementationStep>> = {
   OPENSPEC_STATUS: 'ARTIFACT_REVIEW',
-  OPENSPEC_NEW_CHANGE: 'ARTIFACT_REVIEW',
+  OPENSPEC_NEW_CHANGE: 'START_CHANGE',
   OPENSPEC_INSTRUCTIONS: 'ARTIFACT_REVIEW',
   OPENSPEC_FF: 'ARTIFACT_REVIEW',
   OPENSPEC_APPLY: 'APPLY',

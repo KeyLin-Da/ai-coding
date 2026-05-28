@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { createEmptyImplementationSteps, defaultBranchName, ensureImplementationSteps, implementationStepForAction, nextImplementationStep, shouldSyncBranchName } from '../../shared/workflow';
+import {
+  createEmptyImplementationSteps,
+  defaultBranchName,
+  ensureImplementationSteps,
+  implementationStepForAction,
+  implementationSteps,
+  nextImplementationStep,
+  shouldSyncBranchName
+} from '../../shared/workflow';
 
 describe('workflow helpers', () => {
   it('按需求类型生成默认分支名', () => {
@@ -19,11 +27,15 @@ describe('workflow helpers', () => {
 
   it('提供实施验证子步骤默认状态和动作归属', () => {
     const steps = createEmptyImplementationSteps();
-    expect(steps.ARTIFACT_REVIEW.status).toBe('DRAFT');
+    expect(implementationSteps).toEqual(['START_CHANGE', 'ARTIFACT_REVIEW', 'APPLY', 'CHANGE_INSPECTION', 'UNIT_TEST']);
+    expect(steps.START_CHANGE.status).toBe('DRAFT');
+    expect(steps.ARTIFACT_REVIEW.status).toBe('NOT_STARTED');
     expect(steps.APPLY.status).toBe('NOT_STARTED');
+    expect(implementationStepForAction('OPENSPEC_NEW_CHANGE')).toBe('START_CHANGE');
     expect(implementationStepForAction('OPENSPEC_FF')).toBe('ARTIFACT_REVIEW');
     expect(implementationStepForAction('OPENSPEC_APPLY')).toBe('APPLY');
     expect(implementationStepForAction('JUNIT_GENERATE')).toBe('UNIT_TEST');
+    expect(nextImplementationStep('START_CHANGE')).toBe('ARTIFACT_REVIEW');
     expect(nextImplementationStep('CHANGE_INSPECTION')).toBe('UNIT_TEST');
   });
 
@@ -33,6 +45,7 @@ describe('workflow helpers', () => {
     });
     expect(steps.ARTIFACT_REVIEW.status).toBe('APPROVED');
     expect(steps.ARTIFACT_REVIEW.comment).toBe('已通过');
+    expect(steps.START_CHANGE.status).toBe('DRAFT');
     expect(steps.APPLY.status).toBe('NOT_STARTED');
   });
 });

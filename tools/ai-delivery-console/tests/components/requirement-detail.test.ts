@@ -2,7 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentProvider, ArtifactRef, OpenSpecSummary, RequirementWorkflow } from '../../shared/workflow';
-import { createEmptyStages } from '../../shared/workflow';
+import { createEmptyImplementationSteps, createEmptyStages } from '../../shared/workflow';
 import RequirementDetail from '../../src/views/RequirementDetail.vue';
 import { apiClient } from '@/api/client';
 import { ElMessage } from 'element-plus';
@@ -73,11 +73,16 @@ function artifact(stage: ArtifactRef['stage'], path: string): ArtifactRef {
   };
 }
 
-function workflow(artifacts: ArtifactRef[]): RequirementWorkflow {
+function workflow(artifacts: ArtifactRef[], startChangeApproved = true): RequirementWorkflow {
   const now = new Date().toISOString();
   const stages = createEmptyStages();
+  const implementationSteps = createEmptyImplementationSteps();
   stages.PRD.status = 'APPROVED';
   stages.TECH_DESIGN.status = 'APPROVED';
+  if (startChangeApproved) {
+    implementationSteps.START_CHANGE.status = 'APPROVED';
+    implementationSteps.ARTIFACT_REVIEW.status = 'DRAFT';
+  }
   return {
     requirementId: '172014',
     title: '定位菜单',
@@ -88,6 +93,7 @@ function workflow(artifacts: ArtifactRef[]): RequirementWorkflow {
     createdAt: now,
     updatedAt: now,
     stages,
+    implementationSteps,
     artifacts,
     runs: [],
     reviews: [],
@@ -105,7 +111,10 @@ function componentStubs() {
     ArtifactSidebar: { template: '<div />' },
     ArtifactPreviewDialog: { template: '<div />' },
     GitChangeInspector: { template: '<div />' },
-    ElAlert: { template: '<div />' },
+    ElAlert: {
+      props: ['title'],
+      template: '<div>{{ title }}</div>'
+    },
     ElButton: {
       props: ['disabled'],
       template: '<button :disabled="disabled"><slot /></button>'
@@ -140,6 +149,7 @@ async function mountDetail(current: RequirementWorkflow) {
   vi.mocked(apiClient.listAgents).mockResolvedValue(agents);
   vi.mocked(apiClient.listRequirements).mockResolvedValue([current]);
   vi.mocked(apiClient.getOpenSpecSummary).mockResolvedValue(emptyOpenSpecSummary);
+  vi.mocked(apiClient.runAction).mockResolvedValue({ workflow: current });
 
   const wrapper = mount(RequirementDetail, {
     global: {
@@ -164,6 +174,22 @@ function openSpecArtifactButton(wrapper: ReturnType<typeof mount>) {
   return button;
 }
 
+async function activateImplementationStep(wrapper: ReturnType<typeof mount>, label: string) {
+  const button = wrapper.findAll('button').find((item) => item.text().includes(label));
+  if (!button) {
+    throw new Error(`未找到实施验证子步骤：${label}`);
+  }
+  await button.trigger('click');
+}
+
+function openSpecStartButton(wrapper: ReturnType<typeof mount>) {
+  const button = wrapper.findAll('button').find((item) => ['开始变更', '复制开始变更命令'].includes(item.text().trim()));
+  if (!button) {
+    throw new Error('未找到开始变更按钮');
+  }
+  return button;
+}
+
 describe('RequirementDetail OpenSpec 工件生成', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -179,6 +205,7 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     const current = workflow([artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md')]);
     const wrapper = await mountDetail(current);
 
+    await activateImplementationStep(wrapper, '工件生成与评审');
     await openSpecArtifactButton(wrapper).trigger('click');
 
     expect(ElMessage.warning).toHaveBeenCalledWith('请先生成、保存或刷新 PRD 产物');
@@ -190,6 +217,7 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     const current = workflow([artifact('PRD', 'docs/172014/prd/analysis.md')]);
     const wrapper = await mountDetail(current);
 
+    await activateImplementationStep(wrapper, '工件生成与评审');
     await openSpecArtifactButton(wrapper).trigger('click');
 
     expect(ElMessage.warning).toHaveBeenCalledWith('请先生成、保存或刷新技术方案产物');
@@ -208,6 +236,7 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     const wrapper = await mountDetail(current);
 
     await wrapper.findAll('select')[1].setValue('MANUAL_COPY');
+    await activateImplementationStep(wrapper, '工件生成与评审');
     await openSpecArtifactButton(wrapper).trigger('click');
     await flushPromises();
 
@@ -223,5 +252,61 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     );
     expect(apiClient.runAction).not.toHaveBeenCalled();
     expect(ElMessage.success).toHaveBeenCalledWith('命令已复制');
+  });
+
+  it('开始变更动作发起 OPENSPEC_NEW_CHANGE', async () => {
+    const current = workflow([]);
+    const wrapper = await mountDetail(current);
+
+    await openSpecStartButton(wrapper).trigger('click');
+    await flushPromises();
+
+    expect(apiClient.runAction).toHaveBeenCalledWith(
+      '172014',
+      expect.objectContaining({
+        actionType: 'OPENSPEC_NEW_CHANGE',
+        params: expect.objectContaining({
+          changeName: 'req-172014'
+        })
+      })
+    );
+  });
+
+  it('手动复制开始变更命令且不创建运行记录', async () => {
+    const current = workflow([]);
+    vi.mocked(apiClient.previewActionCommand).mockResolvedValue({
+      commandText: 'openspec new change req-172014'
+    });
+    const wrapper = await mountDetail(current);
+
+    await wrapper.findAll('select')[1].setValue('MANUAL_COPY');
+    await openSpecStartButton(wrapper).trigger('click');
+    await flushPromises();
+
+    expect(apiClient.previewActionCommand).toHaveBeenCalledWith(
+      '172014',
+      expect.objectContaining({
+        actionType: 'OPENSPEC_NEW_CHANGE',
+        params: expect.objectContaining({
+          changeName: 'req-172014'
+        })
+      })
+    );
+    expect(apiClient.runAction).not.toHaveBeenCalled();
+    expect(ElMessage.success).toHaveBeenCalledWith('命令已复制');
+  });
+
+  it('开始变更未审核通过时阻止生成 OpenSpec 工件', async () => {
+    const current = workflow(
+      [artifact('PRD', 'docs/172014/prd/analysis.md'), artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md')],
+      false
+    );
+    const wrapper = await mountDetail(current);
+
+    await activateImplementationStep(wrapper, '工件生成与评审');
+
+    expect(wrapper.text()).toContain('请先完成并审核开始变更步骤');
+    expect(apiClient.runAction).not.toHaveBeenCalled();
+    expect(apiClient.previewActionCommand).not.toHaveBeenCalled();
   });
 });

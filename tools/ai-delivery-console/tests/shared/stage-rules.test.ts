@@ -61,6 +61,7 @@ describe('stage-rules', () => {
   });
 
   it('按动作归属实施验证子步骤', () => {
+    expect(implementationStepForAction('OPENSPEC_NEW_CHANGE')).toBe('START_CHANGE');
     expect(implementationStepForAction('OPENSPEC_FF')).toBe('ARTIFACT_REVIEW');
     expect(implementationStepForAction('OPENSPEC_APPLY')).toBe('APPLY');
     expect(implementationStepForAction('OPENSPEC_VERIFY')).toBe('APPLY');

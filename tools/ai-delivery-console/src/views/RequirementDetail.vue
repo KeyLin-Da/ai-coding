@@ -171,16 +171,29 @@
                 </div>
               </section>
 
-              <template v-if="activeImplementationStep === 'ARTIFACT_REVIEW'">
+              <template v-if="activeImplementationStep === 'START_CHANGE'">
                 <div class="action-line">
                   <el-input v-model="changeName" placeholder="OpenSpec change name，例如 req-172014" />
-                  <el-button type="primary" :disabled="!techDesignApproved" :icon="primaryActionIcon(Operation)" @click="runOpenSpecArtifacts">
-                    {{ actionButtonText('生成 OpenSpec 工件') }}
+                  <el-button type="primary" :disabled="!techDesignApproved" :icon="primaryActionIcon(Operation)" @click="runOpenSpecNewChange">
+                    {{ actionButtonText('开始变更') }}
                   </el-button>
                   <el-button :icon="primaryActionIcon(DataAnalysis)" @click="runOpenSpecStatus">{{ actionButtonText('查看 OpenSpec 状态') }}</el-button>
                   <el-button :icon="DocumentChecked" @click="openReview">审核本步骤</el-button>
                 </div>
                 <el-alert v-if="!techDesignApproved" type="warning" show-icon title="需要先通过技术方案审核" />
+              </template>
+
+              <template v-if="activeImplementationStep === 'ARTIFACT_REVIEW'">
+                <div class="action-line">
+                  <el-input v-model="changeName" placeholder="OpenSpec change name，例如 req-172014" />
+                  <el-button type="primary" :disabled="!canRunOpenSpecArtifacts" :icon="primaryActionIcon(Operation)" @click="runOpenSpecArtifacts">
+                    {{ actionButtonText('生成 OpenSpec 工件') }}
+                  </el-button>
+                  <el-button :icon="primaryActionIcon(DataAnalysis)" @click="runOpenSpecStatus">{{ actionButtonText('查看 OpenSpec 状态') }}</el-button>
+                  <el-button :icon="DocumentChecked" @click="openReview">审核本步骤</el-button>
+                </div>
+                <el-alert v-if="implementationStepStates.START_CHANGE.status !== 'APPROVED'" type="warning" show-icon title="请先完成并审核开始变更步骤" />
+                <el-alert v-else-if="!techDesignApproved" type="warning" show-icon title="需要先通过技术方案审核" />
                 <OpenSpecDocuments
                   v-if="openSpecDocuments.length"
                   v-model="selectedOpenSpecDocPath"
@@ -339,7 +352,7 @@ const designClarification = ref('');
 const openSpecSummary = ref<OpenSpecSummary>();
 const selectedOpenSpecDocPath = ref('');
 const openSpecPreviewVersion = ref(0);
-const activeImplementationStep = ref<ImplementationStep>('ARTIFACT_REVIEW');
+const activeImplementationStep = ref<ImplementationStep>('START_CHANGE');
 const gitChanges = ref<GitChangeSummary>();
 
 const workflow = computed(() => store.current);
@@ -374,6 +387,7 @@ const openSpecTaskPercentage = computed(() => {
 });
 const openSpecPendingTaskCount = computed(() => Math.max(0, (openSpecSummary.value?.tasks.total || 0) - (openSpecSummary.value?.tasks.completed || 0)));
 const canArchiveOpenSpec = computed(() => Boolean(workflow.value?.stages.CODE_REVIEW.status === 'APPROVED' && !openSpecSummary.value?.archived));
+const canRunOpenSpecArtifacts = computed(() => Boolean(implementationStepStates.value.START_CHANGE.status === 'APPROVED' && techDesignApproved.value));
 const canRunOpenSpecApply = computed(() => implementationStepStates.value.ARTIFACT_REVIEW.status === 'APPROVED');
 const canInspectChanges = computed(() => implementationStepStates.value.APPLY.status === 'APPROVED');
 const canRunJunit = computed(() => implementationStepStates.value.CHANGE_INSPECTION.status === 'APPROVED');
@@ -624,7 +638,19 @@ async function runOpenSpecStatus() {
   await runOrCopyAction({ actionType: 'OPENSPEC_STATUS', params: { changeName: changeName.value } }, loadOpenSpecSummary);
 }
 
+async function runOpenSpecNewChange() {
+  if (!techDesignApproved.value) {
+    ElMessage.warning('请先通过技术方案审核');
+    return;
+  }
+  await runOrCopyAction({ actionType: 'OPENSPEC_NEW_CHANGE', params: { ...agentActionParams(), changeName: changeName.value } }, loadOpenSpecSummary);
+}
+
 async function runOpenSpecArtifacts() {
+  if (implementationStepStates.value.START_CHANGE.status !== 'APPROVED') {
+    ElMessage.warning('请先完成并审核开始变更步骤');
+    return;
+  }
   if (!techDesignApproved.value) {
     ElMessage.warning('请先通过技术方案审核');
     return;
@@ -912,7 +938,7 @@ onMounted(async () => {
 
 .implementation-step-nav {
   display: grid;
-  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  grid-template-columns: repeat(5, minmax(130px, 1fr));
   gap: 10px;
 }
 
