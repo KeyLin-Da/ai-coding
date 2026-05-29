@@ -3,7 +3,7 @@ import type { ActionInput, ExecutionMode, RunRecord, RunStatus } from '../../sha
 import { implementationStepForAction, stageForAction } from '../../shared/workflow';
 import type { RequirementWorkflow } from '../../shared/workflow';
 import { createRunId, appendRunEvent } from './run-log';
-import { assertInsideWorkspace } from './workspace';
+import { assertInsideWorkspace, normalizeRequirementId } from './workspace';
 import { getAgentProvider, startAgentInTerminal, startAgentProcess } from './agent-providers';
 import { normalizePrdClarification } from './workflow-repository';
 
@@ -82,7 +82,12 @@ function technicalDesignDocumentPath(workflow: RequirementWorkflow, params: Reco
 }
 
 function openSpecInputParam(workflow: RequirementWorkflow, params: Record<string, unknown>): string {
-  return [openSpecPrdDocumentPath(workflow, params), technicalDesignDocumentPath(workflow, params)].filter(Boolean).join(',');
+  const requirementId = normalizeRequirementId(workflow.requirementId);
+  return [
+    openSpecPrdDocumentPath(workflow, params),
+    technicalDesignDocumentPath(workflow, params),
+    `docs/${requirementId}/prd/files`
+  ].filter(Boolean).join(',');
 }
 
 function projectParam(workflow: RequirementWorkflow): string {

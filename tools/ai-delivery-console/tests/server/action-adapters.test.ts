@@ -85,7 +85,7 @@ describe('action-adapters', () => {
           documentPath: 'docs/172014/technical-design/design_review.md'
         }
       })
-    ).toBe('/openspec-ff-change req-172014 d=docs/172014/prd/analysis.md,docs/172014/technical-design/design_review.md');
+    ).toBe('/openspec-ff-change req-172014 d=docs/172014/prd/analysis.md,docs/172014/technical-design/design_review.md,docs/172014/prd/files');
   });
 
   it('技能动作支持本地终端执行模式', async () => {
@@ -346,7 +346,7 @@ describe('action-adapters', () => {
     });
     expect(run.stage).toBe('IMPLEMENTATION');
     expect(run.implementationStep).toBe('ARTIFACT_REVIEW');
-    expect(run.commandText).toBe('/openspec-ff-change req-172014 d=docs/172014/prd/analysis.md,docs/172014/technical-design/design_review.md');
+    expect(run.commandText).toBe('/openspec-ff-change req-172014 d=docs/172014/prd/analysis.md,docs/172014/technical-design/design_review.md,docs/172014/prd/files');
   });
 
   it('OpenSpec 工件生成未显式传 PRD 时优先使用 PRD 产物路径', async () => {
@@ -371,6 +371,37 @@ describe('action-adapters', () => {
         documentPath: 'docs/172014/technical-design/design_review.md'
       }
     });
-    expect(run.commandText).toBe('/openspec-ff-change req-172014 d=docs/legacy-prd/172014/analysis.md,docs/172014/technical-design/design_review.md');
+    expect(run.commandText).toBe('/openspec-ff-change req-172014 d=docs/legacy-prd/172014/analysis.md,docs/172014/technical-design/design_review.md,docs/172014/prd/files');
+  });
+
+  it('OpenSpec 工件生成将 PRD 文件目录追加到 d 参数末尾', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-action-'));
+    const run = await executeAction(root, workflow(), {
+      actionType: 'OPENSPEC_FF',
+      params: {
+        changeName: 'req-172014',
+        prdDocumentPath: 'docs/172014/prd/analysis.md',
+        documentPath: 'docs/172014/technical-design/design_review.md'
+      }
+    });
+    const dValue = run.commandText?.match(/d=(.+)$/)?.[1] || '';
+    const segments = dValue.split(',');
+    expect(segments).toHaveLength(3);
+    expect(segments[0]).toBe('docs/172014/prd/analysis.md');
+    expect(segments[1]).toBe('docs/172014/technical-design/design_review.md');
+    expect(segments[2]).toBe('docs/172014/prd/files');
+  });
+
+  it('OpenSpec 工件生成 PRD 文件目录使用默认路径不受显式参数影响', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-action-'));
+    const run = await executeAction(root, workflow(), {
+      actionType: 'OPENSPEC_FF',
+      params: {
+        changeName: 'req-172014',
+        prdDocumentPath: 'docs/custom/prd/doc.md',
+        documentPath: 'docs/custom/tech/design.md'
+      }
+    });
+    expect(run.commandText).toContain('d=docs/custom/prd/doc.md,docs/custom/tech/design.md,docs/172014/prd/files');
   });
 });
