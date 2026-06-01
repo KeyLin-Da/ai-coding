@@ -313,6 +313,7 @@ import type {
 } from '@shared/workflow';
 import {
   ensureImplementationSteps,
+  findFirstPendingImplementationStep,
   implementationStepForAction,
   implementationStepLabels,
   implementationSteps,
@@ -799,6 +800,10 @@ watch(
     designClarification.value = value.techDesignClarification || '';
     void loadOpenSpecSummary();
     activeStage.value = value.currentStage === 'DONE' ? 'CODE_REVIEW' : value.currentStage;
+
+    if (activeStage.value === 'IMPLEMENTATION') {
+      activeImplementationStep.value = findFirstPendingImplementationStep(value.implementationSteps);
+    }
   },
   { immediate: true }
 );

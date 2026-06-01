@@ -361,6 +361,14 @@ export function ensureImplementationSteps(
   return defaults;
 }
 
+export function findFirstPendingImplementationStep(
+  steps?: Partial<Record<ImplementationStep, Partial<ImplementationStepState>>>
+): ImplementationStep {
+  const normalized = ensureImplementationSteps(steps);
+  const firstPending = implementationSteps.find((step) => normalized[step].status !== 'APPROVED');
+  return firstPending || implementationSteps[implementationSteps.length - 1];
+}
+
 export const actionStageMap: Partial<Record<ActionType, WorkflowStage>> = {
   PRD_ANALYZE: 'PRD',
   DESIGN_GENERATE: 'TECH_DESIGN',

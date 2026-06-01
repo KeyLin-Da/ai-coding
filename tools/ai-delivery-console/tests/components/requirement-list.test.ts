@@ -16,11 +16,12 @@ vi.mock('vue-router', () => ({
 }));
 
 vi.mock('@/api/client', () => ({
-  apiClient: {
-    listRequirements: vi.fn(),
-    listProjectHistory: vi.fn(),
-    createRequirement: vi.fn()
-  }
+	  apiClient: {
+	    listRequirements: vi.fn(),
+	    listProjectHistory: vi.fn(),
+	    listProjects: vi.fn(),
+	    createRequirement: vi.fn()
+	  }
 }));
 
 vi.mock('element-plus', async () => {
@@ -108,6 +109,16 @@ async function mountList(current = workflow()) {
   setActivePinia(pinia);
   vi.mocked(apiClient.listRequirements).mockResolvedValue([current]);
   vi.mocked(apiClient.listProjectHistory).mockResolvedValue([
+    {
+      name: 'opp-api',
+      path: 'opp-api'
+    },
+    {
+      name: 'opp-diy',
+      path: 'opp-diy'
+    }
+  ]);
+  vi.mocked(apiClient.listProjects).mockResolvedValue([
     {
       name: 'opp-api',
       path: 'opp-api'

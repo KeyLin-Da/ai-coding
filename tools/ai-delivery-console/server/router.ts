@@ -13,7 +13,8 @@ import { applyReview, refreshCodeReviewIssues, returnToImplementation } from './
 import { cancelAgentRun, listAgentProviders, refreshTerminalRunStatuses } from './services/agent-providers';
 import { normalizeOpenSpecChangeName, readOpenSpecSummary, updateOpenSpecTaskStatus } from './services/openspec-summary';
 import { readGitChanges } from './services/git-changes';
-import { readProjectHistory } from './services/project-history';
+import { readProjectHistory, saveProjectHistory, listProjectsFromConfiguredPaths } from './services/project-history';
+import { loadSettings, saveSettings, validateSettings } from './services/project-settings';
 import {
   assertAllowedPrdSourceFile,
   deletePrdSourceFileSnapshot,
@@ -156,7 +157,7 @@ function send(response: ServerResponse, status: number, body: unknown): void {
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS'
+    'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
   });
   response.end(JSON.stringify(body));
 }
@@ -185,6 +186,27 @@ export function createRouter(workspaceRoot: string) {
 
       if (request.method === 'GET' && pathname === '/api/ai-delivery/project-history') {
         send(response, 200, { data: await readProjectHistory(workspaceRoot) });
+        return;
+      }
+
+      if (request.method === 'GET' && pathname === '/api/ai-delivery/projects') {
+        send(response, 200, { data: await listProjectsFromConfiguredPaths(workspaceRoot) });
+        return;
+      }
+
+      if (request.method === 'GET' && pathname === '/api/ai-delivery/settings') {
+        send(response, 200, { data: await loadSettings(workspaceRoot) });
+        return;
+      }
+
+      if (request.method === 'PUT' && pathname === '/api/ai-delivery/settings') {
+        const settings = await parseBody<{ projectPaths: string[] }>(request);
+        const error = validateSettings(settings);
+        if (error) {
+          send(response, 400, { message: error });
+          return;
+        }
+        send(response, 200, { data: await saveSettings(workspaceRoot, settings) });
         return;
       }
 

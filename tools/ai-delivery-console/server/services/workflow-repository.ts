@@ -4,7 +4,9 @@ import type { RequirementInput, RequirementType, RequirementWorkflow, WorkflowSt
 import { createEmptyImplementationSteps, createEmptyStages, defaultBranchName, ensureImplementationSteps } from '../../shared/workflow';
 import { deriveCurrentStage } from '../../shared/stage-rules';
 import { normalizeRequirementId } from './workspace';
-import { normalizeWorkflowProjects, saveProjectHistory } from './project-history';
+import { saveProjectHistory } from './project-history';
+import { normalizeWorkflowProjects } from './project-resolver';
+import { loadSettings } from './project-settings';
 
 export function normalizePrdClarification(value?: string): string | undefined {
   const withoutControls = Array.from(String(value || ''))
@@ -96,7 +98,7 @@ export class WorkflowRepository {
         ? input.techDesignSourceFiles || []
         : existing.techDesignSourceFiles || [];
       const projects = hasInputField(input, 'projects')
-        ? await normalizeWorkflowProjects(this.workspaceRoot, input.projects || [])
+        ? await normalizeWorkflowProjects(this.workspaceRoot, input.projects || [], (await loadSettings(this.workspaceRoot)).projectPaths)
         : existing.projects || [];
       await saveProjectHistory(this.workspaceRoot, projects);
       return this.save({
@@ -114,7 +116,7 @@ export class WorkflowRepository {
     }
     const now = new Date().toISOString();
     const requirementType: RequirementType = input.requirementType || 'REQUIREMENT';
-    const projects = await normalizeWorkflowProjects(this.workspaceRoot, input.projects || []);
+    const projects = await normalizeWorkflowProjects(this.workspaceRoot, input.projects || [], (await loadSettings(this.workspaceRoot)).projectPaths);
     await saveProjectHistory(this.workspaceRoot, projects);
     const workflow: RequirementWorkflow = {
       requirementId,

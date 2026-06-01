@@ -68,14 +68,12 @@
             v-model="selectedProjectPaths"
             multiple
             filterable
-            allow-create
             default-first-option
-            placeholder="输入或选择工程，例如 opp-gateway"
+            placeholder="选择工程（从已配置的工程目录下读取）"
             style="width: 100%"
           >
-            <el-option v-for="project in projectHistory" :key="project.path" :label="project.path" :value="project.path" />
+            <el-option v-for="project in projectHistory" :key="project.path" :label="project.name" :value="project.path" />
           </el-select>
-          <el-button :icon="Refresh" @click="loadProjectHistory">刷新快照</el-button>
         </div>
       </el-form-item>
     </el-form>
@@ -145,7 +143,8 @@ function stageText(stage: string) {
 }
 
 async function loadProjectHistory() {
-  projectHistory.value = await apiClient.listProjectHistory();
+  // Load projects from configured projectPaths instead of saved history
+  projectHistory.value = await apiClient.listProjects();
 }
 
 function openCreateDialog() {

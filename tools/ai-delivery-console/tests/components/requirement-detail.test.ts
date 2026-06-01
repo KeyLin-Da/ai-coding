@@ -255,7 +255,7 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
   });
 
   it('开始变更动作发起 OPENSPEC_NEW_CHANGE', async () => {
-    const current = workflow([]);
+    const current = workflow([], false);
     const wrapper = await mountDetail(current);
 
     await openSpecStartButton(wrapper).trigger('click');
@@ -273,7 +273,7 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
   });
 
   it('手动复制开始变更命令且不创建运行记录', async () => {
-    const current = workflow([]);
+    const current = workflow([], false);
     vi.mocked(apiClient.previewActionCommand).mockResolvedValue({
       commandText: 'openspec new change req-172014'
     });

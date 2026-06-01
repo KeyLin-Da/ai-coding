@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import type { GitChangeSummary, GitChangedFile, GitProjectChangeSummary, WorkflowProject } from '../../shared/workflow';
-import { assertInsideWorkspace } from './workspace';
+import { loadSettings } from './project-settings';
+import { resolveWorkflowProject } from './project-resolver';
 
 const maxDiffLength = 120_000;
 
@@ -93,13 +94,21 @@ function truncateDiff(diff: string): string {
   return diff.length > maxDiffLength ? `${diff.slice(0, maxDiffLength)}\n\n... diff 内容过长，已截断 ...\n` : diff;
 }
 
-async function readProjectGitChanges(workspaceRoot: string, project: WorkflowProject, expectedBranch?: string): Promise<GitProjectChangeSummary> {
-  const projectRoot = assertInsideWorkspace(workspaceRoot, project.path);
-  const projectRef = {
+async function readProjectGitChanges(
+  workspaceRoot: string,
+  project: WorkflowProject,
+  expectedBranch?: string,
+  projectPaths: string[] = []
+): Promise<GitProjectChangeSummary> {
+  let projectRoot = '';
+  let projectRef = {
     name: project.name || path.basename(project.path),
     path: project.path
   };
   try {
+    const resolved = await resolveWorkflowProject(workspaceRoot, project, projectPaths);
+    projectRoot = resolved.rootPath;
+    projectRef = resolved.project;
     const [currentBranch, status, unstagedDiff, stagedDiff, unstagedNumstat, stagedNumstat] = await Promise.all([
       runGit(projectRoot, ['branch', '--show-current']),
       runGit(projectRoot, ['status', '--short', '--untracked-files=all']),
@@ -150,7 +159,8 @@ export async function readGitChanges(workspaceRoot: string, projects: WorkflowPr
   if (!projects.length) {
     throw new Error('请先维护涉及工程，再查看变更文件及代码');
   }
-  const projectSummaries = await Promise.all(projects.map((project) => readProjectGitChanges(workspaceRoot, project, expectedBranch)));
+  const settings = await loadSettings(workspaceRoot);
+  const projectSummaries = await Promise.all(projects.map((project) => readProjectGitChanges(workspaceRoot, project, expectedBranch, settings.projectPaths)));
   const files = projectSummaries.flatMap((summary) =>
     summary.files.map((file) => ({
       ...file,

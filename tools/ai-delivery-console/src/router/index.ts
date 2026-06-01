@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import RequirementList from '@/views/RequirementList.vue';
 import RequirementDetail from '@/views/RequirementDetail.vue';
+import Settings from '@/views/Settings.vue';
 
 const router = createRouter({
   history: createWebHistory(),
@@ -15,6 +16,11 @@ const router = createRouter({
       name: 'requirement-detail',
       component: RequirementDetail,
       props: true
+    },
+    {
+      path: '/settings',
+      name: 'settings',
+      component: Settings
     }
   ]
 });

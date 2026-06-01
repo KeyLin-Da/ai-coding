@@ -127,5 +127,17 @@ export const apiClient = {
         method: 'DELETE'
       }
     );
+  },
+  getSettings() {
+    return request<{ projectPaths: string[] }>('/api/ai-delivery/settings');
+  },
+  saveSettings(projectPaths: string[]) {
+    return request<{ projectPaths: string[] }>('/api/ai-delivery/settings', {
+      method: 'PUT',
+      body: JSON.stringify({ projectPaths })
+    });
+  },
+  listProjects() {
+    return request<WorkflowProject[]>('/api/ai-delivery/projects');
   }
 };

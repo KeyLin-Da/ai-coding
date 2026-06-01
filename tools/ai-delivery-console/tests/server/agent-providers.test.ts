@@ -53,8 +53,8 @@ describe('agent-providers', () => {
     expect(providers.map((provider) => provider.id)).toEqual(expect.arrayContaining(['codex']));
     const codex = providers.find((provider) => provider.id === 'codex');
     expect(codex?.inputMode).toBe('STDIN');
-    expect(codex?.command).toEqual(['codex', 'exec', '-C', '{workspaceRoot}', '-']);
-    expect(codex?.interactiveCommand).toEqual(['codex', '-C', '{workspaceRoot}', '--no-alt-screen', '{prompt}']);
+    expect(codex?.command).toEqual(['codex', 'exec', '-C', '{workspaceRoot}', '{projectParentAddDirArgs}', '-']);
+    expect(codex?.interactiveCommand).toEqual(['codex', '-C', '{workspaceRoot}', '{projectParentAddDirArgs}', '--no-alt-screen', '{prompt}']);
     expect(codex?.supportsInteractive).toBe(true);
   });
 
@@ -133,6 +133,56 @@ describe('agent-providers', () => {
 
   it('交互终端命令按参数数组安全转义', () => {
     expect(interactiveTerminalCommandLine(['codex', '-C', '/workspace', "hello 'user'"])).toBe("'codex' '-C' '/workspace' 'hello '\\''user'\\'''");
+  });
+
+  it('Codex 终端命令将工程父目录追加为 add-dir', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-terminal-'));
+    const projectParent = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-projects-'));
+    const provider: AgentProvider = {
+      id: 'codex',
+      name: 'Codex',
+      inputMode: 'STDIN',
+      command: ['codex', 'exec', '-C', '{workspaceRoot}', '{projectParentAddDirArgs}', '-'],
+      interactiveCommand: ['codex', '-C', '{workspaceRoot}', '{projectParentAddDirArgs}', '--no-alt-screen', '{prompt}'],
+      available: true,
+      supportsStreaming: true,
+      supportsInteractive: true
+    };
+    const run = {
+      ...runRecord('run-codex-script'),
+      agentId: 'codex',
+      executionMode: 'TERMINAL' as const
+    };
+
+    const terminal = await createTerminalRunScript(root, workflow(), run, provider, '/coding-prd-analyzer id=172014', [projectParent]);
+
+    expect(terminal.commandLine).toContain(`'-C' '${root}' '--add-dir' '${projectParent}'`);
+    expect(terminal.commandLine).toContain('"$(cat "$PROMPT_FILE")"');
+  });
+
+  it('Codex 交互终端命令将工程父目录追加为 add-dir', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-terminal-'));
+    const projectParent = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-projects-'));
+    const provider: AgentProvider = {
+      id: 'codex',
+      name: 'Codex',
+      inputMode: 'STDIN',
+      command: ['codex', 'exec', '-C', '{workspaceRoot}', '{projectParentAddDirArgs}', '-'],
+      interactiveCommand: ['codex', '-C', '{workspaceRoot}', '{projectParentAddDirArgs}', '--no-alt-screen', '{prompt}'],
+      available: true,
+      supportsStreaming: true,
+      supportsInteractive: true
+    };
+    const run = {
+      ...runRecord('run-codex-interactive-script'),
+      agentId: 'codex',
+      executionMode: 'INTERACTIVE_TERMINAL' as const
+    };
+
+    const terminal = await createTerminalRunScript(root, workflow(), run, provider, '/coding-prd-analyzer id=172014', [projectParent]);
+
+    expect(terminal.commandLine).toContain(`'-C' '${root}' '--add-dir' '${projectParent}' '--no-alt-screen'`);
+    expect(terminal.commandLine).toContain('AI Delivery Agent Task');
   });
 
   it('生成本地终端脚本并记录 transcript 和状态路径', async () => {

@@ -6,6 +6,7 @@ import { createRunId, appendRunEvent } from './run-log';
 import { assertInsideWorkspace, normalizeRequirementId } from './workspace';
 import { getAgentProvider, startAgentInTerminal, startAgentProcess } from './agent-providers';
 import { normalizePrdClarification } from './workflow-repository';
+import { loadSettings } from './project-settings';
 
 const cliActionMap: Partial<Record<ActionInput['actionType'], string[]>> = {
   OPENSPEC_STATUS: ['openspec', 'status'],
@@ -91,7 +92,7 @@ function openSpecInputParam(workflow: RequirementWorkflow, params: Record<string
 }
 
 function projectParam(workflow: RequirementWorkflow): string {
-  return (workflow.projects || []).map((project) => project.path || project.name).filter(Boolean).join(',');
+  return (workflow.projects || []).map((project) => project.name || project.path).filter(Boolean).join(',');
 }
 
 function buildSkillCommand(workflow: RequirementWorkflow, action: ActionInput): string {
@@ -307,9 +308,10 @@ export async function executeAction(
     return run;
   }
 
+  const settings = await loadSettings(workspaceRoot);
   return ['TERMINAL', 'INTERACTIVE_TERMINAL'].includes(executionMode(params))
-    ? startAgentInTerminal(workspaceRoot, workflow, run, provider, commandText)
-    : startAgentProcess(workspaceRoot, workflow, run, provider, commandText, onRunUpdate);
+    ? startAgentInTerminal(workspaceRoot, workflow, run, provider, commandText, settings.projectPaths)
+    : startAgentProcess(workspaceRoot, workflow, run, provider, commandText, onRunUpdate, settings.projectPaths);
 }
 
 export const internalForTests = {

@@ -5,7 +5,10 @@
         <p class="eyebrow">OpenSpec Delivery Console</p>
         <h1>AI 需求交付控制台</h1>
       </div>
-      <el-button :icon="Refresh" @click="refresh">刷新</el-button>
+      <div>
+        <el-button :icon="Document" @click="$router.push('/settings')">设置</el-button>
+        <el-button :icon="Refresh" @click="refresh">刷新</el-button>
+      </div>
     </header>
     <main class="app-main">
       <router-view />
@@ -14,7 +17,7 @@
 </template>
 
 <script setup lang="ts">
-import { Refresh } from '@element-plus/icons-vue';
+import { Refresh, Document } from '@element-plus/icons-vue';
 import { useRoute } from 'vue-router';
 import { useWorkflowStore } from '@/stores/workflow';
 

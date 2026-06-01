@@ -1,7 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { WorkflowProject } from '../../shared/workflow';
-import { assertInsideWorkspace, toRelativePath } from './workspace';
+import { loadSettings } from './project-settings';
+import { canonicalProjectPath } from './project-resolver';
 
 interface ProjectHistoryFile {
   projects: Array<WorkflowProject & { lastUsedAt?: string }>;
@@ -9,27 +10,6 @@ interface ProjectHistoryFile {
 
 function historyPath(workspaceRoot: string): string {
   return path.join(workspaceRoot, 'docs', '.ai-delivery-console', 'project-history.json');
-}
-
-function normalizeProjectPath(workspaceRoot: string, rawPath: string): string {
-  const value = String(rawPath || '').trim();
-  if (!value) {
-    throw new Error('涉及工程路径不能为空');
-  }
-  const absolute = assertInsideWorkspace(workspaceRoot, value);
-  const relative = toRelativePath(workspaceRoot, absolute).replace(/\\/g, '/');
-  if (!relative || relative === '.') {
-    throw new Error('涉及工程不能为工作区根目录');
-  }
-  return relative;
-}
-
-async function assertProjectDirectory(workspaceRoot: string, relativePath: string): Promise<void> {
-  const absolute = assertInsideWorkspace(workspaceRoot, relativePath);
-  const stat = await fs.stat(absolute).catch(() => null);
-  if (!stat?.isDirectory()) {
-    throw new Error(`涉及工程不存在或不是目录: ${relativePath}`);
-  }
 }
 
 async function readSavedProjectHistory(workspaceRoot: string): Promise<WorkflowProject[]> {
@@ -69,27 +49,45 @@ export async function snapshotWorkspaceProjects(workspaceRoot: string): Promise<
   return projects;
 }
 
-export async function normalizeWorkflowProjects(workspaceRoot: string, projects: WorkflowProject[] = []): Promise<WorkflowProject[]> {
-  const seen = new Set<string>();
-  const normalized: WorkflowProject[] = [];
-  for (const project of projects) {
-    const projectPath = normalizeProjectPath(workspaceRoot, project.path || project.name);
-    if (seen.has(projectPath)) {
-      continue;
-    }
-    await assertProjectDirectory(workspaceRoot, projectPath);
-    seen.add(projectPath);
-    normalized.push({
-      name: project.name?.trim() || path.basename(projectPath),
-      path: projectPath
-    });
-  }
-  return normalized;
-}
-
 export async function readProjectHistory(workspaceRoot: string): Promise<WorkflowProject[]> {
+  const settings = await loadSettings(workspaceRoot);
+  if (settings.projectPaths.length) {
+    return listProjectsFromConfiguredPaths(workspaceRoot);
+  }
   await snapshotWorkspaceProjects(workspaceRoot);
   return readSavedProjectHistory(workspaceRoot);
+}
+
+export async function listProjectsFromConfiguredPaths(workspaceRoot: string): Promise<WorkflowProject[]> {
+  const settings = await loadSettings(workspaceRoot);
+  const projects: WorkflowProject[] = [];
+  
+  for (const basePath of settings.projectPaths) {
+    try {
+      const entries = await fs.readdir(basePath, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory() || entry.name.startsWith('.')) {
+          continue;
+        }
+        // Check if it's a git repo
+        const gitStat = await fs.stat(path.join(basePath, entry.name, '.git')).catch(() => null);
+        if (gitStat) {
+          const absolutePath = path.join(basePath, entry.name);
+          projects.push({
+            name: entry.name,
+            path: canonicalProjectPath(workspaceRoot, absolutePath)
+          });
+        }
+      }
+    } catch (error: any) {
+      // Directory doesn't exist or not accessible, skip silently
+      console.log(`[project-list] 跳过不可访问的目录：${basePath}`, error.message);
+    }
+  }
+  
+  // Sort by path
+  projects.sort((a, b) => a.path.localeCompare(b.path));
+  return projects;
 }
 
 export async function saveProjectHistory(workspaceRoot: string, projects: WorkflowProject[]): Promise<void> {

@@ -1,19 +1,46 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { execSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { AgentProvider, RequirementWorkflow, RunRecord, RunStatus } from '../../shared/workflow';
 import { serverConfig } from '../config';
 import { appendRunEvent } from './run-log';
 import { assertInsideWorkspace, normalizeRequirementId, toRelativePath } from './workspace';
+import { normalizeProjectBasePaths, resolveWorkflowProjects } from './project-resolver';
 
 const activeProcesses = new Map<string, ChildProcessWithoutNullStreams>();
 const cancelledRunIds = new Set<string>();
+
+type CommandContext = Record<string, string | string[]>;
 
 function splitCommand(command: string): string[] {
   return command.match(/(?:[^\s"]+|"[^"]*")+/g)?.map((part) => part.replace(/^"|"$/g, '')) || [];
 }
 
+function isCliAvailable(command: string): boolean {
+  try {
+    execSync(`command -v ${command}`, { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getNodeMajorVersion(): number {
+  return parseInt(process.version.slice(1).split('.')[0] || '0', 10);
+}
+
+function getAgentSkillDir(agentId: string): string {
+  const mapping: Record<string, string> = {
+    codex: '.codex',
+    codebuddy: '.codebuddy',
+    qoder: '.qoder',
+    qwen: '.qwen'
+  };
+  return mapping[agentId] || '.codex';
+}
+
 function defaultProviders(): AgentProvider[] {
+  const qwenNodeOk = getNodeMajorVersion() >= 20;
   return [
     {
       id: 'codex',
@@ -25,6 +52,39 @@ function defaultProviders(): AgentProvider[] {
       available: Boolean(serverConfig.codexCommand),
       supportsStreaming: true,
       supportsInteractive: Boolean(serverConfig.codexInteractiveCommand)
+    },
+    {
+      id: 'codebuddy',
+      name: 'CodeBuddy',
+      description: '使用本机 CodeBuddy CLI 执行技能 Prompt。',
+      inputMode: 'STDIN',
+      command: splitCommand(serverConfig.codebuddyCommand),
+      interactiveCommand: splitCommand(serverConfig.codebuddyInteractiveCommand),
+      available: isCliAvailable('codebuddy'),
+      supportsStreaming: false,
+      supportsInteractive: Boolean(serverConfig.codebuddyInteractiveCommand)
+    },
+    {
+      id: 'qoder',
+      name: 'Qoder CLI CN',
+      description: '使用本机 qoderclicn CLI 执行技能 Prompt。',
+      inputMode: 'STDIN',
+      command: splitCommand(serverConfig.qoderCommand),
+      interactiveCommand: splitCommand(serverConfig.qoderInteractiveCommand),
+      available: isCliAvailable('qoderclicn'),
+      supportsStreaming: false,
+      supportsInteractive: Boolean(serverConfig.qoderInteractiveCommand)
+    },
+    {
+      id: 'qwen',
+      name: 'Qwen',
+      description: qwenNodeOk ? '使用本机 Qwen CLI 执行技能 Prompt。' : '需要 Node.js ≥ 20，当前版本不满足。',
+      inputMode: 'STDIN',
+      command: splitCommand(serverConfig.qwenCommand),
+      interactiveCommand: splitCommand(serverConfig.qwenInteractiveCommand),
+      available: qwenNodeOk && isCliAvailable('qwen'),
+      supportsStreaming: false,
+      supportsInteractive: qwenNodeOk && Boolean(serverConfig.qwenInteractiveCommand)
     }
   ];
 }
@@ -59,25 +119,48 @@ export async function getAgentProvider(agentId: string): Promise<AgentProvider |
   return (await listAgentProviders()).find((provider) => provider.id === agentId);
 }
 
-export async function createPromptEnvelope(workspaceRoot: string, workflow: RequirementWorkflow, run: RunRecord, commandText: string): Promise<string> {
+async function selectedProjectRoots(workspaceRoot: string, workflow: RequirementWorkflow, projectPaths: string[] = []): Promise<string[]> {
+  if (!workflow.projects?.length) {
+    return [];
+  }
+  const resolved = await resolveWorkflowProjects(workspaceRoot, workflow.projects, projectPaths);
+  return resolved.map((item) => item.rootPath);
+}
+
+function projectAddDirArgs(projectRoots: string[]): string[] {
+  return projectRoots.flatMap((projectRoot) => ['--add-dir', projectRoot]);
+}
+
+function projectParentAddDirArgs(projectPaths: string[] = []): string[] {
+  return normalizeProjectBasePaths(projectPaths).flatMap((projectPath) => ['--add-dir', projectPath]);
+}
+
+export async function createPromptEnvelope(workspaceRoot: string, workflow: RequirementWorkflow, run: RunRecord, commandText: string, projectPaths?: string[]): Promise<string> {
   const requirementId = normalizeRequirementId(workflow.requirementId);
   const promptDir = path.join(workspaceRoot, 'docs', requirementId, 'workflow', 'prompts');
   await fs.mkdir(promptDir, { recursive: true });
   const promptPath = path.join(promptDir, `${run.id}.md`);
   const skillName = commandText.trim().split(/\s+/)[0]?.replace(/^\//, '') || 'unknown';
-  const skillPath = path.join(workspaceRoot, '.codex', 'skills', skillName, 'SKILL.md');
+  const agentSkillDir = getAgentSkillDir(run.agentId || 'codex');
+  const skillPath = path.join(workspaceRoot, agentSkillDir, 'skills', skillName, 'SKILL.md');
   const relativeSkillPath = path.relative(workspaceRoot, skillPath);
+  const projectRoots = await selectedProjectRoots(workspaceRoot, workflow, projectPaths);
+  const configuredProjectPaths = projectPaths?.length ? `\n### 已配置工程父目录\n\n${projectPaths.map((p) => `- ${p}`).join('\n')}\n` : '';
+  const selectedProjects = projectRoots.length ? `\n### 本次涉及工程\n\n${projectRoots.map((p) => `- ${p}`).join('\n')}\n` : '';
+  const projectPathsSection = configuredProjectPaths || selectedProjects
+    ? `\n## 工程代码目录\n${configuredProjectPaths}${selectedProjects}`
+    : '';
   const content = `# AI Delivery Agent Task
 
 你将在工作区执行一个 AI 需求交付动作。
 
-- 工作区: ${workspaceRoot}
+- 交付工作区: ${workspaceRoot}
 - 需求号: ${workflow.requirementId}
 - 需求标题: ${workflow.title}
 - 关联分支: ${workflow.branchName || '未绑定'}
 - 运行 ID: ${run.id}
 - Agent: ${run.agentId || 'unknown'}
-
+${projectPathsSection}
 ## 技能
 
 - 名称: ${skillName}
@@ -92,17 +175,30 @@ ${commandText}
 ## 执行要求
 
 1. 先阅读技能说明文件，并严格按技能约定执行。
-2. 所有文件读写必须限制在工作区内。
-3. 关键执行步骤、命令、阻塞原因和产物路径需要输出到终端。
-4. 若技能要求生成文档或报告，写入技能约定目录。
-5. 如果缺少必要输入或权限，停止并说明最小补充信息。
+2. 交付产物、OpenSpec 工件、运行日志和报告必须写入交付工作区内的约定目录。
+3. 工程代码的读取和修改仅限于上方列出的工程代码目录；不要把工程产物写入交付工作区之外的其他位置。
+4. 关键执行步骤、命令、阻塞原因和产物路径需要输出到终端。
+5. 若技能要求生成文档或报告，写入技能约定目录。
+6. 如果缺少必要输入或权限，停止并说明最小补充信息。
 `;
   await fs.writeFile(promptPath, content, 'utf8');
   return path.relative(workspaceRoot, promptPath);
 }
 
-function renderCommand(command: string[], context: Record<string, string>): string[] {
-  return command.map((part) => part.replace(/\{(\w+)\}/g, (_, key) => context[key] ?? ''));
+function renderCommand(command: string[], context: CommandContext): string[] {
+  return command.flatMap((part) => {
+    const exact = part.match(/^\{(\w+)\}$/);
+    if (exact) {
+      const exactValue = context[exact[1]];
+      return Array.isArray(exactValue) ? exactValue : [String(exactValue ?? '')];
+    }
+    return [
+      part.replace(/\{(\w+)\}/g, (_, key) => {
+        const value = context[key];
+        return Array.isArray(value) ? value.join(' ') : String(value ?? '');
+      })
+    ];
+  }).filter((part) => part !== '');
 }
 
 function shellQuote(value: string): string {
@@ -150,9 +246,10 @@ export async function createTerminalRunScript(
   workflow: RequirementWorkflow,
   run: RunRecord,
   provider: AgentProvider,
-  commandText: string
+  commandText: string,
+  projectPaths?: string[]
 ): Promise<TerminalRunScript> {
-  const promptPath = await createPromptEnvelope(workspaceRoot, workflow, run, commandText);
+  const promptPath = await createPromptEnvelope(workspaceRoot, workflow, run, commandText, projectPaths);
   const absolutePromptPath = assertInsideWorkspace(workspaceRoot, promptPath);
   const requirementId = normalizeRequirementId(workflow.requirementId);
   const scriptDir = path.join(workspaceRoot, 'docs', requirementId, 'workflow', 'scripts');
@@ -169,6 +266,7 @@ export async function createTerminalRunScript(
   if (!commandTemplate.length) {
     throw new Error(`${terminalExecutionModeLabel(run)}未配置可执行命令: ${provider.name}`);
   }
+  const projectRoots = await selectedProjectRoots(workspaceRoot, workflow, projectPaths);
   const rendered = renderCommand(commandTemplate, {
     workspaceRoot,
     promptFile: absolutePromptPath,
@@ -176,7 +274,9 @@ export async function createTerminalRunScript(
     prompt: promptContent,
     commandText,
     requirementId: workflow.requirementId,
-    runId: run.id
+    runId: run.id,
+    projectAddDirArgs: projectAddDirArgs(projectRoots),
+    projectParentAddDirArgs: projectParentAddDirArgs(projectPaths)
   });
   const commandLine = interactiveMode ? interactiveTerminalCommandLine(rendered) : terminalCommandLine(provider, rendered);
   const transcriptPath = toRelativePath(workspaceRoot, absoluteTranscriptPath);
@@ -361,7 +461,8 @@ export async function startAgentProcess(
   run: RunRecord,
   provider: AgentProvider,
   commandText: string,
-  onUpdate: (run: RunRecord) => Promise<void>
+  onUpdate: (run: RunRecord) => Promise<void>,
+  projectPaths?: string[]
 ): Promise<RunRecord> {
   if (provider.inputMode === 'MANUAL' || !provider.command?.length) {
     run.status = 'WAITING_FOR_AGENT';
@@ -391,18 +492,23 @@ export async function startAgentProcess(
     return run;
   }
 
-  const promptPath = await createPromptEnvelope(workspaceRoot, workflow, run, commandText);
+  const promptPath = await createPromptEnvelope(workspaceRoot, workflow, run, commandText, projectPaths);
   const absolutePromptPath = assertInsideWorkspace(workspaceRoot, promptPath);
   run.promptPath = promptPath;
   run.commandText = commandText;
 
+  const promptContent = await fs.readFile(absolutePromptPath, 'utf8');
+  const projectRoots = await selectedProjectRoots(workspaceRoot, workflow, projectPaths);
   const rendered = renderCommand(provider.command, {
     workspaceRoot,
     promptFile: absolutePromptPath,
     promptPath: absolutePromptPath,
+    prompt: promptContent,
     commandText,
     requirementId: workflow.requirementId,
-    runId: run.id
+    runId: run.id,
+    projectAddDirArgs: projectAddDirArgs(projectRoots),
+    projectParentAddDirArgs: projectParentAddDirArgs(projectPaths)
   });
 
   await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
@@ -428,8 +534,9 @@ export async function startAgentProcess(
   activeProcesses.set(run.id, child);
 
   if (provider.inputMode === 'STDIN') {
-    const promptContent = await fs.readFile(absolutePromptPath, 'utf8');
     child.stdin.end(promptContent);
+  } else {
+    child.stdin.end();
   }
 
   child.stdout.on('data', (chunk) => {
@@ -515,7 +622,8 @@ export async function startAgentInTerminal(
   workflow: RequirementWorkflow,
   run: RunRecord,
   provider: AgentProvider,
-  commandText: string
+  commandText: string,
+  projectPaths?: string[]
 ): Promise<RunRecord> {
   const requestedMode = isInteractiveTerminalRun(run) ? 'INTERACTIVE_TERMINAL' : 'TERMINAL';
   run.executionMode = requestedMode;
@@ -553,7 +661,7 @@ export async function startAgentInTerminal(
   }
 
   run.commandText = commandText;
-  const terminal = await createTerminalRunScript(workspaceRoot, workflow, run, provider, commandText);
+  const terminal = await createTerminalRunScript(workspaceRoot, workflow, run, provider, commandText, projectPaths);
   run.promptPath = terminal.promptPath;
   run.terminalScriptPath = terminal.scriptPath;
   run.terminalTranscriptPath = terminal.transcriptPath;
