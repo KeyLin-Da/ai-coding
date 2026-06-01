@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(openspec list --json 2>/dev/null || echo \"No openspec found\")",
+      "Bash(find /Users/key.lin/work/Projects/ai-coding/docs -path \"*/prd/files\" -type d 2>/dev/null | head -10)",
+      "Bash(find /Users/key.lin/work/Projects/ai-coding/docs -path \"*/prd*\" -type d 2>/dev/null | sort | head -30)",
+      "Bash(ls -la /Users/key.lin/work/Projects/ai-coding/docs/170094/prd/files/ 2>/dev/null && echo \"---\" && ls -la /Users/key.lin/work/Projects/ai-coding/docs/170094/prd/files/raw/ 2>/dev/null && echo \"---\" && ls -la /Users/key.lin/work/Projects/ai-coding/docs/170094/prd/files/screenshots/ 2>/dev/null && echo \"---\" && ls -la /Users/key.lin/work/Projects/ai-coding/docs/170094/prd/files/temp/ 2>/dev/null)",
+      "Bash(ls -la /Users/key.lin/work/Projects/ai-coding/docs/172014/prd/files/ 2>/dev/null && echo \"---\" && ls -la /Users/key.lin/work/Projects/ai-coding/docs/172014/prd/files/screenshots/ 2>/dev/null)",
+      "Bash(ls -la /Users/key.lin/work/Projects/ai-coding/docs/170094/prd/file/ 2>/dev/null && echo \"---\" && ls -la /Users/key.lin/work/Projects/ai-coding/docs/170094/prd/ 2>/dev/null)",
+      "Bash(cat:*)",
+      "Bash(openspec new:*)",
+      "Bash(openspec status:*)",
+      "Bash(openspec instructions:*)",
+      "Bash(ls -la /Users/key.lin/work/Projects/ai-coding/docs/172014/prd/files/ && echo \"---screenshots---\" && ls -la /Users/key.lin/work/Projects/ai-coding/docs/172014/prd/files/screenshots/ 2>/dev/null)",
+      "Bash(ls /Users/key.lin/work/Projects/ai-coding/openspec/specs/ 2>/dev/null || echo \"No specs directory\")",
+      "Bash(mkdir:*)",
+      "Bash(cd /Users/key.lin/work/Projects/ai-coding/tools/ai-delivery-console && npx vitest run tests/server/action-adapters.test.ts 2>&1 | tail -40)",
+      "Bash(npx vitest run tests/server/action-adapters.test.ts -t \"OpenSpec 工件生成\" 2>&1 | tail -20)",
+      "Bash(which codex qoderclicn codebuddy qwen-coder 2>/dev/null; echo \"---\"; which codebuddy-code qodercli qoder 2>/dev/null; echo \"---\"; ls ~/Library/Application\\\\ Support/codebuddy*/cli/ 2>/dev/null || true; echo \"---npm-global---\"; npm list -g --depth=0 2>/dev/null | grep -iE \"codex|qoder|codebuddy|qwen\" || true)",
+      "Bash(compgen -c 2>/dev/null | grep -iE \"^\\(codex|qoder|codebuddy|qwen|clicode\\)\" | sort -u | head -20 || true)",
+      "Bash(codex --help 2>&1 | head -50)",
+      "Bash(qoderclicn --help 2>&1 | head -50)",
+      "Bash(codebuddy --help 2>&1 | head -50)",
+      "Bash(qwen --help 2>&1 | head -50)",
+      "Bash(codex exec --help 2>&1 | head -30)",
+      "Bash(qoderclicn --help 2>&1 | grep -A2 -E \"\\(-p|--print|stdin|pipe|cwd\\)\" | head -20)",
+      "Bash(codebuddy --help 2>&1 | grep -A2 -E \"\\(--add-dir|cwd|work.dir|directory\\)\" | head -20)",
+      "Bash(openspec instructions proposal --change \"delivery-console-enhancements\" --json 2>&1 | head -80)",
+      "Bash(openspec specs --json 2>/dev/null || echo \"no specs dir\")",
+      "Bash(find tools/ai-delivery-console -name \"*.ts\" -path \"*/server/services/*\" 2>/dev/null | head -20)",
+      "Bash(find tools/ai-delivery-console -name \"*.vue\" 2>/dev/null | head -20)",
+      "Bash(ls -la tools/ 2>/dev/null || echo \"no tools dir\"; ls -la)",
+      "Bash(openspec instructions proposal --change \"delivery-console-enhancements\" --json 2>/dev/null | python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('OUTPUT_PATH:', d['outputPath']\\)\")",
+      "Bash(grep -n \"activeImplementationStep\\\\|implementationStep\\\\|IMPLEMENTATION\\\\|watch.*workflow\\\\|activeStage\" src/views/RequirementDetail.vue | head -40)",
+      "Bash(grep -n \"watch\\(\\\\|watch\\(\" src/views/RequirementDetail.vue | head -20)",
+      "Bash(ls /Users/key.lin/work/Projects/ai-coding/skills/ 2>/dev/null && echo \"---\" && ls /Users/key.lin/work/Projects/ai-coding/.codex/skills/ 2>/dev/null | head -20 && echo \"---\" && ls /Users/key.lin/work/Projects/ai-coding/.codebuddy/skills/ 2>/dev/null | head -20 && echo \"---\" && ls /Users/key.lin/work/Projects/ai-coding/.qoder/skills/ 2>/dev/null | head -20)",
+      "Bash(find /Users/key.lin/work/Projects/ai-coding/tools/ai-delivery-console -name \"server.ts\" -o -name \"routes.ts\" -o -name \"index.ts\" | grep -v node_modules | head -20)",
+      "Bash(find /Users/key.lin/work/Projects/ai-coding/tools/ai-delivery-console/src -name \"*.ts\" | grep -v node_modules | head -20)"
+    ]
+  }
+}

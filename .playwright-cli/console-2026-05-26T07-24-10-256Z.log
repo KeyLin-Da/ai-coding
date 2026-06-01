@@ -1,0 +1,26 @@
+[  126398ms] [WARNING] ElementPlusError: [el-radio] [API] label act as value is about to be deprecated in version 3.0.0, please use value instead.
+For more detail, please visit: https://element-plus.org/en-US/component/radio.html
+
+    at debugWarn (http://127.0.0.1:5178/node_modules/.vite/deps/element-plus.js?v=c452556d:1239:37)
+    at watch.immediate (http://127.0.0.1:5178/node_modules/.vite/deps/element-plus.js?v=c452556d:1738:7)
+    at callWithErrorHandling (http://127.0.0.1:5178/node_modules/.vite/deps/chunk-LVSZPXJR.js?v=c452556d:2391:19)
+    at callWithAsyncErrorHandling (http://127.0.0.1:5178/node_modules/.vite/deps/chunk-LVSZPXJR.js?v=c452556d:2398:17)
+    at baseWatchOptions.call (http://127.0.0.1:5178/node_modules/.vite/deps/chunk-LVSZPXJR.js?v=c452556d:3087:47)
+    at job (http://127.0.0.1:5178/node_modules/.vite/deps/chunk-LVSZPXJR.js?v=c452556d:2118:18)
+    at watch (http://127.0.0.1:5178/node_modules/.vite/deps/chunk-LVSZPXJR.js?v=c452556d:2154:7)
+    at doWatch (http://127.0.0.1:5178/node_modules/.vite/deps/chunk-LVSZPXJR.js?v=c452556d:3115:23)
+    at watch2 (http://127.0.0.1:5178/node_modules/.vite/deps/chunk-LVSZPXJR.js?v=c452556d:3047:10)
+    at useDeprecated (http://127.0.0.1:5178/node_modules/.vite/deps/element-plus.js?v=c452556d:1736:3) @ http://127.0.0.1:5178/node_modules/.vite/deps/element-plus.js?v=c452556d:1239
+[  126399ms] [WARNING] ElementPlusError: [el-radio] [API] label act as value is about to be deprecated in version 3.0.0, please use value instead.
+For more detail, please visit: https://element-plus.org/en-US/component/radio.html
+
+    at debugWarn (http://127.0.0.1:5178/node_modules/.vite/deps/element-plus.js?v=c452556d:1239:37)
+    at watch.immediate (http://127.0.0.1:5178/node_modules/.vite/deps/element-plus.js?v=c452556d:1738:7)
+    at callWithErrorHandling (http://127.0.0.1:5178/node_modules/.vite/deps/chunk-LVSZPXJR.js?v=c452556d:2391:19)
+    at callWithAsyncErrorHandling (http://127.0.0.1:5178/node_modules/.vite/deps/chunk-LVSZPXJR.js?v=c452556d:2398:17)
+    at baseWatchOptions.call (http://127.0.0.1:5178/node_modules/.vite/deps/chunk-LVSZPXJR.js?v=c452556d:3087:47)
+    at job (http://127.0.0.1:5178/node_modules/.vite/deps/chunk-LVSZPXJR.js?v=c452556d:2118:18)
+    at watch (http://127.0.0.1:5178/node_modules/.vite/deps/chunk-LVSZPXJR.js?v=c452556d:2154:7)
+    at doWatch (http://127.0.0.1:5178/node_modules/.vite/deps/chunk-LVSZPXJR.js?v=c452556d:3115:23)
+    at watch2 (http://127.0.0.1:5178/node_modules/.vite/deps/chunk-LVSZPXJR.js?v=c452556d:3047:10)
+    at useDeprecated (http://127.0.0.1:5178/node_modules/.vite/deps/element-plus.js?v=c452556d:1736:3) @ http://127.0.0.1:5178/node_modules/.vite/deps/element-plus.js?v=c452556d:1239

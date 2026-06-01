@@ -1,0 +1,40 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - paragraph [ref=e6]: OpenSpec Delivery Console
+      - heading "AI 需求交付控制台" [level=1] [ref=e7]
+    - generic [ref=e8]:
+      - button "设置" [ref=e9] [cursor=pointer]:
+        - img [ref=e11]
+        - generic [ref=e13]: 设置
+      - button "刷新" [ref=e14] [cursor=pointer]:
+        - img [ref=e16]
+        - generic [ref=e18]: 刷新
+  - main [ref=e19]:
+    - generic [ref=e20]:
+      - generic [ref=e22]:
+        - strong [ref=e23]: 全局设置
+        - paragraph [ref=e24]: 配置工程父目录，Agent 将通过这些路径定位需求关联的工程代码。
+      - generic [ref=e25]:
+        - generic [ref=e26]: 工程父目录列表
+        - generic [ref=e27]:
+          - generic [ref=e28]:
+            - generic:
+              - generic: /Users/key.lin/work/Projects/opp
+              - generic:
+                - img
+          - generic [ref=e29]:
+            - generic [ref=e30]:
+              - textbox "输入绝对路径（如 /Users/dev/projects）" [ref=e32]
+              - button "添加" [ref=e34] [cursor=pointer]:
+                - generic [ref=e35]: 添加
+            - button "选择目录" [ref=e36] [cursor=pointer]:
+              - generic [ref=e37]: 选择目录
+            - button "保存配置" [ref=e38] [cursor=pointer]:
+              - generic [ref=e39]: 保存配置
+      - generic [ref=e40]:
+        - generic [ref=e41]: 说明
+        - list [ref=e43]:
+          - listitem [ref=e44]: "每个路径必须是绝对路径（以 `/` 开头）"
+          - listitem [ref=e45]: 支持配置多个路径，Agent 会按顺序在这些路径下查找工程代码
+          - listitem [ref=e46]: "配置保存在本地 `.ai-delivery/settings.json` 文件中"

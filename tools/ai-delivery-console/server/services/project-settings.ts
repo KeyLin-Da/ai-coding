@@ -6,7 +6,7 @@ export interface ProjectSettings {
 }
 
 function settingsFilePath(workspaceRoot: string): string {
-  return path.join(workspaceRoot, '.ai-delivery', 'settings.json');
+  return path.join(workspaceRoot, 'docs/.ai-delivery-console', 'settings.json');
 }
 
 export async function loadSettings(workspaceRoot: string): Promise<ProjectSettings> {

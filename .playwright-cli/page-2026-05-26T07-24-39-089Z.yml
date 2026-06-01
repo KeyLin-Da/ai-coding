@@ -1,0 +1,296 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - paragraph [ref=e6]: OpenSpec Delivery Console
+      - heading "AI 需求交付控制台" [level=1] [ref=e7]
+    - button "刷新" [ref=e8] [cursor=pointer]:
+      - img [ref=e10]
+      - generic [ref=e12]: 刷新
+  - main [ref=e13]:
+    - generic [ref=e14]:
+      - generic [ref=e15]:
+        - generic [ref=e16]:
+          - generic [ref=e17]:
+            - generic [ref=e18]: 需求
+            - generic [ref=e19]: /
+            - strong [ref=e20]: "171697"
+          - generic [ref=e21]:
+            - button "刷新产物" [ref=e22] [cursor=pointer]:
+              - img [ref=e24]
+              - generic [ref=e26]: 刷新产物
+            - button "返回列表" [ref=e27] [cursor=pointer]:
+              - img [ref=e29]
+              - generic [ref=e32]: 返回列表
+        - heading "【opp-gateway】/admin/api/v2/activityInfo/getClockData、/admin/api/v2/activityInfo/getFunUserData对应功能导致opp-learn严重FGC优化" [level=2] [ref=e33]
+        - generic [ref=e34]:
+          - generic [ref=e336]: 缺陷
+          - generic [ref=e338]: 进行中
+          - generic [ref=e35]: bugfix/opp#171697
+        - generic "阶段时间线" [ref=e36]:
+          - button "✓ PRD 已通过" [ref=e37] [cursor=pointer]:
+            - generic [ref=e38]: ✓
+            - generic [ref=e39]:
+              - strong [ref=e40]: PRD
+              - generic [ref=e41]: 已通过
+          - button "✓ 技术方案 已通过" [ref=e42] [cursor=pointer]:
+            - generic [ref=e43]: ✓
+            - generic [ref=e44]:
+              - strong [ref=e45]: 技术方案
+              - generic [ref=e46]: 已通过
+          - button "3 实施验证 草稿" [ref=e47] [cursor=pointer]:
+            - generic [ref=e48]: "3"
+            - generic [ref=e49]:
+              - strong [ref=e50]: 实施验证
+              - generic [ref=e51]: 草稿
+          - button "4 代码评审 未开始" [ref=e52] [cursor=pointer]:
+            - generic [ref=e53]: "4"
+            - generic [ref=e54]:
+              - strong [ref=e55]: 代码评审
+              - generic [ref=e56]: 未开始
+      - generic [ref=e57]:
+        - main [ref=e58]:
+          - generic [ref=e59]:
+            - generic [ref=e60]:
+              - generic [ref=e61]:
+                - strong [ref=e62]: 实施验证
+                - paragraph [ref=e63]: 实施验证分步骤推进：工件生成与评审。
+              - generic [ref=e64]:
+                - generic [ref=e66] [cursor=pointer]:
+                  - generic:
+                    - combobox [ref=e68]
+                    - generic [ref=e69]: Codex
+                  - img [ref=e72]
+                - generic [ref=e75] [cursor=pointer]:
+                  - generic:
+                    - combobox [ref=e77]
+                    - generic [ref=e78]: 后台执行
+                  - img [ref=e81]
+                - button "本步骤日志" [ref=e83] [cursor=pointer]:
+                  - img [ref=e85]
+                  - generic [ref=e87]: 本步骤日志
+            - generic [ref=e89]:
+              - navigation "实施验证子步骤" [ref=e90]:
+                - button "1 工件生成与评审 草稿" [ref=e91] [cursor=pointer]:
+                  - generic [ref=e92]: "1"
+                  - generic [ref=e93]:
+                    - strong [ref=e94]: 工件生成与评审
+                    - generic [ref=e95]: 草稿
+                - button "2 开始实施 未开始" [ref=e96] [cursor=pointer]:
+                  - generic [ref=e97]: "2"
+                  - generic [ref=e98]:
+                    - strong [ref=e99]: 开始实施
+                    - generic [ref=e100]: 未开始
+                - button "3 查看变更文件及代码 未开始" [ref=e101] [cursor=pointer]:
+                  - generic [ref=e102]: "3"
+                  - generic [ref=e103]:
+                    - strong [ref=e104]: 查看变更文件及代码
+                    - generic [ref=e105]: 未开始
+                - button "4 执行单测并生成报告 未开始" [ref=e106] [cursor=pointer]:
+                  - generic [ref=e107]: "4"
+                  - generic [ref=e108]:
+                    - strong [ref=e109]: 执行单测并生成报告
+                    - generic [ref=e110]: 未开始
+              - region "实施验证摘要" [ref=e111]:
+                - generic [ref=e112]:
+                  - generic [ref=e113]:
+                    - strong [ref=e114]: OpenSpec
+                    - generic [ref=e340]: 进行中
+                  - paragraph [ref=e115]: openspec/changes/req-171697
+                  - progressbar [ref=e116]:
+                    - generic [ref=e119]: 70%
+                - generic [ref=e120]:
+                  - generic [ref=e121]:
+                    - generic [ref=e122]: 已完成
+                    - strong [ref=e123]: "21"
+                  - generic [ref=e124]:
+                    - generic [ref=e125]: 待完成
+                    - strong [ref=e126]: "9"
+                  - generic [ref=e127]:
+                    - generic [ref=e128]: 问题
+                    - strong [ref=e129]: "0"
+                  - generic [ref=e130]:
+                    - generic [ref=e131]: 总任务
+                    - strong [ref=e132]: "30"
+              - generic [ref=e133]:
+                - textbox "OpenSpec change name，例如 req-172014" [ref=e136]: req-171697
+                - button "生成 OpenSpec 工件" [ref=e137] [cursor=pointer]:
+                  - img [ref=e139]
+                  - generic [ref=e141]: 生成 OpenSpec 工件
+                - button "查看 OpenSpec 状态" [ref=e142] [cursor=pointer]:
+                  - img [ref=e144]
+                  - generic [ref=e146]: 查看 OpenSpec 状态
+                - button "审核本步骤" [ref=e147] [cursor=pointer]:
+                  - img [ref=e149]
+                  - generic [ref=e151]: 审核本步骤
+              - generic [ref=e152]:
+                - generic [ref=e153]:
+                  - strong [ref=e154]: OpenSpec 工作
+                  - generic [ref=e155]: openspec/changes/req-171697/proposal.md
+                - generic [ref=e156]:
+                  - tablist [ref=e160]:
+                    - tab "Proposal" [selected] [ref=e162]
+                    - tab "Design" [ref=e163]
+                    - tab "Tasks" [ref=e164]
+                    - tab "learn-activity-clock-data-performance/spec.md" [ref=e165]
+                  - generic:
+                    - tabpanel "Proposal"
+              - generic [ref=e166]:
+                - generic [ref=e167]:
+                  - generic [ref=e168]:
+                    - strong [ref=e169]: 文档内容
+                    - paragraph [ref=e170]: openspec/changes/req-171697/proposal.md
+                  - generic [ref=e171]:
+                    - button "读取" [ref=e172] [cursor=pointer]:
+                      - img [ref=e174]
+                      - generic [ref=e176]: 读取
+                    - button "下载" [ref=e177] [cursor=pointer]:
+                      - img [ref=e179]
+                      - generic [ref=e181]: 下载
+                    - button "保存" [ref=e182] [cursor=pointer]:
+                      - img [ref=e184]
+                      - generic [ref=e186]: 保存
+                - generic [ref=e187]:
+                  - textbox [ref=e190]: "## Why 后台学习数据接口 `/api/v2/activityInfo/getClockData` 在大活动下会把 `fun_clock_info`、`fun_activity_data`、`fun_activity_calendar` 明细全量加载到 JVM，只为计算报名数、打卡数和打卡率，已引发 `opp-learn` 严重 FullGC 风险。该接口仍被管理后台调用，即使标记为废弃，也需要先做低风险性能修复。 ## What Changes - 将 `getClockData` 汇总计算从全量 `list()` 改为数据库侧 `count` / 聚合查询。 - 聚合和分页 SQL 使用 `opp-learn` 现有 MyBatis/MyBatis-Plus Mapper/XML 写法，不为本接口新增 JDBC Template 写法。 - 保持现有接口路径、入参、出参和打卡率口径不变。 - 优化打卡统计分页查询，避免不必要的大范围扫描。 - 补充必要索引建议和执行计划验收要求。 ## Non-goals - 不重构前端调用链或删除废弃接口。 - 不调整 `getFunUserData`，该接口性能优化另行处理。 - 不改变打卡率、报名人数、打卡次数的业务含义。 - 不引入缓存、汇总表或异步统计链路。 ## Capabilities ### New Capabilities - `learn-activity-clock-data-performance`: 约束学习活动打卡统计接口在大活动下的汇总和分页查询性能。 ### Modified Capabilities - 无。 ## Impact 影响 `opp-learn` 的 `FunActivityController#getClockData`、`IFunActivityDataService` / `FunActivityDataMapper` 聚合查询，以及 `fun_clock_info`、`fun_activity_data`、`fun_activity_calendar` 相关索引评估。`opp-admin-bff` 和 `opp-api` 的 Feign/API 合约保持不变。验证需覆盖 TEAM、COMMUNITY、CLOCK 三类活动，并确认大活动下不再触发全量明细装载。 ## Success Criteria - `getClockData` 不再执行无分页的明细 `list()` 查询来计算汇总值。 - `EXPLAIN` 显示核心聚合查询命中以 `activity_id` 起手的合适索引。 - 典型大活动下接口不再触发 FullGC，P95 响应耗时明显下降。 - 返回字段与现有接口语义保持一致。"
+                  - generic [ref=e191]:
+                    - generic [ref=e192]:
+                      - generic [ref=e193]: 预览
+                      - button "全屏预览" [ref=e194] [cursor=pointer]:
+                        - img [ref=e196]
+                    - article [ref=e198]:
+                      - heading "Why" [level=2] [ref=e199]
+                      - paragraph [ref=e200]:
+                        - text: 后台学习数据接口
+                        - code [ref=e201]: /api/v2/activityInfo/getClockData
+                        - text: 在大活动下会把
+                        - code [ref=e202]: fun_clock_info
+                        - text: 、
+                        - code [ref=e203]: fun_activity_data
+                        - text: 、
+                        - code [ref=e204]: fun_activity_calendar
+                        - text: 明细全量加载到 JVM，只为计算报名数、打卡数和打卡率，已引发
+                        - code [ref=e205]: opp-learn
+                        - text: 严重 FullGC 风险。该接口仍被管理后台调用，即使标记为废弃，也需要先做低风险性能修复。
+                      - heading "What Changes" [level=2] [ref=e206]
+                      - list [ref=e207]:
+                        - listitem [ref=e208]:
+                          - text: 将
+                          - code [ref=e209]: getClockData
+                          - text: 汇总计算从全量
+                          - code [ref=e210]: list()
+                          - text: 改为数据库侧
+                          - code [ref=e211]: count
+                          - text: / 聚合查询。
+                        - listitem [ref=e212]:
+                          - text: 聚合和分页 SQL 使用
+                          - code [ref=e213]: opp-learn
+                          - text: 现有 MyBatis/MyBatis-Plus Mapper/XML 写法，不为本接口新增 JDBC Template 写法。
+                        - listitem [ref=e214]: 保持现有接口路径、入参、出参和打卡率口径不变。
+                        - listitem [ref=e215]: 优化打卡统计分页查询，避免不必要的大范围扫描。
+                        - listitem [ref=e216]: 补充必要索引建议和执行计划验收要求。
+                      - heading "Non-goals" [level=2] [ref=e217]
+                      - list [ref=e218]:
+                        - listitem [ref=e219]: 不重构前端调用链或删除废弃接口。
+                        - listitem [ref=e220]:
+                          - text: 不调整
+                          - code [ref=e221]: getFunUserData
+                          - text: ，该接口性能优化另行处理。
+                        - listitem [ref=e222]: 不改变打卡率、报名人数、打卡次数的业务含义。
+                        - listitem [ref=e223]: 不引入缓存、汇总表或异步统计链路。
+                      - heading "Capabilities" [level=2] [ref=e224]
+                      - heading "New Capabilities" [level=3] [ref=e225]
+                      - list [ref=e226]:
+                        - listitem [ref=e227]:
+                          - code [ref=e228]: learn-activity-clock-data-performance
+                          - text: ": 约束学习活动打卡统计接口在大活动下的汇总和分页查询性能。"
+                      - heading "Modified Capabilities" [level=3] [ref=e229]
+                      - list [ref=e230]:
+                        - listitem [ref=e231]: 无。
+                      - heading "Impact" [level=2] [ref=e232]
+                      - paragraph [ref=e233]:
+                        - text: 影响
+                        - code [ref=e234]: opp-learn
+                        - text: 的
+                        - code [ref=e235]: FunActivityController#getClockData
+                        - text: 、
+                        - code [ref=e236]: IFunActivityDataService
+                        - text: /
+                        - code [ref=e237]: FunActivityDataMapper
+                        - text: 聚合查询，以及
+                        - code [ref=e238]: fun_clock_info
+                        - text: 、
+                        - code [ref=e239]: fun_activity_data
+                        - text: 、
+                        - code [ref=e240]: fun_activity_calendar
+                        - text: 相关索引评估。
+                        - code [ref=e241]: opp-admin-bff
+                        - text: 和
+                        - code [ref=e242]: opp-api
+                        - text: 的 Feign/API 合约保持不变。验证需覆盖 TEAM、COMMUNITY、CLOCK 三类活动，并确认大活动下不再触发全量明细装载。
+                      - heading "Success Criteria" [level=2] [ref=e243]
+                      - list [ref=e244]:
+                        - listitem [ref=e245]:
+                          - code [ref=e246]: getClockData
+                          - text: 不再执行无分页的明细
+                          - code [ref=e247]: list()
+                          - text: 查询来计算汇总值。
+                        - listitem [ref=e248]:
+                          - code [ref=e249]: EXPLAIN
+                          - text: 显示核心聚合查询命中以
+                          - code [ref=e250]: activity_id
+                          - text: 起手的合适索引。
+                        - listitem [ref=e251]: 典型大活动下接口不再触发 FullGC，P95 响应耗时明显下降。
+                        - listitem [ref=e252]: 返回字段与现有接口语义保持一致。
+        - complementary [ref=e253]:
+          - generic [ref=e254]:
+            - strong [ref=e255]: 产物
+            - button "刷新" [ref=e256] [cursor=pointer]:
+              - img [ref=e258]
+              - generic [ref=e260]: 刷新
+          - generic [ref=e264]:
+            - generic [ref=e265]:
+              - strong [ref=e266]: PRD
+              - button "PRD 分析文档 未生成 未生成" [ref=e267] [cursor=pointer]:
+                - img [ref=e269]
+                - generic [ref=e271]:
+                  - generic [ref=e272]: PRD 分析文档
+                  - generic [ref=e273]: 未生成
+                - generic [ref=e343]: 未生成
+            - generic [ref=e274]:
+              - strong [ref=e275]: 技术方案
+              - button "技术方案评审文档 未生成 未生成" [ref=e276] [cursor=pointer]:
+                - img [ref=e278]
+                - generic [ref=e280]:
+                  - generic [ref=e281]: 技术方案评审文档
+                  - generic [ref=e282]: 未生成
+                - generic [ref=e345]: 未生成
+            - generic [ref=e283]:
+              - strong [ref=e284]: 实施验证
+              - button "OpenSpec Proposal openspec/changes/req-171697/proposal.md 已生成" [ref=e285] [cursor=pointer]:
+                - img [ref=e287]
+                - generic [ref=e289]:
+                  - generic [ref=e290]: OpenSpec Proposal
+                  - generic [ref=e291]: openspec/changes/req-171697/proposal.md
+                - generic [ref=e347]: 已生成
+              - button "OpenSpec Design openspec/changes/req-171697/design.md 已生成" [ref=e292] [cursor=pointer]:
+                - img [ref=e294]
+                - generic [ref=e296]:
+                  - generic [ref=e297]: OpenSpec Design
+                  - generic [ref=e298]: openspec/changes/req-171697/design.md
+                - generic [ref=e349]: 已生成
+              - button "OpenSpec Tasks openspec/changes/req-171697/tasks.md 已生成" [ref=e299] [cursor=pointer]:
+                - img [ref=e301]
+                - generic [ref=e303]:
+                  - generic [ref=e304]: OpenSpec Tasks
+                  - generic [ref=e305]: openspec/changes/req-171697/tasks.md
+                - generic [ref=e351]: 已生成
+              - button "OpenSpec learn-activity-clock-data-performance openspec/changes/req-171697/specs/learn-activity-clock-data-performance/spec.md 已生成" [ref=e306] [cursor=pointer]:
+                - img [ref=e308]
+                - generic [ref=e310]:
+                  - generic [ref=e311]: OpenSpec learn-activity-clock-data-performance
+                  - generic [ref=e312]: openspec/changes/req-171697/specs/learn-activity-clock-data-performance/spec.md
+                - generic [ref=e353]: 已生成
+          - generic [ref=e313]:
+            - strong [ref=e314]: 评审问题
+            - generic [ref=e315]:
+              - img [ref=e317]
+              - paragraph [ref=e334]: 暂无问题

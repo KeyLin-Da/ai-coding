@@ -1,0 +1,190 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - paragraph [ref=e6]: OpenSpec Delivery Console
+      - heading "AI 需求交付控制台" [level=1] [ref=e7]
+    - button "刷新" [ref=e8] [cursor=pointer]:
+      - img [ref=e10]
+      - generic [ref=e12]: 刷新
+  - main [ref=e13]:
+    - generic [ref=e14]:
+      - generic [ref=e15]:
+        - generic [ref=e16]:
+          - strong [ref=e17]: 需求工作流
+          - paragraph [ref=e18]: 按需求号聚合 PRD、技术方案、OpenSpec、单测和代码评审。
+        - button "创建/导入" [ref=e19] [cursor=pointer]:
+          - img [ref=e21]
+          - generic [ref=e23]: 创建/导入
+      - generic [ref=e25]:
+        - table [ref=e27]:
+          - rowgroup [ref=e36]:
+            - row "需求号 标题 分支 涉及工程 阶段 最近运行 操作" [ref=e37]:
+              - columnheader "需求号" [ref=e38]:
+                - generic [ref=e39]: 需求号
+              - columnheader "标题" [ref=e40]:
+                - generic [ref=e41]: 标题
+              - columnheader "分支" [ref=e42]:
+                - generic [ref=e43]: 分支
+              - columnheader "涉及工程" [ref=e44]:
+                - generic [ref=e45]: 涉及工程
+              - columnheader "阶段" [ref=e46]:
+                - generic [ref=e47]: 阶段
+              - columnheader "最近运行" [ref=e48]:
+                - generic [ref=e49]: 最近运行
+              - columnheader "操作" [ref=e50]:
+                - generic [ref=e51]: 操作
+        - table [ref=e56]:
+          - rowgroup [ref=e65]:
+            - row "171697 【opp-gateway】/admin/api/v2/activityInfo/getClockData、/admin/api/v2/activityInfo/getFunUserData对应功能导致opp-learn严重FGC优化 bugfix/opp#171697 未配置 实施验证 REFRESH_ARTIFACTS 查看 工程" [ref=e66]:
+              - cell "171697" [ref=e67]:
+                - generic [ref=e68]: "171697"
+              - cell "【opp-gateway】/admin/api/v2/activityInfo/getClockData、/admin/api/v2/activityInfo/getFunUserData对应功能导致opp-learn严重FGC优化" [ref=e69]:
+                - generic [ref=e70]: 【opp-gateway】/admin/api/v2/activityInfo/getClockData、/admin/api/v2/activityInfo/getFunUserData对应功能导致opp-learn严重FGC优化
+              - cell "bugfix/opp#171697" [ref=e71]:
+                - generic [ref=e72]: bugfix/opp#171697
+              - cell "未配置" [ref=e73]:
+                - generic [ref=e74]: 未配置
+              - cell "实施验证" [ref=e75]:
+                - generic [ref=e201]: 实施验证
+              - cell "REFRESH_ARTIFACTS" [ref=e77]:
+                - generic [ref=e78]: REFRESH_ARTIFACTS
+              - cell "查看 工程" [ref=e79]:
+                - generic [ref=e80]:
+                  - button "查看" [ref=e81] [cursor=pointer]:
+                    - img [ref=e83]
+                    - generic [ref=e85]: 查看
+                  - button "工程" [ref=e86] [cursor=pointer]:
+                    - img [ref=e88]
+                    - generic [ref=e91]: 工程
+            - row "171635 【无需求】/api/v2/teamDetail/quit接口优化 bugfix/opp#171635 未配置 实施验证 暂无 查看 工程" [ref=e92]:
+              - cell "171635" [ref=e93]:
+                - generic [ref=e94]: "171635"
+              - cell "【无需求】/api/v2/teamDetail/quit接口优化" [ref=e95]:
+                - generic [ref=e96]: 【无需求】/api/v2/teamDetail/quit接口优化
+              - cell "bugfix/opp#171635" [ref=e97]:
+                - generic [ref=e98]: bugfix/opp#171635
+              - cell "未配置" [ref=e99]:
+                - generic [ref=e100]: 未配置
+              - cell "实施验证" [ref=e101]:
+                - generic [ref=e203]: 实施验证
+              - cell "暂无" [ref=e103]:
+                - generic [ref=e104]: 暂无
+              - cell "查看 工程" [ref=e105]:
+                - generic [ref=e106]:
+                  - button "查看" [ref=e107] [cursor=pointer]:
+                    - img [ref=e109]
+                    - generic [ref=e111]: 查看
+                  - button "工程" [ref=e112] [cursor=pointer]:
+                    - img [ref=e114]
+                    - generic [ref=e117]: 工程
+            - row "171634 【无需求】api/v2/coursePlan/getPlanCoursePage接口优化 bugfix/opp-171634 未配置 PRD REFRESH_ARTIFACTS 查看 工程" [ref=e118]:
+              - cell "171634" [ref=e119]:
+                - generic [ref=e120]: "171634"
+              - cell "【无需求】api/v2/coursePlan/getPlanCoursePage接口优化" [ref=e121]:
+                - generic [ref=e122]: 【无需求】api/v2/coursePlan/getPlanCoursePage接口优化
+              - cell "bugfix/opp-171634" [ref=e123]:
+                - generic [ref=e124]: bugfix/opp-171634
+              - cell "未配置" [ref=e125]:
+                - generic [ref=e126]: 未配置
+              - cell "PRD" [ref=e127]:
+                - generic [ref=e205]: PRD
+              - cell "REFRESH_ARTIFACTS" [ref=e129]:
+                - generic [ref=e130]: REFRESH_ARTIFACTS
+              - cell "查看 工程" [ref=e131]:
+                - generic [ref=e132]:
+                  - button "查看" [ref=e133] [cursor=pointer]:
+                    - img [ref=e135]
+                    - generic [ref=e137]: 查看
+                  - button "工程" [ref=e138] [cursor=pointer]:
+                    - img [ref=e140]
+                    - generic [ref=e143]: 工程
+            - row "170094 【opp】【装修】新平衡生活+渠道新增“页面导航”组件需求 feature/opp#170094 未配置 技术方案 OPENSPEC_STATUS 查看 工程" [ref=e144]:
+              - cell "170094" [ref=e145]:
+                - generic [ref=e146]: "170094"
+              - cell "【opp】【装修】新平衡生活+渠道新增“页面导航”组件需求" [ref=e147]:
+                - generic [ref=e148]: 【opp】【装修】新平衡生活+渠道新增“页面导航”组件需求
+              - cell "feature/opp#170094" [ref=e149]:
+                - generic [ref=e150]: feature/opp#170094
+              - cell "未配置" [ref=e151]:
+                - generic [ref=e152]: 未配置
+              - cell "技术方案" [ref=e153]:
+                - generic [ref=e207]: 技术方案
+              - cell "OPENSPEC_STATUS" [ref=e155]:
+                - generic [ref=e156]: OPENSPEC_STATUS
+              - cell "查看 工程" [ref=e157]:
+                - generic [ref=e158]:
+                  - button "查看" [ref=e159] [cursor=pointer]:
+                    - img [ref=e161]
+                    - generic [ref=e163]: 查看
+                  - button "工程" [ref=e164] [cursor=pointer]:
+                    - img [ref=e166]
+                    - generic [ref=e169]: 工程
+            - row "172014 【opp】【装修】新增定位菜单组件 feature/opp-172014 未配置 技术方案 OPENSPEC_VERIFY 查看 工程" [ref=e170]:
+              - cell "172014" [ref=e171]:
+                - generic [ref=e172]: "172014"
+              - cell "【opp】【装修】新增定位菜单组件" [ref=e173]:
+                - generic [ref=e174]: 【opp】【装修】新增定位菜单组件
+              - cell "feature/opp-172014" [ref=e175]:
+                - generic [ref=e176]: feature/opp-172014
+              - cell "未配置" [ref=e177]:
+                - generic [ref=e178]: 未配置
+              - cell "技术方案" [ref=e179]:
+                - generic [ref=e209]: 技术方案
+              - cell "OPENSPEC_VERIFY" [ref=e181]:
+                - generic [ref=e182]: OPENSPEC_VERIFY
+              - cell "查看 工程" [ref=e183]:
+                - generic [ref=e184]:
+                  - button "查看" [ref=e185] [cursor=pointer]:
+                    - img [ref=e187]
+                    - generic [ref=e189]: 查看
+                  - button "工程" [ref=e190] [cursor=pointer]:
+                    - img [ref=e192]
+                    - generic [ref=e195]: 工程
+    - dialog "编辑涉及工程" [ref=e211]:
+      - generic [active] [ref=e212]:
+        - generic [ref=e213]:
+          - heading "编辑涉及工程" [level=2] [ref=e214]
+          - button "Close this dialog" [ref=e215] [cursor=pointer]:
+            - img [ref=e217]
+        - generic [ref=e220]:
+          - generic [ref=e221]:
+            - generic [ref=e222]: "*需求号"
+            - textbox "*需求号" [disabled] [ref=e226]:
+              - /placeholder: 例如 172014
+              - text: "171697"
+          - generic [ref=e227]:
+            - generic [ref=e228]: "*标题"
+            - textbox "*标题" [disabled] [ref=e232]:
+              - /placeholder: 需求标题
+              - text: 【opp-gateway】/admin/api/v2/activityInfo/getClockData、/admin/api/v2/activityInfo/getFunUserData对应功能导致opp-learn严重FGC优化
+          - generic [ref=e233]:
+            - generic [ref=e234]: "*需求类型"
+            - radiogroup "*需求类型" [ref=e236]:
+              - generic [ref=e237]:
+                - radio "需求" [disabled] [ref=e238]
+                - generic [ref=e239]: 需求
+              - generic [ref=e240]:
+                - radio "缺陷" [checked] [disabled] [ref=e241]
+                - generic [ref=e242]: 缺陷
+          - generic [ref=e243]:
+            - generic [ref=e244]: "*分支名"
+            - textbox "*分支名" [disabled] [ref=e248]:
+              - /placeholder: bugfix/opp#171697
+              - text: bugfix/opp#171697
+          - generic [ref=e249]:
+            - generic [ref=e250]: 涉及工程
+            - generic [ref=e252]:
+              - generic [ref=e254]:
+                - generic [ref=e255]:
+                  - combobox "涉及工程" [ref=e257]
+                  - generic [ref=e258]: 输入或选择工程，例如 opp-gateway
+                - img [ref=e261] [cursor=pointer]
+              - button "刷新快照" [ref=e263] [cursor=pointer]:
+                - img [ref=e265]
+                - generic [ref=e267]: 刷新快照
+        - generic [ref=e268]:
+          - button "取消" [ref=e269] [cursor=pointer]:
+            - generic [ref=e270]: 取消
+          - button "保存" [ref=e271] [cursor=pointer]:
+            - img [ref=e273]
+            - generic [ref=e275]: 保存

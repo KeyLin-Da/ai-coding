@@ -40,7 +40,7 @@
       <ul class="info-list">
         <li>每个路径必须是绝对路径（以 `/` 开头）</li>
         <li>支持配置多个路径，Agent 会按顺序在这些路径下查找工程代码</li>
-        <li>配置保存在本地 `.ai-delivery/settings.json` 文件中</li>
+        <li>配置保存在本地 `docs/.ai-delivery-console/settings.json` 文件中</li>
       </ul>
     </el-card>
   </section>

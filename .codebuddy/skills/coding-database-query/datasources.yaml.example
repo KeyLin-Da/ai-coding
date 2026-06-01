@@ -1,0 +1,55 @@
+# 数据源配置文件
+# 支持多种数据库类型：mysql, postgresql, sqlite, oracle, mssql
+
+datasources:
+  # MySQL 示例 - 用户中心数据库
+  opp_user:
+    db_type: mysql
+    url: jdbc:mysql://localhost:3306/opp_user?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+    username: readonly
+    password: readonly123
+    description: "用户中心数据库"
+  
+  # MySQL 示例 - 素材管理数据库
+  opp_material:
+    db_type: mysql
+    url: jdbc:mysql://localhost:3306/opp_material?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+    username: readonly
+    password: readonly123
+    description: "素材管理数据库"
+  
+  # PostgreSQL 示例 - 分析数据库
+  analytics:
+    db_type: postgresql
+    url: jdbc:postgresql://localhost:5432/analytics?ssl=false&connectTimeout=10
+    username: analyst
+    password: pass123
+    description: "数据分析数据库"
+  
+  # SQLite 示例 - 本地测试数据库
+  local_db:
+    db_type: sqlite
+    db_path: ./data/local.db
+    description: "本地测试数据库"
+  
+  # Oracle 示例
+  oracle_prod:
+    db_type: oracle
+    url: jdbc:oracle:thin:@localhost:1521:orcl
+    username: readonly
+    password: oracle_pass
+    description: "Oracle 生产数据库"
+  
+  # SQL Server 示例
+  mssql_test:
+    db_type: mssql
+    url: jdbc:sqlserver://localhost:1433;databaseName=testdb;encrypt=false
+    username: sa
+    password: mssql_pass
+    description: "SQL Server 测试数据库"
+
+# 使用说明：
+# 1. 复制此文件为 datasources.yaml（不要提交到版本控制）
+# 2. 根据实际情况修改连接信息
+# 3. 敏感信息建议使用环境变量：password: ${DB_PASSWORD}
+# 4. 使用时指定数据源名称即可，例如：--datasource opp_user

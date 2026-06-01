@@ -4,3 +4,4 @@
 # 排除的工程目录
 openspec/*
 !openspec/config.yaml
+docs/*
