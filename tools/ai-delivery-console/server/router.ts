@@ -7,13 +7,13 @@ import { normalizePrdClarification, WorkflowRepository } from './services/workfl
 import { scanRequirementArtifacts } from './services/workspace-scanner';
 import { WorkflowLock } from './services/workflow-lock';
 import { buildActionCommand, executeAction, validateActionInput } from './services/action-adapters';
-import { readRunEvents, appendStageCommandLog } from './services/run-log';
+import { appendStageCommandLog, readRunEvents, readRunEventsWithTranscript, readTerminalTranscriptChunk, readTerminalTranscriptSize } from './services/run-log';
 import { readArtifact, saveArtifact } from './services/markdown-service';
 import { applyReview, refreshCodeReviewIssues, returnToImplementation } from './services/review-service';
 import { cancelAgentRun, listAgentProviders, refreshTerminalRunStatuses } from './services/agent-providers';
 import { normalizeOpenSpecChangeName, readOpenSpecSummary, updateOpenSpecTaskStatus } from './services/openspec-summary';
 import { readGitChanges } from './services/git-changes';
-import { readProjectHistory, saveProjectHistory, listProjectsFromConfiguredPaths } from './services/project-history';
+import { readProjectHistory, listProjectsFromConfiguredPaths } from './services/project-history';
 import { loadSettings, saveSettings, validateSettings } from './services/project-settings';
 import {
   assertAllowedPrdSourceFile,
@@ -546,7 +546,9 @@ export function createRouter(workspaceRoot: string) {
       const runMatch = match(pathname, /^\/api\/ai-delivery\/runs\/([^/]+)\/events$/);
       if (request.method === 'GET' && runMatch) {
         const requirementId = url.searchParams.get('requirementId') || '';
-        send(response, 200, { data: await readRunEvents(workspaceRoot, requirementId, runMatch[1]) });
+        const workflow = await repository.load(requirementId);
+        const run = workflow?.runs.find((item) => item.id === runMatch[1]);
+        send(response, 200, { data: await readRunEventsWithTranscript(workspaceRoot, requirementId, runMatch[1], run?.terminalTranscriptPath) });
         return;
       }
 
@@ -559,20 +561,38 @@ export function createRouter(workspaceRoot: string) {
           Connection: 'keep-alive',
           'Access-Control-Allow-Origin': '*'
         });
-        let sent = 0;
+        const tailOnly = url.searchParams.get('tail') === '1';
+        let sent = tailOnly ? (await readRunEvents(workspaceRoot, requirementId, runStreamMatch[1])).length : 0;
+        const initialWorkflow = await repository.load(requirementId);
+        const initialRun = initialWorkflow?.runs.find((item) => item.id === runStreamMatch[1]);
+        let transcriptOffset = tailOnly ? await readTerminalTranscriptSize(workspaceRoot, initialRun?.terminalTranscriptPath) : 0;
         let interval: NodeJS.Timeout | undefined;
+        let closed = false;
         const push = async () => {
+          if (closed) {
+            return;
+          }
+          let workflow = await repository.load(requirementId);
+          if (workflow) {
+            const refreshed = await refreshTerminalRunStatuses(workspaceRoot, workflow);
+            workflow = refreshed.changed ? await repository.save(refreshed.workflow) : refreshed.workflow;
+          }
+          const run = workflow?.runs.find((item) => item.id === runStreamMatch[1]);
           const events = await readRunEvents(workspaceRoot, requirementId, runStreamMatch[1]);
           for (const event of events.slice(sent)) {
             response.write(`data: ${JSON.stringify(event)}\n\n`);
           }
           sent = events.length;
-          const workflow = await repository.load(requirementId);
-          const run = workflow?.runs.find((item) => item.id === runStreamMatch[1]);
-          if (run && ['SUCCEEDED', 'FAILED', 'CANCELLED', 'WAITING_FOR_AGENT', 'TERMINAL_OPENED'].includes(run.status)) {
+          const transcript = await readTerminalTranscriptChunk(workspaceRoot, run?.terminalTranscriptPath, transcriptOffset);
+          transcriptOffset = transcript.nextOffset;
+          if (transcript.event) {
+            response.write(`data: ${JSON.stringify(transcript.event)}\n\n`);
+          }
+          if (run && ['SUCCEEDED', 'FAILED', 'CANCELLED', 'WAITING_FOR_AGENT'].includes(run.status)) {
             if (interval) {
               clearInterval(interval);
             }
+            closed = true;
             response.end();
           }
         };
@@ -581,7 +601,10 @@ export function createRouter(workspaceRoot: string) {
             response.write(`event: error\ndata: ${JSON.stringify({ message: error.message })}\n\n`);
           });
         }, 500);
-        request.on('close', () => clearInterval(interval));
+        request.on('close', () => {
+          closed = true;
+          clearInterval(interval);
+        });
         await push();
         return;
       }

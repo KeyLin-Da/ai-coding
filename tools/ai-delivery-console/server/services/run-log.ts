@@ -1,7 +1,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { RunEvent, WorkflowStage } from '../../shared/workflow';
-import { createId, normalizeRequirementId } from './workspace';
+import { assertInsideWorkspace, createId, normalizeRequirementId } from './workspace';
+
+const TERMINAL_TRANSCRIPT_MAX_BYTES = 256 * 1024;
 
 export function createRunId(): string {
   return createId('run');
@@ -72,4 +74,88 @@ export async function readRunEvents(workspaceRoot: string, requirementId: string
     }
     throw error;
   }
+}
+
+export async function readTerminalTranscriptSize(workspaceRoot: string, transcriptPath?: string): Promise<number> {
+  if (!transcriptPath) {
+    return 0;
+  }
+  try {
+    const stat = await fs.stat(assertInsideWorkspace(workspaceRoot, transcriptPath));
+    return stat.isFile() ? stat.size : 0;
+  } catch (error: any) {
+    if (error.code === 'ENOENT') {
+      return 0;
+    }
+    throw error;
+  }
+}
+
+export async function readTerminalTranscriptChunk(
+  workspaceRoot: string,
+  transcriptPath: string | undefined,
+  offset = 0,
+  maxBytes = TERMINAL_TRANSCRIPT_MAX_BYTES
+): Promise<{ event?: RunEvent; nextOffset: number }> {
+  if (!transcriptPath) {
+    return { nextOffset: offset };
+  }
+
+  try {
+    const absoluteTranscriptPath = assertInsideWorkspace(workspaceRoot, transcriptPath);
+    const stat = await fs.stat(absoluteTranscriptPath);
+    if (!stat.isFile()) {
+      return { nextOffset: offset };
+    }
+
+    const safeOffset = offset > stat.size ? 0 : Math.max(0, offset);
+    const availableBytes = stat.size - safeOffset;
+    if (availableBytes <= 0) {
+      return { nextOffset: stat.size };
+    }
+
+    const readStart = availableBytes > maxBytes ? stat.size - maxBytes : safeOffset;
+    const readLength = stat.size - readStart;
+    const buffer = Buffer.alloc(readLength);
+    const file = await fs.open(absoluteTranscriptPath, 'r');
+    try {
+      const result = await file.read(buffer, 0, readLength, readStart);
+      const text = buffer.subarray(0, result.bytesRead).toString('utf8');
+      const prefix = readStart > safeOffset ? `[AI Delivery] Transcript 过长，仅显示最新 ${maxBytes} bytes。\n` : '';
+      return {
+        nextOffset: stat.size,
+        event: {
+          time: stat.mtime.toISOString(),
+          type: 'STDOUT',
+          level: 'INFO',
+          message: '终端 transcript',
+          text: prefix + text,
+          data: {
+            transcriptPath,
+            offset: readStart,
+            bytesRead: result.bytesRead,
+            truncated: readStart > safeOffset
+          }
+        }
+      };
+    } finally {
+      await file.close();
+    }
+  } catch (error: any) {
+    if (error.code === 'ENOENT') {
+      return { nextOffset: offset };
+    }
+    throw error;
+  }
+}
+
+export async function readRunEventsWithTranscript(
+  workspaceRoot: string,
+  requirementId: string,
+  runId: string,
+  transcriptPath?: string
+): Promise<RunEvent[]> {
+  const events = await readRunEvents(workspaceRoot, requirementId, runId);
+  const transcript = await readTerminalTranscriptChunk(workspaceRoot, transcriptPath, 0);
+  return transcript.event ? [...events, transcript.event] : events;
 }

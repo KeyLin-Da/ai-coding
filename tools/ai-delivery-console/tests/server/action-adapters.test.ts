@@ -5,6 +5,9 @@ import { describe, expect, it } from 'vitest';
 import type { AgentProvider, RequirementWorkflow, RunRecord } from '../../shared/workflow';
 import { createEmptyStages } from '../../shared/workflow';
 import {
+  internalForTests
+} from '../../server/services/action-adapters';
+import {
   cancelAgentRun,
   createPromptEnvelope,
   createTerminalRunScript,
@@ -48,6 +51,23 @@ function runRecord(id: string): RunRecord {
 }
 
 describe('agent-providers', () => {
+  it('内置 CLI 执行时实时追加 stdout 和 stderr 事件', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-cli-'));
+    const events: Array<{ type: string; text?: string }> = [];
+
+    const result = await internalForTests.runCli(
+      root,
+      [process.execPath, '-e', 'console.log("cli-out"); console.error("cli-err");'],
+      async (event) => {
+        events.push(event);
+      }
+    );
+
+    expect(result.status).toBe('SUCCEEDED');
+    expect(events.some((event) => event.type === 'STDOUT' && event.text?.includes('cli-out'))).toBe(true);
+    expect(events.some((event) => event.type === 'STDERR' && event.text?.includes('cli-err'))).toBe(true);
+  });
+
   it('默认提供 codex Provider', async () => {
     const providers = await listAgentProviders();
     expect(providers.map((provider) => provider.id)).toEqual(expect.arrayContaining(['codex']));
@@ -204,7 +224,7 @@ describe('agent-providers', () => {
     expect(terminal.commandLine).not.toContain('background-agent');
     expect(script).toContain("EXECUTION_MODE='INTERACTIVE_TERMINAL'");
     expect(script).toContain("EXECUTION_MODE_LABEL='交互终端'");
-    expect(script).toContain('script -q -a "$TRANSCRIPT_FILE" zsh -lc "$COMMAND_PREVIEW"');
+    expect(script).toContain('script -q -a "$TRANSCRIPT_FILE" zsh -lc "setopt pipefail; $COMMAND_PREVIEW"');
   });
 
   it('CodeBuddy 终端命令将涉及工程追加为 add-dir', async () => {

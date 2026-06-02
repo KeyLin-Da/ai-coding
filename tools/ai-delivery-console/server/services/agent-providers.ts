@@ -25,10 +25,6 @@ function isCliAvailable(command: string): boolean {
   }
 }
 
-function getNodeMajorVersion(): number {
-  return parseInt(process.version.slice(1).split('.')[0] || '0', 10);
-}
-
 function getAgentSkillDir(agentId: string): string {
   const mapping: Record<string, string> = {
     codex: '.codex',
@@ -40,7 +36,6 @@ function getAgentSkillDir(agentId: string): string {
 }
 
 function defaultProviders(): AgentProvider[] {
-  const qwenNodeOk = getNodeMajorVersion() >= 20;
   return [
     {
       id: 'codex',
@@ -61,31 +56,31 @@ function defaultProviders(): AgentProvider[] {
       command: splitCommand(serverConfig.codebuddyCommand),
       interactiveCommand: splitCommand(serverConfig.codebuddyInteractiveCommand),
       available: isCliAvailable('codebuddy'),
-      supportsStreaming: false,
+      supportsStreaming: true,
       supportsInteractive: Boolean(serverConfig.codebuddyInteractiveCommand)
     },
-    {
-      id: 'qoder',
-      name: 'Qoder CLI CN',
-      description: '使用本机 qoderclicn CLI 执行技能 Prompt。',
-      inputMode: 'STDIN',
-      command: splitCommand(serverConfig.qoderCommand),
-      interactiveCommand: splitCommand(serverConfig.qoderInteractiveCommand),
-      available: isCliAvailable('qoderclicn'),
-      supportsStreaming: false,
-      supportsInteractive: Boolean(serverConfig.qoderInteractiveCommand)
-    },
-    {
-      id: 'qwen',
-      name: 'Qwen',
-      description: qwenNodeOk ? '使用本机 Qwen CLI 执行技能 Prompt。' : '需要 Node.js ≥ 20，当前版本不满足。',
-      inputMode: 'STDIN',
-      command: splitCommand(serverConfig.qwenCommand),
-      interactiveCommand: splitCommand(serverConfig.qwenInteractiveCommand),
-      available: qwenNodeOk && isCliAvailable('qwen'),
-      supportsStreaming: false,
-      supportsInteractive: qwenNodeOk && Boolean(serverConfig.qwenInteractiveCommand)
-    }
+//     {
+//       id: 'qoder',
+//       name: 'Qoder CLI CN',
+//       description: '使用本机 qoderclicn CLI 执行技能 Prompt。',
+//       inputMode: 'STDIN',
+//       command: splitCommand(serverConfig.qoderCommand),
+//       interactiveCommand: splitCommand(serverConfig.qoderInteractiveCommand),
+//       available: isCliAvailable('qoderclicn'),
+//       supportsStreaming: false,
+//       supportsInteractive: Boolean(serverConfig.qoderInteractiveCommand)
+//     },
+//     {
+//       id: 'qwen',
+//       name: 'Qwen',
+//       description: qwenNodeOk ? '使用本机 Qwen CLI 执行技能 Prompt。' : '需要 Node.js ≥ 20，当前版本不满足。',
+//       inputMode: 'STDIN',
+//       command: splitCommand(serverConfig.qwenCommand),
+//       interactiveCommand: splitCommand(serverConfig.qwenInteractiveCommand),
+//       available: qwenNodeOk && isCliAvailable('qwen'),
+//       supportsStreaming: false,
+//       supportsInteractive: qwenNodeOk && Boolean(serverConfig.qwenInteractiveCommand)
+//     }
   ];
 }
 
@@ -317,11 +312,11 @@ if [[ "$EXECUTION_MODE" == "INTERACTIVE_TERMINAL" ]]; then
   } | tee -a "$TRANSCRIPT_FILE"
 
   if command -v script >/dev/null 2>&1; then
-    script -q -a "$TRANSCRIPT_FILE" zsh -lc "$COMMAND_PREVIEW"
+    script -q -a "$TRANSCRIPT_FILE" zsh -lc "setopt pipefail; $COMMAND_PREVIEW"
     command_exit=$?
   else
     print "[AI Delivery] 未找到 script 命令，将直接运行交互命令，transcript 可能不完整。" | tee -a "$TRANSCRIPT_FILE"
-    zsh -lc "$COMMAND_PREVIEW"
+    zsh -lc "setopt pipefail; $COMMAND_PREVIEW"
     command_exit=$?
   fi
 

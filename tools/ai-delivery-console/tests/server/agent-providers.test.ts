@@ -56,6 +56,31 @@ describe('agent-providers', () => {
     expect(codex?.command).toEqual(['codex', 'exec', '-C', '{workspaceRoot}', '{projectParentAddDirArgs}', '-']);
     expect(codex?.interactiveCommand).toEqual(['codex', '-C', '{workspaceRoot}', '{projectParentAddDirArgs}', '--no-alt-screen', '{prompt}']);
     expect(codex?.supportsInteractive).toBe(true);
+    const codebuddy = providers.find((provider) => provider.id === 'codebuddy');
+    expect(codebuddy?.inputMode).toBe('STDIN');
+    expect(codebuddy?.command).toEqual([
+      'codebuddy',
+      '--add-dir',
+      '{workspaceRoot}',
+      '{projectParentAddDirArgs}',
+      '--allowedTools',
+      'Bash,Read,Write',
+      '--permission-mode',
+      'bypassPermissions',
+      '-p',
+      '-'
+    ]);
+    expect(codebuddy?.interactiveCommand).toEqual([
+      'codebuddy',
+      '--add-dir',
+      '{workspaceRoot}',
+      '{projectParentAddDirArgs}',
+      '--allowedTools',
+      'Bash,Read,Write',
+      '--permission-mode',
+      'bypassPermissions',
+      '{prompt}'
+    ]);
   });
 
   it('生成 Prompt Envelope 并包含技能调用文本', async () => {
@@ -133,6 +158,12 @@ describe('agent-providers', () => {
 
   it('交互终端命令按参数数组安全转义', () => {
     expect(interactiveTerminalCommandLine(['codex', '-C', '/workspace', "hello 'user'"])).toBe("'codex' '-C' '/workspace' 'hello '\\''user'\\'''");
+  });
+
+  it('交互终端命令不通过 pipe 占用 TUI stdin', () => {
+    expect(interactiveTerminalCommandLine(['codebuddy', '--permission-mode', 'bypassPermissions', 'prompt text'])).toBe(
+      "'codebuddy' '--permission-mode' 'bypassPermissions' 'prompt text'"
+    );
   });
 
   it('Codex 终端命令将工程父目录追加为 add-dir', async () => {
@@ -235,7 +266,35 @@ describe('agent-providers', () => {
     expect(terminal.commandLine).not.toContain('background-agent');
     expect(script).toContain("EXECUTION_MODE='INTERACTIVE_TERMINAL'");
     expect(script).toContain("EXECUTION_MODE_LABEL='交互终端'");
-    expect(script).toContain('script -q -a "$TRANSCRIPT_FILE" zsh -lc "$COMMAND_PREVIEW"');
+    expect(script).toContain('script -q -a "$TRANSCRIPT_FILE" zsh -lc "setopt pipefail; $COMMAND_PREVIEW"');
+  });
+
+  it('CodeBuddy 交互终端脚本通过 prompt 参数进入 TUI', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-terminal-'));
+    const projectParent = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-projects-'));
+    const provider: AgentProvider = {
+      id: 'codebuddy',
+      name: 'CodeBuddy',
+      inputMode: 'STDIN',
+      command: ['codebuddy', '--add-dir', '{workspaceRoot}', '{projectParentAddDirArgs}', '--allowedTools', 'Bash,Read,Write', '--permission-mode', 'bypassPermissions', '-p', '-'],
+      interactiveCommand: ['codebuddy', '--add-dir', '{workspaceRoot}', '{projectParentAddDirArgs}', '--allowedTools', 'Bash,Read,Write', '--permission-mode', 'bypassPermissions', '{prompt}'],
+      available: true,
+      supportsStreaming: true,
+      supportsInteractive: true
+    };
+    const run = {
+      ...runRecord('run-codebuddy-interactive-tui'),
+      agentId: 'codebuddy',
+      executionMode: 'INTERACTIVE_TERMINAL' as const
+    };
+
+    const terminal = await createTerminalRunScript(root, workflow(), run, provider, '/coding-prd-analyzer id=172014', [projectParent]);
+
+    expect(terminal.commandLine).toContain(`'codebuddy' '--add-dir' '${root}' '--add-dir' '${projectParent}'`);
+    expect(terminal.commandLine).toContain("'--permission-mode' 'bypassPermissions'");
+    expect(terminal.commandLine).toContain('AI Delivery Agent Task');
+    expect(terminal.commandLine).not.toContain("'-p' '-'");
+    expect(terminal.commandLine).not.toContain('cat ');
   });
 
   it('刷新本地终端状态文件并更新运行记录', async () => {

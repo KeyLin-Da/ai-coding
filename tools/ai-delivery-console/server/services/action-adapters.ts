@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import type { ActionInput, ExecutionMode, RunRecord, RunStatus } from '../../shared/workflow';
+import type { ActionInput, ExecutionMode, RunEvent, RunRecord, RunStatus } from '../../shared/workflow';
 import { implementationStepForAction, stageForAction } from '../../shared/workflow';
 import type { RequirementWorkflow } from '../../shared/workflow';
 import { createRunId, appendRunEvent } from './run-log';
@@ -154,7 +154,11 @@ function isAgentAction(actionType: ActionInput['actionType']): boolean {
   return ['PRD_ANALYZE', 'DESIGN_GENERATE', 'OPENSPEC_FF', 'OPENSPEC_APPLY', 'OPENSPEC_VERIFY', 'OPENSPEC_ARCHIVE', 'JUNIT_GENERATE', 'CODE_REVIEW'].includes(actionType);
 }
 
-function runCli(workspaceRoot: string, args: string[]): Promise<{ status: RunStatus; output: string; error?: string }> {
+function runCli(
+  workspaceRoot: string,
+  args: string[],
+  onEvent: (event: Omit<RunEvent, 'time'>) => Promise<void> = async () => undefined
+): Promise<{ status: RunStatus; output: string; error?: string }> {
   return new Promise((resolve) => {
     const child = spawn(args[0], args.slice(1), {
       cwd: workspaceRoot,
@@ -163,16 +167,36 @@ function runCli(workspaceRoot: string, args: string[]): Promise<{ status: RunSta
     });
     let stdout = '';
     let stderr = '';
+    const pendingEvents: Promise<void>[] = [];
+    const emit = (event: Omit<RunEvent, 'time'>) => {
+      pendingEvents.push(onEvent(event).catch(() => undefined));
+    };
     child.stdout.on('data', (chunk) => {
-      stdout += String(chunk);
+      const text = String(chunk);
+      stdout += text;
+      emit({
+        type: 'STDOUT',
+        level: 'INFO',
+        message: text.trimEnd() || 'stdout',
+        text
+      });
     });
     child.stderr.on('data', (chunk) => {
-      stderr += String(chunk);
+      const text = String(chunk);
+      stderr += text;
+      emit({
+        type: 'STDERR',
+        level: 'WARN',
+        message: text.trimEnd() || 'stderr',
+        text
+      });
     });
-    child.on('error', (error) => {
+    child.on('error', async (error) => {
+      await Promise.allSettled(pendingEvents);
       resolve({ status: 'FAILED', output: stdout, error: error.message });
     });
-    child.on('close', (code) => {
+    child.on('close', async (code) => {
+      await Promise.allSettled(pendingEvents);
       resolve({
         status: code === 0 ? 'SUCCEEDED' : 'FAILED',
         output: stdout,
@@ -269,7 +293,7 @@ export async function executeAction(
       level: 'INFO',
       message: `执行命令: ${args.join(' ')}`
     });
-    const result = await runCli(workspaceRoot, args);
+    const result = await runCli(workspaceRoot, args, (event) => appendRunEvent(workspaceRoot, workflow.requirementId, runId, event));
     run.status = result.status;
     run.error = result.error;
     run.finishedAt = new Date().toISOString();
@@ -316,5 +340,6 @@ export async function executeAction(
 
 export const internalForTests = {
   buildSkillCommand,
-  isAgentAction
+  isAgentAction,
+  runCli
 };

@@ -1,7 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentProvider, ArtifactRef, OpenSpecSummary, RequirementWorkflow } from '../../shared/workflow';
+import type { AgentProvider, ArtifactRef, OpenSpecSummary, RequirementWorkflow, RunRecord } from '../../shared/workflow';
 import { createEmptyImplementationSteps, createEmptyStages } from '../../shared/workflow';
 import RequirementDetail from '../../src/views/RequirementDetail.vue';
 import { apiClient } from '@/api/client';
@@ -22,6 +22,7 @@ vi.mock('@/api/client', () => ({
     getRequirement: vi.fn(),
     getOpenSpecSummary: vi.fn(),
     runAction: vi.fn(),
+    getRunEvents: vi.fn(),
     previewActionCommand: vi.fn()
   }
 }));
@@ -61,6 +62,21 @@ const emptyOpenSpecSummary: OpenSpecSummary = {
     groups: []
   }
 };
+
+let eventSourceUrls: string[] = [];
+
+class MockEventSource {
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  onerror: (() => void) | null = null;
+
+  constructor(public readonly url: string) {
+    eventSourceUrls.push(url);
+  }
+
+  close() {
+    return undefined;
+  }
+}
 
 function artifact(stage: ArtifactRef['stage'], path: string): ArtifactRef {
   return {
@@ -149,7 +165,18 @@ async function mountDetail(current: RequirementWorkflow) {
   vi.mocked(apiClient.listAgents).mockResolvedValue(agents);
   vi.mocked(apiClient.listRequirements).mockResolvedValue([current]);
   vi.mocked(apiClient.getOpenSpecSummary).mockResolvedValue(emptyOpenSpecSummary);
-  vi.mocked(apiClient.runAction).mockResolvedValue({ workflow: current });
+  vi.mocked(apiClient.getRunEvents).mockResolvedValue([]);
+  const run: RunRecord = {
+    id: 'run-auto-log',
+    requirementId: current.requirementId,
+    actionType: 'OPENSPEC_NEW_CHANGE',
+    stage: 'IMPLEMENTATION',
+    implementationStep: 'START_CHANGE',
+    status: 'RUNNING',
+    startedAt: new Date().toISOString(),
+    params: {}
+  };
+  vi.mocked(apiClient.runAction).mockResolvedValue({ run, workflow: current });
 
   const wrapper = mount(RequirementDetail, {
     global: {
@@ -193,6 +220,8 @@ function openSpecStartButton(wrapper: ReturnType<typeof mount>) {
 describe('RequirementDetail OpenSpec 工件生成', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    eventSourceUrls = [];
+    vi.stubGlobal('EventSource', MockEventSource);
     Object.defineProperty(navigator, 'clipboard', {
       value: {
         writeText: vi.fn().mockResolvedValue(undefined)
@@ -270,6 +299,8 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
         })
       })
     );
+    expect(apiClient.getRunEvents).toHaveBeenCalledWith('172014', 'run-auto-log');
+    expect(eventSourceUrls.some((url) => url.includes('/api/ai-delivery/runs/run-auto-log/stream'))).toBe(true);
   });
 
   it('手动复制开始变更命令且不创建运行记录', async () => {

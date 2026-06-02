@@ -314,11 +314,9 @@ import type {
 import {
   ensureImplementationSteps,
   findFirstPendingImplementationStep,
-  implementationStepForAction,
   implementationStepLabels,
   implementationSteps,
   requirementTypeLabels,
-  stageForAction,
   stageLabels,
   statusLabels
 } from '@shared/workflow';
@@ -332,6 +330,7 @@ import ArtifactPreviewDialog from '@/components/ArtifactPreviewDialog.vue';
 import GitChangeInspector from '@/components/GitChangeInspector.vue';
 import { useWorkflowStore } from '@/stores/workflow';
 import { apiClient } from '@/api/client';
+import { findLatestStageRun } from '@/utils/run-selection';
 
 const route = useRoute();
 const store = useWorkflowStore();
@@ -359,14 +358,7 @@ const gitChanges = ref<GitChangeSummary>();
 const workflow = computed(() => store.current);
 const implementationStepStates = computed(() => ensureImplementationSteps(workflow.value?.implementationSteps));
 const currentStageRun = computed<RunRecord | undefined>(() => {
-  if (activeStage.value === 'IMPLEMENTATION') {
-    return workflow.value?.runs.find(
-      (run) =>
-        (run.stage || stageForAction(run.actionType)) === 'IMPLEMENTATION' &&
-        (run.implementationStep || implementationStepForAction(run.actionType)) === activeImplementationStep.value
-    );
-  }
-  return workflow.value?.runs.find((run) => (run.stage || stageForAction(run.actionType)) === activeStage.value);
+  return findLatestStageRun(workflow.value?.runs || [], activeStage.value, activeStage.value === 'IMPLEMENTATION' ? activeImplementationStep.value : undefined);
 });
 const prdSourceFiles = computed(() => workflow.value?.prdSourceFiles || []);
 const techDesignSourceFiles = computed(() => workflow.value?.techDesignSourceFiles || []);
@@ -478,7 +470,10 @@ function previewArtifact(artifact: ArtifactRef) {
 }
 
 async function runRefresh() {
-  await store.runAction({ actionType: 'REFRESH_ARTIFACTS' });
+  const result = await store.runAction({ actionType: 'REFRESH_ARTIFACTS' });
+  if (result?.run?.id) {
+    await openRunLog(result.run.id);
+  }
   await loadOpenSpecSummary();
   ElMessage.success('产物索引已刷新');
 }
@@ -610,7 +605,10 @@ async function runOrCopyAction(action: ActionInput, afterRun?: () => Promise<voi
     ElMessage.success('命令已复制');
     return;
   }
-  await store.runAction(action);
+  const result = await store.runAction(action);
+  if (result?.run?.id) {
+    await openRunLog(result.run.id);
+  }
   await afterRun?.();
 }
 
@@ -720,7 +718,10 @@ async function runOpenSpecArchive() {
 }
 
 async function returnToImplementation() {
-  await store.runAction({ actionType: 'RETURN_TO_IMPLEMENTATION' });
+  const result = await store.runAction({ actionType: 'RETURN_TO_IMPLEMENTATION' });
+  if (result?.run?.id) {
+    await openRunLog(result.run.id);
+  }
   activeStage.value = 'IMPLEMENTATION';
 }
 
@@ -777,7 +778,9 @@ async function submitReview(input: {
 async function openRunLog(runId: string) {
   await store.loadRunEvents(runId);
   store.streamRunEvents(runId);
-  runLogDrawer.value?.open();
+  if (typeof runLogDrawer.value?.open === 'function') {
+    runLogDrawer.value.open();
+  }
 }
 
 async function cancelRun(runId: string) {

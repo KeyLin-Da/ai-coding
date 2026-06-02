@@ -13,8 +13,12 @@ export const serverConfig = {
   agentTimeout: Number(process.env.AGENT_TIMEOUT || 600000),
   codexCommand: process.env.CODEX_COMMAND || 'codex exec -C {workspaceRoot} {projectParentAddDirArgs} -',
   codexInteractiveCommand: process.env.CODEX_INTERACTIVE_COMMAND || 'codex -C {workspaceRoot} {projectParentAddDirArgs} --no-alt-screen {prompt}',
-  codebuddyCommand: process.env.CODEBUDDY_COMMAND || 'codebuddy --add-dir {workspaceRoot} {projectAddDirArgs} -',
-  codebuddyInteractiveCommand: process.env.CODEBUDDY_INTERACTIVE_COMMAND || 'codebuddy --add-dir {workspaceRoot} {projectAddDirArgs} -',
+  codebuddyCommand:
+    process.env.CODEBUDDY_COMMAND ||
+    'codebuddy --add-dir {workspaceRoot} {projectParentAddDirArgs} --allowedTools "Bash,Read,Write" --permission-mode bypassPermissions -p -',
+  codebuddyInteractiveCommand:
+    process.env.CODEBUDDY_INTERACTIVE_COMMAND ||
+    'codebuddy --add-dir {workspaceRoot} {projectParentAddDirArgs} --allowedTools "Bash,Read,Write" --permission-mode bypassPermissions {prompt}',
   qoderCommand: process.env.QODER_COMMAND || 'qoderclicn -w {workspaceRoot} -',
   qoderInteractiveCommand: process.env.QODER_INTERACTIVE_COMMAND || 'qoderclicn -w {workspaceRoot} -',
   qwenCommand: process.env.QWEN_COMMAND || 'qwen -',

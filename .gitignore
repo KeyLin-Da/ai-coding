@@ -5,3 +5,4 @@
 openspec/*
 !openspec/config.yaml
 docs/*
+logs/*

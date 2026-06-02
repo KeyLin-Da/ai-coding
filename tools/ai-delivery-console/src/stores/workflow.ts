@@ -48,11 +48,12 @@ export const useWorkflowStore = defineStore('workflow', {
     },
     async runAction(input: ActionInput) {
       if (!this.current) {
-        return;
+        return undefined;
       }
       const result = await apiClient.runAction(this.current.requirementId, input);
       this.current = result.workflow;
       await this.loadRequirements();
+      return result;
     },
     async submitReview(input: Omit<ReviewInput, 'requirementId'>) {
       if (!this.current) {
@@ -76,8 +77,9 @@ export const useWorkflowStore = defineStore('workflow', {
       }
       this.stopRunStream();
       const requirementId = this.current.requirementId;
-      this.runEvents = [];
-      this.eventSource = new EventSource(`/api/ai-delivery/runs/${encodeURIComponent(runId)}/stream?requirementId=${encodeURIComponent(requirementId)}`);
+      this.eventSource = new EventSource(
+        `/api/ai-delivery/runs/${encodeURIComponent(runId)}/stream?requirementId=${encodeURIComponent(requirementId)}&tail=1`
+      );
       this.eventSource.onmessage = (event) => {
         this.runEvents.push(JSON.parse(event.data) as RunEvent);
       };
