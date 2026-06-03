@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import path from 'node:path';
 import { URL } from 'node:url';
 import type { ActionInput, PrdSourceFile, RequirementInput, RequirementWorkflow, ReviewInput, RunRecord, TechDesignSourceFile, WorkflowStatus } from '../shared/workflow';
-import { ensureImplementationSteps, stageForAction } from '../shared/workflow';
+import { ensureImplementationSteps, isImplementationStep, stageForAction } from '../shared/workflow';
 import { normalizePrdClarification, WorkflowRepository } from './services/workflow-repository';
 import { scanRequirementArtifacts } from './services/workspace-scanner';
 import { WorkflowLock } from './services/workflow-lock';
@@ -77,7 +77,7 @@ function implementationStatusForRun(run: RunRecord): WorkflowStatus {
 }
 
 function applyImplementationRun(workflow: RequirementWorkflow, run: RunRecord): RequirementWorkflow {
-  if (!run.implementationStep) {
+  if (!isImplementationStep(run.implementationStep)) {
     return workflow;
   }
   const implementationSteps = ensureImplementationSteps(workflow.implementationSteps);
@@ -224,7 +224,13 @@ export function createRouter(workspaceRoot: string) {
       if (request.method === 'POST' && pathname === '/api/ai-delivery/requirements') {
         const input = await parseBody<RequirementInput>(request);
         let workflow = await repository.upsert(input);
-        workflow.artifacts = await scanRequirementArtifacts(workspaceRoot, workflow.requirementId, workflow.branchName, workflow.stages.IMPLEMENTATION.changeName);
+        workflow.artifacts = await scanRequirementArtifacts(
+          workspaceRoot,
+          workflow.requirementId,
+          workflow.branchName,
+          workflow.stages.IMPLEMENTATION.changeName,
+          workflow.requirementType
+        );
         workflow = await repository.save(workflow);
         send(response, 200, { data: workflow });
         return;
@@ -240,7 +246,13 @@ export function createRouter(workspaceRoot: string) {
         const refreshed = await refreshTerminalRunStatuses(workspaceRoot, workflow);
         workflow = refreshed.workflow;
         // 扫描并更新产物索引
-        workflow.artifacts = await scanRequirementArtifacts(workspaceRoot, workflow.requirementId, workflow.branchName, workflow.stages.IMPLEMENTATION.changeName);
+        workflow.artifacts = await scanRequirementArtifacts(
+          workspaceRoot,
+          workflow.requirementId,
+          workflow.branchName,
+          workflow.stages.IMPLEMENTATION.changeName,
+          workflow.requirementType
+        );
         workflow = await repository.save(workflow);
         send(response, 200, { data: workflow });
         return;
@@ -374,7 +386,13 @@ export function createRouter(workspaceRoot: string) {
           };
           workflow = await repository.save({
             ...nextWorkflow,
-            artifacts: await scanRequirementArtifacts(workspaceRoot, nextWorkflow.requirementId, nextWorkflow.branchName, nextWorkflow.stages.IMPLEMENTATION.changeName)
+            artifacts: await scanRequirementArtifacts(
+              workspaceRoot,
+              nextWorkflow.requirementId,
+              nextWorkflow.branchName,
+              nextWorkflow.stages.IMPLEMENTATION.changeName,
+              nextWorkflow.requirementType
+            )
           });
           send(response, 200, { data: workflow });
         } finally {
@@ -398,7 +416,13 @@ export function createRouter(workspaceRoot: string) {
           const nextWorkflow = await deleteTechDesignSourceFileSnapshot(workspaceRoot, workflow, fileId);
           workflow = await repository.save({
             ...nextWorkflow,
-            artifacts: await scanRequirementArtifacts(workspaceRoot, nextWorkflow.requirementId, nextWorkflow.branchName, nextWorkflow.stages.IMPLEMENTATION.changeName)
+            artifacts: await scanRequirementArtifacts(
+              workspaceRoot,
+              nextWorkflow.requirementId,
+              nextWorkflow.branchName,
+              nextWorkflow.stages.IMPLEMENTATION.changeName,
+              nextWorkflow.requirementType
+            )
           });
           send(response, 200, { data: workflow });
         } finally {
@@ -490,11 +514,23 @@ export function createRouter(workspaceRoot: string) {
           workflow.runs.unshift(run);
           workflow = applyImplementationRun(workflow, run);
           if (action.actionType === 'REFRESH_ARTIFACTS') {
-            workflow.artifacts = await scanRequirementArtifacts(workspaceRoot, workflow.requirementId, workflow.branchName, workflow.stages.IMPLEMENTATION.changeName);
+            workflow.artifacts = await scanRequirementArtifacts(
+              workspaceRoot,
+              workflow.requirementId,
+              workflow.branchName,
+              workflow.stages.IMPLEMENTATION.changeName,
+              workflow.requirementType
+            );
           }
           // PRD分析、技术方案生成等可能产生产物的操作，执行完成后自动刷新产物索引
           if (['PRD_ANALYZE', 'DESIGN_GENERATE', 'OPENSPEC_NEW_CHANGE', 'OPENSPEC_ARCHIVE'].includes(action.actionType)) {
-            workflow.artifacts = await scanRequirementArtifacts(workspaceRoot, workflow.requirementId, workflow.branchName, workflow.stages.IMPLEMENTATION.changeName);
+            workflow.artifacts = await scanRequirementArtifacts(
+              workspaceRoot,
+              workflow.requirementId,
+              workflow.branchName,
+              workflow.stages.IMPLEMENTATION.changeName,
+              workflow.requirementType
+            );
           }
           if (action.actionType === 'RETURN_TO_IMPLEMENTATION') {
             const issues = await refreshCodeReviewIssues(workspaceRoot, workflow);

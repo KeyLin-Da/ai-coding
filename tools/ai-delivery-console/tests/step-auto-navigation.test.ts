@@ -35,14 +35,14 @@ describe('step-auto-navigation', () => {
     expect(findFirstPendingImplementationStep(states)).toBe('CHANGE_INSPECTION');
   });
 
-  it('所有步骤 APPROVED 时返回 UNIT_TEST', () => {
+  it('所有新流程步骤 APPROVED 时返回 CHANGE_INSPECTION', () => {
     const states = {
       START_CHANGE: { step: 'START_CHANGE', status: 'APPROVED' },
       ARTIFACT_REVIEW: { step: 'ARTIFACT_REVIEW', status: 'APPROVED' },
       APPLY: { step: 'APPLY', status: 'APPROVED' },
       CHANGE_INSPECTION: { step: 'CHANGE_INSPECTION', status: 'APPROVED' },
-      UNIT_TEST: { step: 'UNIT_TEST', status: 'APPROVED' }
+      UNIT_TEST: { step: 'UNIT_TEST', status: 'NOT_STARTED' }
     };
-    expect(findFirstPendingImplementationStep(states)).toBe('UNIT_TEST');
+    expect(findFirstPendingImplementationStep(states)).toBe('CHANGE_INSPECTION');
   });
 });

@@ -16,12 +16,12 @@ vi.mock('vue-router', () => ({
 }));
 
 vi.mock('@/api/client', () => ({
-	  apiClient: {
-	    listRequirements: vi.fn(),
-	    listProjectHistory: vi.fn(),
-	    listProjects: vi.fn(),
-	    createRequirement: vi.fn()
-	  }
+  apiClient: {
+    listRequirements: vi.fn(),
+    listProjectHistory: vi.fn(),
+    listProjects: vi.fn(),
+    createRequirement: vi.fn()
+  }
 }));
 
 vi.mock('element-plus', async () => {
@@ -100,7 +100,8 @@ function componentStubs() {
     },
     ElTable: { template: '<div><slot /></div>' },
     ElTableColumn: { template: '<div />' },
-    ElTag: { template: '<span><slot /></span>' }
+    ElTag: { template: '<span><slot /></span>' },
+    ElTooltip: { template: '<span><slot /></span>' }
   };
 }
 
@@ -186,5 +187,47 @@ describe('RequirementList', () => {
     );
     expect(routerPush).not.toHaveBeenCalled();
     expect(ElMessage.success).toHaveBeenCalledWith('需求信息已保存');
+  });
+
+  it('列表展示工程名、阶段颜色类和最近运行中文描述', async () => {
+    const current = {
+      ...workflow(),
+      currentStage: 'CODE_REVIEW' as const,
+      projects: [
+        {
+          name: 'opp-learn',
+          path: '/Users/key.lin/work/Projects/opp/opp-learn'
+        },
+        {
+          name: '/Users/key.lin/work/Projects/opp/opp-api',
+          path: '/Users/key.lin/work/Projects/opp/opp-api'
+        }
+      ],
+      runs: [
+        {
+          id: 'run-1',
+          requirementId: '172014',
+          actionType: 'CODE_REVIEW' as const,
+          status: 'SUCCEEDED' as const,
+          startedAt: '2026-06-03T08:00:00.000Z',
+          params: {}
+        }
+      ]
+    };
+    const wrapper = await mountList(current);
+    const vm = wrapper.vm as unknown as {
+      projectDisplayName: (project: { name: string; path: string }) => string;
+      stageTagClass: (stage: 'CODE_REVIEW') => string[];
+      recentRunText: (run?: (typeof current.runs)[number]) => string;
+      stageText: (stage: string) => string;
+    };
+
+    expect(vm.projectDisplayName(current.projects[0])).toBe('opp-learn');
+    expect(vm.projectDisplayName(current.projects[1])).toBe('opp-api');
+    expect(vm.stageTagClass('CODE_REVIEW')).toEqual(['stage-tag', 'stage-tag--CODE_REVIEW']);
+    expect(vm.stageText('TECH_DESIGN')).toBe('技术方案');
+    expect(vm.stageText('SKIPPED')).toBe('已跳过');
+    expect(vm.recentRunText(current.runs[0])).toBe('代码评审（成功）');
+    expect(vm.recentRunText()).toBe('暂无');
   });
 });

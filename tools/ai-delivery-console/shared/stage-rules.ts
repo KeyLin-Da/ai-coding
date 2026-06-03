@@ -1,18 +1,30 @@
 import type { RequirementWorkflow, ReviewDecision, WorkflowStage } from './workflow';
-import { workflowStages } from './workflow';
+import { workflowStagesForWorkflow } from './workflow';
 
-export function nextStage(stage: WorkflowStage): WorkflowStage | 'DONE' {
-  const index = workflowStages.indexOf(stage);
-  return index === workflowStages.length - 1 ? 'DONE' : workflowStages[index + 1];
+export function nextStage(stage: WorkflowStage, workflow?: RequirementWorkflow): WorkflowStage | 'DONE' {
+  const stages = workflowStagesForWorkflow(workflow);
+  const index = stages.indexOf(stage);
+  if (index < 0) {
+    return stages[0] || 'DONE';
+  }
+  return index === stages.length - 1 ? 'DONE' : stages[index + 1];
 }
 
 export function previousStagesApproved(workflow: RequirementWorkflow, stage: WorkflowStage): boolean {
-  const index = workflowStages.indexOf(stage);
-  return workflowStages.slice(0, index).every((item) => workflow.stages[item].status === 'APPROVED');
+  const stages = workflowStagesForWorkflow(workflow);
+  const index = stages.indexOf(stage);
+  if (index < 0) {
+    return false;
+  }
+  return stages.slice(0, index).every((item) => workflow.stages[item].status === 'APPROVED');
 }
 
 export function canEnterStage(workflow: RequirementWorkflow, stage: WorkflowStage): boolean {
-  if (stage === 'PRD') {
+  const stages = workflowStagesForWorkflow(workflow);
+  if (!stages.includes(stage)) {
+    return false;
+  }
+  if (stage === stages[0]) {
     return true;
   }
   return previousStagesApproved(workflow, stage);
@@ -29,7 +41,7 @@ export function canApproveStage(workflow: RequirementWorkflow, stage: WorkflowSt
 }
 
 export function deriveCurrentStage(workflow: RequirementWorkflow): WorkflowStage | 'DONE' {
-  for (const stage of workflowStages) {
+  for (const stage of workflowStagesForWorkflow(workflow)) {
     if (workflow.stages[stage].status !== 'APPROVED') {
       return stage;
     }

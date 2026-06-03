@@ -21,10 +21,25 @@ function workflow(): RequirementWorkflow {
   };
 }
 
+function defectWorkflow(): RequirementWorkflow {
+  const item = workflow();
+  item.requirementType = 'DEFECT';
+  item.currentStage = 'TECH_DESIGN';
+  item.stages.PRD.status = 'SKIPPED';
+  item.stages.TECH_DESIGN.status = 'DRAFT';
+  return item;
+}
+
 describe('stage-rules', () => {
   it('按固定顺序推进阶段', () => {
     expect(nextStage('PRD')).toBe('TECH_DESIGN');
     expect(nextStage('CODE_REVIEW')).toBe('DONE');
+  });
+
+  it('缺陷按适用阶段推进', () => {
+    const item = defectWorkflow();
+    expect(nextStage('TECH_DESIGN', item)).toBe('IMPLEMENTATION');
+    expect(nextStage('CODE_REVIEW', item)).toBe('DONE');
   });
 
   it('PRD 未通过时禁止进入技术方案', () => {
@@ -32,6 +47,13 @@ describe('stage-rules', () => {
     expect(canEnterStage(item, 'TECH_DESIGN')).toBe(false);
     item.stages.PRD.status = 'APPROVED';
     expect(canEnterStage(item, 'TECH_DESIGN')).toBe(true);
+  });
+
+  it('缺陷不要求 PRD 审核即可进入技术方案', () => {
+    const item = defectWorkflow();
+    expect(canEnterStage(item, 'PRD')).toBe(false);
+    expect(canEnterStage(item, 'TECH_DESIGN')).toBe(true);
+    expect(canApproveStage(item, 'PRD')).toBe(false);
   });
 
   it('代码评审存在未修复阻断问题时不可通过', () => {
@@ -47,6 +69,13 @@ describe('stage-rules', () => {
     const item = workflow();
     item.stages.PRD.status = 'APPROVED';
     expect(deriveCurrentStage(item)).toBe('TECH_DESIGN');
+  });
+
+  it('缺陷从适用阶段推导当前阶段', () => {
+    const item = defectWorkflow();
+    expect(deriveCurrentStage(item)).toBe('TECH_DESIGN');
+    item.stages.TECH_DESIGN.status = 'APPROVED';
+    expect(deriveCurrentStage(item)).toBe('IMPLEMENTATION');
   });
 
   it('按动作归属独立步骤日志', () => {
@@ -65,7 +94,7 @@ describe('stage-rules', () => {
     expect(implementationStepForAction('OPENSPEC_FF')).toBe('ARTIFACT_REVIEW');
     expect(implementationStepForAction('OPENSPEC_APPLY')).toBe('APPLY');
     expect(implementationStepForAction('OPENSPEC_VERIFY')).toBe('APPLY');
-    expect(implementationStepForAction('JUNIT_GENERATE')).toBe('UNIT_TEST');
+    expect(implementationStepForAction('JUNIT_GENERATE')).toBeUndefined();
     expect(implementationStepForAction('CODE_REVIEW')).toBeUndefined();
   });
 });

@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { parseGitStatusShort, readGitChanges } from '../../server/services/git-changes';
+import { hasStagedTrackedChanges, parseGitStatusShort, readGitChanges } from '../../server/services/git-changes';
 import { saveSettings } from '../../server/services/project-settings';
 
 const exec = promisify(execFile);
@@ -64,6 +64,24 @@ describe('git-changes', () => {
     expect(summary.projects[0].diff).toContain('diff --git');
     expect(summary.files[0].path).toBe('opp-gateway/src/a.txt');
     expect(summary.untrackedFiles[0].path).toBe('opp-gateway/src/generated.txt');
+    expect(hasStagedTrackedChanges(summary)).toBe(false);
+  });
+
+  it('识别指定工程中已暂存的 tracked 变更', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-git-'));
+    const projectRoot = path.join(workspace, 'opp-gateway');
+    await fs.mkdir(path.join(projectRoot, 'src'), { recursive: true });
+    await git(projectRoot, ['init']);
+    await fs.writeFile(path.join(projectRoot, 'src', 'a.txt'), 'old\n', 'utf8');
+    await git(projectRoot, ['add', '.']);
+    await git(projectRoot, ['-c', 'user.email=test@example.com', '-c', 'user.name=Test', 'commit', '-m', 'init']);
+    await fs.writeFile(path.join(projectRoot, 'src', 'a.txt'), 'old\nnew\n', 'utf8');
+    await git(projectRoot, ['add', 'src/a.txt']);
+
+    const summary = await readGitChanges(workspace, [{ name: 'opp-gateway', path: 'opp-gateway' }]);
+
+    expect(summary.files[0].staged).toBe(true);
+    expect(hasStagedTrackedChanges(summary)).toBe(true);
   });
 
   it('支持读取配置工程父目录下的外部工程变更', async () => {

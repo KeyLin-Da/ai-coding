@@ -22,6 +22,7 @@ vi.mock('@/api/client', () => ({
     getRequirement: vi.fn(),
     getOpenSpecSummary: vi.fn(),
     runAction: vi.fn(),
+    getGitChanges: vi.fn(),
     getRunEvents: vi.fn(),
     previewActionCommand: vi.fn()
   }
@@ -117,10 +118,24 @@ function workflow(artifacts: ArtifactRef[], startChangeApproved = true): Require
   };
 }
 
+function defectWorkflow(artifacts: ArtifactRef[], currentStage: RequirementWorkflow['currentStage'] = 'TECH_DESIGN'): RequirementWorkflow {
+  const item = workflow(artifacts);
+  item.title = '邀请好友积分异常';
+  item.requirementType = 'DEFECT';
+  item.branchName = 'bugfix/opp#172014';
+  item.currentStage = currentStage;
+  item.stages = createEmptyStages('DEFECT');
+  item.stages.TECH_DESIGN.status = currentStage === 'TECH_DESIGN' ? 'DRAFT' : 'APPROVED';
+  return item;
+}
+
 function componentStubs() {
   return {
     StageTimeline: { template: '<div />' },
-    MarkdownEditor: { template: '<div />' },
+    MarkdownEditor: {
+      props: ['title', 'artifactPath'],
+      template: '<div class="markdown-editor">{{ title }} {{ artifactPath }}</div>'
+    },
     OpenSpecDocuments: { template: '<div />' },
     ReviewDialog: { template: '<div />' },
     RunLogDrawer: { template: '<div />' },
@@ -149,6 +164,16 @@ function componentStubs() {
       template: '<option :value="value">{{ label }}<slot /></option>'
     },
     ElProgress: { template: '<div />' },
+    ElRadioGroup: {
+      props: ['modelValue'],
+      emits: ['update:modelValue'],
+      template:
+        '<div><button class="review-mode-commit" @click="$emit(\'update:modelValue\', \'commit\')">正式评审</button><button class="review-mode-staged" @click="$emit(\'update:modelValue\', \'staged\')">暂存区预审</button><slot /></div>'
+    },
+    ElRadioButton: {
+      props: ['label'],
+      template: '<span><slot /></span>'
+    },
     ElSelect: {
       props: ['modelValue'],
       emits: ['update:modelValue'],
@@ -158,13 +183,22 @@ function componentStubs() {
   };
 }
 
-async function mountDetail(current: RequirementWorkflow) {
+async function mountDetail(current: RequirementWorkflow, openSpecSummary: OpenSpecSummary = emptyOpenSpecSummary) {
   const pinia = createPinia();
   setActivePinia(pinia);
   vi.mocked(apiClient.getRequirement).mockResolvedValue(current);
   vi.mocked(apiClient.listAgents).mockResolvedValue(agents);
   vi.mocked(apiClient.listRequirements).mockResolvedValue([current]);
-  vi.mocked(apiClient.getOpenSpecSummary).mockResolvedValue(emptyOpenSpecSummary);
+  vi.mocked(apiClient.getOpenSpecSummary).mockResolvedValue(openSpecSummary);
+  vi.mocked(apiClient.getGitChanges).mockResolvedValue({
+    updatedAt: new Date().toISOString(),
+    files: [],
+    untrackedFiles: [],
+    diff: '',
+    projects: [],
+    additions: 0,
+    deletions: 0
+  });
   vi.mocked(apiClient.getRunEvents).mockResolvedValue([]);
   const run: RunRecord = {
     id: 'run-auto-log',
@@ -217,6 +251,22 @@ function openSpecStartButton(wrapper: ReturnType<typeof mount>) {
   return button;
 }
 
+function codeReviewButton(wrapper: ReturnType<typeof mount>) {
+  const button = wrapper.findAll('button').find((item) => item.text().includes('生成代码评审'));
+  if (!button) {
+    throw new Error('未找到生成代码评审按钮');
+  }
+  return button;
+}
+
+function designButton(wrapper: ReturnType<typeof mount>) {
+  const button = wrapper.findAll('button').find((item) => item.text().includes('生成技术方案'));
+  if (!button) {
+    throw new Error('未找到生成技术方案按钮');
+  }
+  return button;
+}
+
 describe('RequirementDetail OpenSpec 工件生成', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -230,6 +280,36 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     });
   });
 
+  it('缺陷详情默认进入技术方案且不展示 PRD 阻断信息', async () => {
+    const current = defectWorkflow([]);
+    const wrapper = await mountDetail(current);
+
+    expect(wrapper.text()).toContain('技术方案');
+    expect(wrapper.text()).not.toContain('需要先通过 PRD 审核');
+    expect(wrapper.text()).not.toContain('PRD 文档');
+    expect(wrapper.text()).not.toContain('生成 PRD');
+    expect(designButton(wrapper).attributes('disabled')).toBeUndefined();
+  });
+
+  it('缺陷生成技术方案时不传 PRD documentPath', async () => {
+    const current = defectWorkflow([]);
+    const wrapper = await mountDetail(current);
+
+    await designButton(wrapper).trigger('click');
+    await flushPromises();
+
+    expect(apiClient.runAction).toHaveBeenCalledWith(
+      '172014',
+      expect.objectContaining({
+        actionType: 'DESIGN_GENERATE',
+        params: expect.not.objectContaining({
+          documentPath: expect.any(String)
+        })
+      })
+    );
+    expect(ElMessage.warning).not.toHaveBeenCalledWith('请先通过 PRD 审核');
+  });
+
   it('缺少 PRD 文档路径时不发起工件生成并提示', async () => {
     const current = workflow([artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md')]);
     const wrapper = await mountDetail(current);
@@ -240,6 +320,35 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     expect(ElMessage.warning).toHaveBeenCalledWith('请先生成、保存或刷新 PRD 产物');
     expect(apiClient.runAction).not.toHaveBeenCalled();
     expect(apiClient.previewActionCommand).not.toHaveBeenCalled();
+  });
+
+  it('缺陷生成 OpenSpec 工件时不要求也不传 PRD 文档路径', async () => {
+    const current = defectWorkflow([artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md')], 'IMPLEMENTATION');
+    const wrapper = await mountDetail(current);
+
+    await activateImplementationStep(wrapper, '工件生成与评审');
+    await openSpecArtifactButton(wrapper).trigger('click');
+    await flushPromises();
+
+    expect(apiClient.runAction).toHaveBeenCalledWith(
+      '172014',
+      expect.objectContaining({
+        actionType: 'OPENSPEC_FF',
+        params: expect.objectContaining({
+          documentPath: 'docs/172014/technical-design/design_review.md'
+        })
+      })
+    );
+    expect(apiClient.runAction).toHaveBeenCalledWith(
+      '172014',
+      expect.objectContaining({
+        actionType: 'OPENSPEC_FF',
+        params: expect.not.objectContaining({
+          prdDocumentPath: expect.any(String)
+        })
+      })
+    );
+    expect(ElMessage.warning).not.toHaveBeenCalledWith('请先生成、保存或刷新 PRD 产物');
   });
 
   it('缺少技术方案文档路径时不发起工件生成并提示', async () => {
@@ -327,6 +436,24 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     expect(ElMessage.success).toHaveBeenCalledWith('命令已复制');
   });
 
+  it('已存在 OpenSpec 变更目录时禁用开始变更且不重复创建', async () => {
+    const current = workflow([], false);
+    const wrapper = await mountDetail(current, {
+      ...emptyOpenSpecSummary,
+      exists: true,
+      rootPath: 'openspec/changes/req-172014'
+    });
+
+    expect(openSpecStartButton(wrapper).attributes('disabled')).toBeDefined();
+    expect(wrapper.text()).toContain('已检测到对应 OpenSpec 变更目录，无需重复开始变更');
+
+    await openSpecStartButton(wrapper).trigger('click');
+    await flushPromises();
+
+    expect(apiClient.runAction).not.toHaveBeenCalled();
+    expect(apiClient.previewActionCommand).not.toHaveBeenCalled();
+  });
+
   it('开始变更未审核通过时阻止生成 OpenSpec 工件', async () => {
     const current = workflow(
       [artifact('PRD', 'docs/172014/prd/analysis.md'), artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md')],
@@ -339,5 +466,109 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     expect(wrapper.text()).toContain('请先完成并审核开始变更步骤');
     expect(apiClient.runAction).not.toHaveBeenCalled();
     expect(apiClient.previewActionCommand).not.toHaveBeenCalled();
+  });
+
+  it('实施验证导航不展示独立执行单测步骤，报告缺失时提示证据不足', async () => {
+    const current = workflow([artifact('PRD', 'docs/172014/prd/analysis.md'), artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md')]);
+    const wrapper = await mountDetail(current);
+
+    expect(wrapper.text()).not.toContain('执行单测并生成报告');
+    expect(wrapper.text()).toContain('单元测试报告');
+    expect(wrapper.text()).toContain('尚未扫描到单元测试报告');
+    expect(wrapper.text()).toContain('docs/{需求号}/junit/**');
+  });
+
+  it('实施验证阶段展示已扫描到的单元测试报告', async () => {
+    const current = workflow([
+      artifact('PRD', 'docs/172014/prd/analysis.md'),
+      artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md'),
+      artifact('IMPLEMENTATION', 'docs/172014/junit/index.html')
+    ]);
+    const wrapper = await mountDetail(current);
+
+    expect(wrapper.text()).toContain('单元测试报告');
+    expect(wrapper.text()).toContain('docs/172014/junit/index.html');
+    expect(wrapper.text()).toContain('查看报告');
+    expect(wrapper.findAll('.markdown-editor').some((editor) => editor.text().includes('单元测试报告'))).toBe(false);
+    expect(wrapper.text()).not.toContain('尚未扫描到单元测试报告');
+  });
+
+  it('代码评审默认使用 commit 正式评审模式', async () => {
+    const current = workflow([]);
+    current.currentStage = 'CODE_REVIEW';
+    current.stages.CODE_REVIEW.status = 'DRAFT';
+    const wrapper = await mountDetail(current);
+
+    await codeReviewButton(wrapper).trigger('click');
+    await flushPromises();
+
+    expect(apiClient.runAction).toHaveBeenCalledWith(
+      '172014',
+      expect.objectContaining({
+        actionType: 'CODE_REVIEW',
+        params: expect.objectContaining({
+          branchName: 'feature/opp-172014',
+          reviewMode: 'commit'
+        })
+      })
+    );
+  });
+
+  it('代码评审可切换为 staged 暂存区预审模式', async () => {
+    const current = workflow([]);
+    current.currentStage = 'CODE_REVIEW';
+    current.stages.CODE_REVIEW.status = 'DRAFT';
+    const wrapper = await mountDetail(current);
+    vi.mocked(apiClient.getGitChanges).mockResolvedValue({
+      updatedAt: new Date().toISOString(),
+      files: [{ path: 'opp-learn/src/a.txt', status: 'M', staged: true, unstaged: false }],
+      untrackedFiles: [],
+      diff: 'diff --git a/src/a.txt b/src/a.txt',
+      projects: [
+        {
+          project: { name: 'opp-learn', path: 'opp-learn' },
+          branchMatches: true,
+          files: [{ path: 'src/a.txt', status: 'M', staged: true, unstaged: false }],
+          untrackedFiles: [],
+          stagedDiff: 'diff --git a/src/a.txt b/src/a.txt',
+          unstagedDiff: '',
+          diff: 'diff --git a/src/a.txt b/src/a.txt',
+          additions: 1,
+          deletions: 0
+        }
+      ],
+      additions: 1,
+      deletions: 0
+    });
+
+    await wrapper.find('.review-mode-staged').trigger('click');
+    await codeReviewButton(wrapper).trigger('click');
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('暂存区预审仅基于 git diff --cached，不作为正式合并判定');
+    expect(apiClient.runAction).toHaveBeenCalledWith(
+      '172014',
+      expect.objectContaining({
+        actionType: 'CODE_REVIEW',
+        params: expect.objectContaining({
+          reviewMode: 'staged'
+        })
+      })
+    );
+  });
+
+  it('staged 暂存区为空时点击代码评审直接拦截', async () => {
+    const current = workflow([]);
+    current.currentStage = 'CODE_REVIEW';
+    current.stages.CODE_REVIEW.status = 'DRAFT';
+    const wrapper = await mountDetail(current);
+
+    await wrapper.find('.review-mode-staged').trigger('click');
+    await codeReviewButton(wrapper).trigger('click');
+    await flushPromises();
+
+    expect(apiClient.getGitChanges).toHaveBeenCalledWith('172014');
+    expect(apiClient.runAction).not.toHaveBeenCalled();
+    expect(ElMessage.warning).toHaveBeenCalledWith('暂存区没有已暂存文件，请先 git add 后再执行暂存区预审');
   });
 });

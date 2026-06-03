@@ -43,10 +43,11 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { Document, Refresh } from '@element-plus/icons-vue';
-import type { ArtifactRef, ReviewIssue } from '@shared/workflow';
-import { stageLabels, workflowStages, type WorkflowStage } from '@shared/workflow';
+import type { ArtifactRef, RequirementWorkflow, ReviewIssue } from '@shared/workflow';
+import { stageLabels, workflowStagesForWorkflow, type WorkflowStage } from '@shared/workflow';
 
 const props = defineProps<{
+  workflow?: Pick<RequirementWorkflow, 'requirementType'>;
   artifacts: ArtifactRef[];
   issues: ReviewIssue[];
 }>();
@@ -57,7 +58,7 @@ defineEmits<{
 }>();
 
 const artifactGroups = computed(() =>
-  workflowStages
+  workflowStagesForWorkflow(props.workflow)
     .map((stage) => ({
       stage,
       items: props.artifacts.filter((artifact) => artifact.stage === stage && artifact.kind !== 'directory')

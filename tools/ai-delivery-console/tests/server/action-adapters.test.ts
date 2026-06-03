@@ -1,10 +1,13 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import type { AgentProvider, RequirementWorkflow, RunRecord } from '../../shared/workflow';
 import { createEmptyStages } from '../../shared/workflow';
 import {
+  executeAction,
   internalForTests
 } from '../../server/services/action-adapters';
 import {
@@ -18,6 +21,12 @@ import {
   terminalCommandLine
 } from '../../server/services/agent-providers';
 import { readRunEvents } from '../../server/services/run-log';
+
+const exec = promisify(execFile);
+
+async function git(cwd: string, args: string[]) {
+  await exec('git', args, { cwd });
+}
 
 function workflow(): RequirementWorkflow {
   const now = new Date().toISOString();
@@ -49,6 +58,150 @@ function runRecord(id: string): RunRecord {
     agentId: 'test-agent'
   };
 }
+
+describe('action-adapters', () => {
+  it('普通需求生成技术方案命令时保留 PRD 文档上下文', () => {
+    const item = {
+      ...workflow(),
+      techDesignSourceFiles: [
+        {
+          id: 'source-1',
+          name: '补充图.png',
+          path: 'docs/172014/technical-design/files/source-1.png',
+          size: 100,
+          uploadedAt: new Date().toISOString()
+        }
+      ]
+    };
+
+    expect(internalForTests.buildSkillCommand(item, { actionType: 'DESIGN_GENERATE', params: {} })).toBe(
+      '/coding-design d=docs/172014/prd/analysis.md,docs/172014/technical-design/files/source-1.png r=172014'
+    );
+  });
+
+  it('缺陷生成技术方案命令不自动携带 PRD 文档路径', () => {
+    const item = {
+      ...workflow(),
+      title: '邀请好友积分异常',
+      requirementType: 'DEFECT' as const,
+      currentStage: 'TECH_DESIGN' as const,
+      stages: createEmptyStages('DEFECT'),
+      techDesignClarification: '后台配置为 1，实际奖励 10',
+      techDesignSourceFiles: [
+        {
+          id: 'source-1',
+          name: '配置截图.png',
+          path: 'docs/172014/technical-design/files/source-1.png',
+          size: 100,
+          uploadedAt: new Date().toISOString()
+        }
+      ]
+    };
+
+    const command = internalForTests.buildSkillCommand(item, { actionType: 'DESIGN_GENERATE', params: {} });
+
+    expect(command).toBe('/coding-design d=邀请好友积分异常,后台配置为 1，实际奖励 10,docs/172014/technical-design/files/source-1.png r=172014');
+    expect(command).not.toContain('/prd/');
+  });
+
+  it('普通需求 OpenSpec 快速生成命令保留 PRD 文档和 PRD 文件目录', () => {
+    expect(internalForTests.buildSkillCommand(workflow(), { actionType: 'OPENSPEC_FF', params: {} })).toBe(
+      '/openspec-ff-change req-172014 d=docs/172014/prd/analysis.md,docs/172014/technical-design/design_review.md,docs/172014/prd/files'
+    );
+  });
+
+  it('缺陷 OpenSpec 快速生成命令不自动携带 PRD 文档和 PRD 文件目录', () => {
+    const item = {
+      ...workflow(),
+      requirementType: 'DEFECT' as const,
+      currentStage: 'TECH_DESIGN' as const,
+      stages: createEmptyStages('DEFECT'),
+      techDesignSourceFiles: [
+        {
+          id: 'source-1',
+          name: '配置截图.png',
+          path: 'docs/172014/technical-design/files/source-1.png',
+          size: 100,
+          uploadedAt: new Date().toISOString()
+        }
+      ]
+    };
+
+    const command = internalForTests.buildSkillCommand(item, { actionType: 'OPENSPEC_FF', params: {} });
+
+    expect(command).toBe('/openspec-ff-change req-172014 d=docs/172014/technical-design/design_review.md,docs/172014/technical-design/files/source-1.png');
+    expect(command).not.toContain('/prd/');
+  });
+
+  it('生成 commit 模式代码评审命令并包含需求号、工程范围、分支和外部文档', () => {
+    const item = {
+      ...workflow(),
+      projects: [
+        { name: 'opp-api', path: 'opp-api' },
+        { name: 'opp-learn', path: 'opp-learn' }
+      ]
+    };
+
+    expect(
+      internalForTests.buildSkillCommand(item, {
+        actionType: 'CODE_REVIEW',
+        params: {
+          docs: 'docs/172014/technical-design/design_review.md'
+        }
+      })
+    ).toBe('/coding-review r=172014 p=opp-api,opp-learn m=commit b=feature/opp-172014 d=docs/172014/technical-design/design_review.md');
+  });
+
+  it('生成 staged 模式代码评审命令时不拼接分支参数', () => {
+    const item = {
+      ...workflow(),
+      projects: [{ name: 'opp-learn', path: 'opp-learn' }]
+    };
+
+    expect(
+      internalForTests.buildSkillCommand(item, {
+        actionType: 'CODE_REVIEW',
+        params: {
+          reviewMode: 'staged',
+          branchName: 'feature/ignored'
+        }
+      })
+    ).toBe('/coding-review r=172014 p=opp-learn m=staged');
+  });
+
+  it('未维护涉及工程时生成代码评审工程占位符', () => {
+    expect(internalForTests.buildSkillCommand(workflow(), { actionType: 'CODE_REVIEW', params: {} })).toBe(
+      '/coding-review r=172014 p=<project-list> m=commit b=feature/opp-172014'
+    );
+  });
+
+  it('staged 模式代码评审在无暂存文件时阻止启动 Agent', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-review-'));
+    const projectRoot = path.join(root, 'opp-learn');
+    await fs.mkdir(path.join(projectRoot, 'src'), { recursive: true });
+    await git(projectRoot, ['init']);
+    await fs.writeFile(path.join(projectRoot, 'src', 'a.txt'), 'old\n', 'utf8');
+    await git(projectRoot, ['add', '.']);
+    await git(projectRoot, ['-c', 'user.email=test@example.com', '-c', 'user.name=Test', 'commit', '-m', 'init']);
+    const item = {
+      ...workflow(),
+      projects: [{ name: 'opp-learn', path: 'opp-learn' }]
+    };
+
+    const run = await executeAction(root, item, {
+      actionType: 'CODE_REVIEW',
+      params: {
+        reviewMode: 'staged',
+        agentId: 'missing-agent'
+      }
+    });
+    const events = await readRunEvents(root, '172014', run.id);
+
+    expect(run.status).toBe('FAILED');
+    expect(run.error).toContain('暂存区没有已暂存文件');
+    expect(events.some((event) => event.message.includes('暂存区没有已暂存文件'))).toBe(true);
+  });
+});
 
 describe('agent-providers', () => {
   it('内置 CLI 执行时实时追加 stdout 和 stderr 事件', async () => {

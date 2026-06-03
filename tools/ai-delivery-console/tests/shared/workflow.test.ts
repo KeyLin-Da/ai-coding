@@ -5,8 +5,11 @@ import {
   ensureImplementationSteps,
   implementationStepForAction,
   implementationSteps,
+  isStageApplicableToType,
   nextImplementationStep,
-  shouldSyncBranchName
+  shouldSyncBranchName,
+  statusLabels,
+  workflowStagesForType
 } from '../../shared/workflow';
 
 describe('workflow helpers', () => {
@@ -21,22 +24,30 @@ describe('workflow helpers', () => {
     expect(shouldSyncBranchName('custom/branch', 'feature/opp#172014', false)).toBe(true);
   });
 
+  it('按需求类型返回适用阶段', () => {
+    expect(workflowStagesForType('REQUIREMENT')).toEqual(['PRD', 'TECH_DESIGN', 'IMPLEMENTATION', 'CODE_REVIEW']);
+    expect(workflowStagesForType('DEFECT')).toEqual(['TECH_DESIGN', 'IMPLEMENTATION', 'CODE_REVIEW']);
+    expect(isStageApplicableToType('PRD', 'DEFECT')).toBe(false);
+    expect(isStageApplicableToType('TECH_DESIGN', 'DEFECT')).toBe(true);
+    expect(statusLabels.SKIPPED).toBe('已跳过');
+  });
+
   it('手动编辑为自定义分支后不再被自动联动覆盖', () => {
     expect(shouldSyncBranchName('custom/branch', 'feature/opp#172014', true)).toBe(false);
   });
 
   it('提供实施验证子步骤默认状态和动作归属', () => {
     const steps = createEmptyImplementationSteps();
-    expect(implementationSteps).toEqual(['START_CHANGE', 'ARTIFACT_REVIEW', 'APPLY', 'CHANGE_INSPECTION', 'UNIT_TEST']);
+    expect(implementationSteps).toEqual(['START_CHANGE', 'ARTIFACT_REVIEW', 'APPLY', 'CHANGE_INSPECTION']);
     expect(steps.START_CHANGE.status).toBe('DRAFT');
     expect(steps.ARTIFACT_REVIEW.status).toBe('NOT_STARTED');
     expect(steps.APPLY.status).toBe('NOT_STARTED');
     expect(implementationStepForAction('OPENSPEC_NEW_CHANGE')).toBe('START_CHANGE');
     expect(implementationStepForAction('OPENSPEC_FF')).toBe('ARTIFACT_REVIEW');
     expect(implementationStepForAction('OPENSPEC_APPLY')).toBe('APPLY');
-    expect(implementationStepForAction('JUNIT_GENERATE')).toBe('UNIT_TEST');
+    expect(implementationStepForAction('JUNIT_GENERATE')).toBeUndefined();
     expect(nextImplementationStep('START_CHANGE')).toBe('ARTIFACT_REVIEW');
-    expect(nextImplementationStep('CHANGE_INSPECTION')).toBe('UNIT_TEST');
+    expect(nextImplementationStep('CHANGE_INSPECTION')).toBeUndefined();
   });
 
   it('兼容缺失部分实施子步骤的旧 workflow', () => {
@@ -47,5 +58,17 @@ describe('workflow helpers', () => {
     expect(steps.ARTIFACT_REVIEW.comment).toBe('已通过');
     expect(steps.START_CHANGE.status).toBe('DRAFT');
     expect(steps.APPLY.status).toBe('NOT_STARTED');
+  });
+
+  it('忽略旧 UNIT_TEST 状态并只返回新流程步骤', () => {
+    const steps = ensureImplementationSteps({
+      START_CHANGE: { status: 'APPROVED' },
+      ARTIFACT_REVIEW: { status: 'APPROVED' },
+      APPLY: { status: 'APPROVED' },
+      CHANGE_INSPECTION: { status: 'APPROVED' },
+      UNIT_TEST: { step: 'UNIT_TEST', status: 'NOT_STARTED' }
+    });
+
+    expect(Object.keys(steps)).toEqual(['START_CHANGE', 'ARTIFACT_REVIEW', 'APPLY', 'CHANGE_INSPECTION']);
   });
 });

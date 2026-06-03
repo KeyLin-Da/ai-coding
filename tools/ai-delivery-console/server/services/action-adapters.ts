@@ -7,6 +7,7 @@ import { assertInsideWorkspace, normalizeRequirementId } from './workspace';
 import { getAgentProvider, startAgentInTerminal, startAgentProcess } from './agent-providers';
 import { normalizePrdClarification } from './workflow-repository';
 import { loadSettings } from './project-settings';
+import { hasStagedTrackedChanges, readGitChanges } from './git-changes';
 
 const cliActionMap: Partial<Record<ActionInput['actionType'], string[]>> = {
   OPENSPEC_STATUS: ['openspec', 'status'],
@@ -69,7 +70,24 @@ function techDesignSourcePaths(workflow: RequirementWorkflow, params: Record<str
   return (workflow.techDesignSourceFiles || []).map((file) => file.path).filter(Boolean);
 }
 
+function uniqueNonEmpty(values: string[]): string[] {
+  const seen = new Set<string>();
+  return values.filter((value) => {
+    const normalized = value.trim();
+    if (!normalized || seen.has(normalized)) {
+      return false;
+    }
+    seen.add(normalized);
+    return true;
+  });
+}
+
 function designInputParam(workflow: RequirementWorkflow, params: Record<string, unknown>): string {
+  if (workflow.requirementType === 'DEFECT') {
+    const explicitClarification = hasParam(params, 'clarification') ? asString(params.clarification) : '';
+    const clarification = explicitClarification || workflow.techDesignClarification || '';
+    return uniqueNonEmpty([workflow.title, clarification, ...techDesignSourcePaths(workflow, params)]).join(',');
+  }
   return [prdDocumentPath(workflow, params), ...techDesignSourcePaths(workflow, params)].filter(Boolean).join(',');
 }
 
@@ -84,6 +102,9 @@ function technicalDesignDocumentPath(workflow: RequirementWorkflow, params: Reco
 
 function openSpecInputParam(workflow: RequirementWorkflow, params: Record<string, unknown>): string {
   const requirementId = normalizeRequirementId(workflow.requirementId);
+  if (workflow.requirementType === 'DEFECT') {
+    return uniqueNonEmpty([technicalDesignDocumentPath(workflow, params), ...techDesignSourcePaths(workflow, params)]).join(',');
+  }
   return [
     openSpecPrdDocumentPath(workflow, params),
     technicalDesignDocumentPath(workflow, params),
@@ -93,6 +114,10 @@ function openSpecInputParam(workflow: RequirementWorkflow, params: Record<string
 
 function projectParam(workflow: RequirementWorkflow): string {
   return (workflow.projects || []).map((project) => project.name || project.path).filter(Boolean).join(',');
+}
+
+function reviewModeParam(params: Record<string, unknown>): 'commit' | 'staged' {
+  return params.reviewMode === 'staged' ? 'staged' : 'commit';
 }
 
 function buildSkillCommand(workflow: RequirementWorkflow, action: ActionInput): string {
@@ -106,6 +131,7 @@ function buildSkillCommand(workflow: RequirementWorkflow, action: ActionInput): 
   const changeName = asString(params.changeName, workflow.stages.IMPLEMENTATION.changeName || `req-${requirementId}`);
   const clarification = asString(params.clarification);
   const projects = projectParam(workflow);
+  const reviewMode = reviewModeParam(params);
 
   switch (action.actionType) {
     case 'PRD_ANALYZE':
@@ -115,7 +141,15 @@ function buildSkillCommand(workflow: RequirementWorkflow, action: ActionInput): 
     case 'JUNIT_GENERATE':
       return `generate-unit-test ${moduleName || '<module-name>'}${description ? ` "${description}"` : ''}`;
     case 'CODE_REVIEW':
-      return `/coding-review b=${branchName || '<branch-name>'}${params.docs ? ` d=${params.docs}` : ''}`;
+      return [
+        `/coding-review r=${requirementId}`,
+        `p=${projects || '<project-list>'}`,
+        `m=${reviewMode}`,
+        reviewMode === 'commit' ? `b=${branchName || '<branch-name>'}` : '',
+        params.docs ? `d=${params.docs}` : ''
+      ]
+        .filter(Boolean)
+        .join(' ');
     case 'OPENSPEC_FF':
       return `/openspec-ff-change ${changeName} d=${openSpecInputParam(workflow, params)}`;
     case 'OPENSPEC_APPLY':
@@ -152,6 +186,29 @@ export function buildActionCommand(workflow: RequirementWorkflow, action: Action
 
 function isAgentAction(actionType: ActionInput['actionType']): boolean {
   return ['PRD_ANALYZE', 'DESIGN_GENERATE', 'OPENSPEC_FF', 'OPENSPEC_APPLY', 'OPENSPEC_VERIFY', 'OPENSPEC_ARCHIVE', 'JUNIT_GENERATE', 'CODE_REVIEW'].includes(actionType);
+}
+
+async function ensureStagedReviewHasChanges(workspaceRoot: string, workflow: RequirementWorkflow, params: Record<string, unknown>, run: RunRecord): Promise<boolean> {
+  if (run.actionType !== 'CODE_REVIEW' || reviewModeParam(params) !== 'staged') {
+    return true;
+  }
+  try {
+    const summary = await readGitChanges(workspaceRoot, workflow.projects || [], workflow.branchName);
+    if (hasStagedTrackedChanges(summary)) {
+      return true;
+    }
+    run.error = '暂存区没有已暂存文件，请先 git add 后再执行暂存区预审';
+  } catch (error: any) {
+    run.error = error.message || '读取暂存区变更失败';
+  }
+  run.status = 'FAILED';
+  run.finishedAt = new Date().toISOString();
+  await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
+    type: 'WARN',
+    level: 'WARN',
+    message: run.error || '暂存区预审已拦截'
+  });
+  return false;
 }
 
 function runCli(
@@ -310,6 +367,10 @@ export async function executeAction(
     run.status = 'FAILED';
     run.error = `动作未实现: ${action.actionType}`;
     run.finishedAt = new Date().toISOString();
+    return run;
+  }
+
+  if (!(await ensureStagedReviewHasChanges(workspaceRoot, workflow, params, run))) {
     return run;
   }
 

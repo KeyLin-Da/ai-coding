@@ -184,3 +184,7 @@ export async function readGitChanges(workspaceRoot: string, projects: WorkflowPr
     deletions: projectSummaries.reduce((sum, summary) => sum + summary.deletions, 0)
   };
 }
+
+export function hasStagedTrackedChanges(summary: GitChangeSummary): boolean {
+  return summary.projects.some((project) => project.files.some((file) => file.staged));
+}

@@ -11,25 +11,38 @@
     <el-table :data="store.requirements" v-loading="store.loading" style="width: 100%">
       <el-table-column prop="requirementId" label="需求号" width="140" />
       <el-table-column prop="title" label="标题" min-width="220" />
+      <el-table-column prop="requirementType" label="需求类型" min-width="140" >
+        <template #default="{ row }">
+            <el-tag :class="stageTagClass(row.requirementType)" effect="plain">{{ stageRequirementType(row.requirementType) }}</el-tag>
+         </template>
+      </el-table-column>
       <el-table-column prop="branchName" label="分支" min-width="180" />
       <el-table-column label="涉及工程" min-width="220">
         <template #default="{ row }">
           <div v-if="row.projects?.length" class="project-tags">
-            <el-tag v-for="project in row.projects" :key="project.path" size="small" effect="plain">
-              {{ project.path }}
-            </el-tag>
+            <el-tooltip
+              v-for="project in row.projects"
+              :key="project.path"
+              :content="project.path"
+              placement="top"
+              :show-after="300"
+            >
+              <el-tag class="project-tag" size="small" effect="plain">
+                {{ projectDisplayName(project) }}
+              </el-tag>
+            </el-tooltip>
           </div>
           <span v-else class="muted">未配置</span>
         </template>
       </el-table-column>
       <el-table-column label="阶段" width="150">
         <template #default="{ row }">
-          <el-tag>{{ stageText(row.currentStage) }}</el-tag>
+          <el-tag :class="stageTagClass(row.currentStage)" effect="plain">{{ stageText(row.currentStage) }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="最近运行" min-width="180">
         <template #default="{ row }">
-          <span class="muted">{{ row.runs[0]?.actionType || '暂无' }}</span>
+          <span :class="{ muted: !row.runs[0] }">{{ recentRunText(row.runs[0]) }}</span>
         </template>
       </el-table-column>
       <el-table-column label="操作" width="190" fixed="right">
@@ -87,10 +100,10 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { DocumentAdd, Edit, Plus, Refresh, View } from '@element-plus/icons-vue';
+import { DocumentAdd, Edit, Plus, View } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
-import type { RequirementInput, RequirementWorkflow, WorkflowProject } from '@shared/workflow';
-import { defaultBranchName, requirementTypeLabels, shouldSyncBranchName, stageLabels } from '@shared/workflow';
+import type { RequirementInput, RequirementWorkflow, RunRecord, WorkflowProject } from '@shared/workflow';
+import { actionTypeLabels, defaultBranchName, requirementTypeLabels, shouldSyncBranchName, stageLabels, statusLabels } from '@shared/workflow';
 import { useWorkflowStore } from '@/stores/workflow';
 import { apiClient } from '@/api/client';
 
@@ -139,7 +152,38 @@ function onBranchNameInput(value: string) {
 }
 
 function stageText(stage: string) {
-  return stage === 'DONE' ? '完成' : stageLabels[stage as keyof typeof stageLabels];
+  return stage === 'DONE' ? '完成' : stageLabels[stage as keyof typeof stageLabels] || stage;
+}
+
+function stageRequirementType(requirementType: string) {
+  return requirementTypeLabels[requirementType as keyof typeof requirementTypeLabels];
+}
+
+function stageTagClass(stage: RequirementWorkflow['currentStage']) {
+  return ['stage-tag', `stage-tag--${stage}`];
+}
+
+function pathBasename(filePath: string) {
+  const normalized = filePath.replace(/\\/g, '/');
+  const segments = normalized.split('/').filter(Boolean);
+  return segments[segments.length - 1] || filePath;
+}
+
+function projectDisplayName(project: WorkflowProject) {
+  const name = project.name?.trim();
+  if (name && !name.includes('/') && !name.includes('\\')) {
+    return name;
+  }
+  return pathBasename(name || project.path);
+}
+
+function recentRunText(run?: RunRecord) {
+  if (!run) {
+    return '暂无';
+  }
+  const actionText = actionTypeLabels[run.actionType] || run.actionType;
+  const statusText = statusLabels[run.status] || run.status;
+  return `${actionText}（${statusText}）`;
 }
 
 async function loadProjectHistory() {
@@ -230,6 +274,70 @@ onMounted(async () => {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.project-tag {
+  max-width: 168px;
+}
+
+.project-tag :deep(.el-tag__content) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stage-tag {
+  border-color: var(--stage-tag-border);
+  background: var(--stage-tag-bg);
+  color: var(--stage-tag-color);
+  font-weight: 600;
+}
+
+.stage-tag--PRD {
+  --stage-tag-bg: #eff6ff;
+  --stage-tag-border: #bfdbfe;
+  --stage-tag-color: #1d4ed8;
+}
+
+.stage-tag--TECH_DESIGN {
+  --stage-tag-bg: #fffbeb;
+  --stage-tag-border: #fde68a;
+  --stage-tag-color: #a16207;
+}
+
+.stage-tag--IMPLEMENTATION {
+  --stage-tag-bg: #f5f3ff;
+  --stage-tag-border: #ddd6fe;
+  --stage-tag-color: #6d28d9;
+}
+
+.stage-tag--CODE_REVIEW {
+  --stage-tag-bg: #fff1f2;
+  --stage-tag-border: #fecdd3;
+  --stage-tag-color: #be123c;
+}
+
+.stage-tag--DONE {
+  --stage-tag-bg: #ecfdf5;
+  --stage-tag-border: #a7f3d0;
+  --stage-tag-color: #047857;
+}
+
+.stage-tag--SKIPPED {
+  --stage-tag-bg: #f8fafc;
+  --stage-tag-border: #cbd5e1;
+  --stage-tag-color: #475569;
+}
+.stage-tag--DEFECT {
+  --stage-tag-bg: #fff1f2;
+  --stage-tag-border: #fecdd3;
+  --stage-tag-color: #be123c;
+}
+
+.stage-tag--REQUIREMENT {
+  --stage-tag-bg: #ecfdf5;
+  --stage-tag-border: #a7f3d0;
+  --stage-tag-color: #047857;
 }
 
 .project-picker {

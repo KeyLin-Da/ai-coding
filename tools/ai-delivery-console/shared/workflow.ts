@@ -11,6 +11,7 @@ export type WorkflowStatus =
   | 'IN_PROGRESS'
   | 'IN_REVIEW'
   | 'BLOCKED'
+  | 'SKIPPED'
   | 'DONE';
 
 export type RunStatus =
@@ -18,6 +19,7 @@ export type RunStatus =
   | 'RUNNING'
   | 'TERMINAL_OPENED'
   | 'SUCCEEDED'
+  | 'COMPLETED'
   | 'FAILED'
   | 'CANCELLED'
   | 'WAITING_FOR_AGENT';
@@ -28,9 +30,11 @@ export type RequirementType = 'REQUIREMENT' | 'DEFECT';
 
 export type ExecutionMode = 'BACKGROUND' | 'TERMINAL' | 'INTERACTIVE_TERMINAL' | 'MANUAL_COPY';
 
-export const implementationSteps = ['START_CHANGE', 'ARTIFACT_REVIEW', 'APPLY', 'CHANGE_INSPECTION', 'UNIT_TEST'] as const;
+export const implementationSteps = ['START_CHANGE', 'ARTIFACT_REVIEW', 'APPLY', 'CHANGE_INSPECTION'] as const;
 
 export type ImplementationStep = (typeof implementationSteps)[number];
+export type LegacyImplementationStep = 'UNIT_TEST';
+export type WorkflowImplementationStep = ImplementationStep | LegacyImplementationStep;
 
 export type ActionType =
   | 'PRD_ANALYZE'
@@ -72,7 +76,7 @@ export interface ReviewIssue {
 export interface ReviewRecord {
   id: string;
   stage: WorkflowStage;
-  implementationStep?: ImplementationStep;
+  implementationStep?: WorkflowImplementationStep;
   decision: ReviewDecision;
   comment: string;
   actor: string;
@@ -96,7 +100,7 @@ export interface RunRecord {
   requirementId: string;
   actionType: ActionType;
   stage?: WorkflowStage;
-  implementationStep?: ImplementationStep;
+  implementationStep?: WorkflowImplementationStep;
   status: RunStatus;
   startedAt: string;
   finishedAt?: string;
@@ -229,7 +233,7 @@ export interface StageState {
 }
 
 export interface ImplementationStepState {
-  step: ImplementationStep;
+  step: WorkflowImplementationStep;
   status: WorkflowStatus;
   runId?: string;
   approvedAt?: string;
@@ -254,7 +258,7 @@ export interface RequirementWorkflow {
   createdAt: string;
   updatedAt: string;
   stages: Record<WorkflowStage, StageState>;
-  implementationSteps?: Record<ImplementationStep, ImplementationStepState>;
+  implementationSteps?: Partial<Record<WorkflowImplementationStep, ImplementationStepState>>;
   artifacts: ArtifactRef[];
   runs: RunRecord[];
   reviews: ReviewRecord[];
@@ -282,7 +286,7 @@ export interface ActionInput {
 export interface ReviewInput {
   requirementId: string;
   stage: WorkflowStage;
-  implementationStep?: ImplementationStep;
+  implementationStep?: WorkflowImplementationStep;
   decision: ReviewDecision;
   comment: string;
   actor?: string;
@@ -310,31 +314,72 @@ export const statusLabels: Record<WorkflowStatus | RunStatus, string> = {
   IN_PROGRESS: '进行中',
   IN_REVIEW: '审核中',
   BLOCKED: '阻塞',
+  SKIPPED: '已跳过',
   DONE: '完成',
   QUEUED: '排队中',
   RUNNING: '运行中',
   TERMINAL_OPENED: '终端已打开',
   SUCCEEDED: '成功',
+  COMPLETED: '已完成',
   FAILED: '失败',
   WAITING_FOR_AGENT: '等待 Agent',
   CANCELLED: '已取消'
+};
+
+export const actionTypeLabels: Record<ActionType, string> = {
+  PRD_ANALYZE: 'PRD 分析',
+  DESIGN_GENERATE: '技术方案生成',
+  OPENSPEC_STATUS: 'OpenSpec 状态检查',
+  OPENSPEC_NEW_CHANGE: '创建 OpenSpec 变更',
+  OPENSPEC_INSTRUCTIONS: '读取 OpenSpec 指令',
+  OPENSPEC_FF: 'OpenSpec 快速生成',
+  OPENSPEC_APPLY: '应用 OpenSpec 变更',
+  OPENSPEC_VERIFY: '验证 OpenSpec 变更',
+  OPENSPEC_ARCHIVE: '归档 OpenSpec 变更',
+  JUNIT_GENERATE: '单元测试生成',
+  CODE_REVIEW: '代码评审',
+  RETURN_TO_IMPLEMENTATION: '打回实施',
+  REFRESH_ARTIFACTS: '刷新产物'
 };
 
 export const implementationStepLabels: Record<ImplementationStep, string> = {
   START_CHANGE: '开始变更',
   ARTIFACT_REVIEW: '工件生成与评审',
   APPLY: '开始实施',
-  CHANGE_INSPECTION: '查看变更文件及代码',
-  UNIT_TEST: '执行单测并生成报告'
+  CHANGE_INSPECTION: '查看变更文件及代码'
 };
 
-export function createEmptyStages(): Record<WorkflowStage, StageState> {
-  return {
+export function createEmptyStages(requirementType: RequirementType = 'REQUIREMENT'): Record<WorkflowStage, StageState> {
+  const stages: Record<WorkflowStage, StageState> = {
     PRD: { stage: 'PRD', status: 'DRAFT' },
     TECH_DESIGN: { stage: 'TECH_DESIGN', status: 'NOT_STARTED' },
     IMPLEMENTATION: { stage: 'IMPLEMENTATION', status: 'NOT_STARTED' },
     CODE_REVIEW: { stage: 'CODE_REVIEW', status: 'NOT_STARTED' }
   };
+  if (requirementType === 'DEFECT') {
+    stages.PRD.status = 'SKIPPED';
+    stages.TECH_DESIGN.status = 'DRAFT';
+  }
+  return stages;
+}
+
+export function workflowStagesForType(requirementType: RequirementType = 'REQUIREMENT'): WorkflowStage[] {
+  if (requirementType === 'DEFECT') {
+    return ['TECH_DESIGN', 'IMPLEMENTATION', 'CODE_REVIEW'];
+  }
+  return [...workflowStages];
+}
+
+export function workflowStagesForWorkflow(workflow?: Pick<RequirementWorkflow, 'requirementType'>): WorkflowStage[] {
+  return workflowStagesForType(workflow?.requirementType || 'REQUIREMENT');
+}
+
+export function isStageApplicableToType(stage: WorkflowStage, requirementType: RequirementType = 'REQUIREMENT'): boolean {
+  return workflowStagesForType(requirementType).includes(stage);
+}
+
+export function isStageApplicableToWorkflow(stage: WorkflowStage, workflow?: Pick<RequirementWorkflow, 'requirementType'>): boolean {
+  return workflowStagesForWorkflow(workflow).includes(stage);
 }
 
 export function createEmptyImplementationSteps(): Record<ImplementationStep, ImplementationStepState> {
@@ -342,13 +387,12 @@ export function createEmptyImplementationSteps(): Record<ImplementationStep, Imp
     START_CHANGE: { step: 'START_CHANGE', status: 'DRAFT' },
     ARTIFACT_REVIEW: { step: 'ARTIFACT_REVIEW', status: 'NOT_STARTED' },
     APPLY: { step: 'APPLY', status: 'NOT_STARTED' },
-    CHANGE_INSPECTION: { step: 'CHANGE_INSPECTION', status: 'NOT_STARTED' },
-    UNIT_TEST: { step: 'UNIT_TEST', status: 'NOT_STARTED' }
+    CHANGE_INSPECTION: { step: 'CHANGE_INSPECTION', status: 'NOT_STARTED' }
   };
 }
 
 export function ensureImplementationSteps(
-  steps?: Partial<Record<ImplementationStep, Partial<ImplementationStepState>>>
+  steps?: Partial<Record<WorkflowImplementationStep, Partial<ImplementationStepState>>>
 ): Record<ImplementationStep, ImplementationStepState> {
   const defaults = createEmptyImplementationSteps();
   for (const step of implementationSteps) {
@@ -361,8 +405,12 @@ export function ensureImplementationSteps(
   return defaults;
 }
 
+export function isImplementationStep(step?: WorkflowImplementationStep): step is ImplementationStep {
+  return implementationSteps.includes(step as ImplementationStep);
+}
+
 export function findFirstPendingImplementationStep(
-  steps?: Partial<Record<ImplementationStep, Partial<ImplementationStepState>>>
+  steps?: Partial<Record<WorkflowImplementationStep, Partial<ImplementationStepState>>>
 ): ImplementationStep {
   const normalized = ensureImplementationSteps(steps);
   const firstPending = implementationSteps.find((step) => normalized[step].status !== 'APPROVED');
@@ -390,8 +438,7 @@ export const actionImplementationStepMap: Partial<Record<ActionType, Implementat
   OPENSPEC_INSTRUCTIONS: 'ARTIFACT_REVIEW',
   OPENSPEC_FF: 'ARTIFACT_REVIEW',
   OPENSPEC_APPLY: 'APPLY',
-  OPENSPEC_VERIFY: 'APPLY',
-  JUNIT_GENERATE: 'UNIT_TEST'
+  OPENSPEC_VERIFY: 'APPLY'
 };
 
 export function stageForAction(actionType: ActionType): WorkflowStage | undefined {
