@@ -8,7 +8,35 @@
       <el-button type="primary" :icon="Plus" @click="openCreateDialog">创建/导入</el-button>
     </div>
 
-    <el-table :data="store.requirements" v-loading="store.loading" style="width: 100%">
+    <div class="filter-panel" aria-label="需求筛选">
+      <el-input
+        v-model="filters.keyword"
+        class="filter-keyword filter-control"
+        clearable
+        :prefix-icon="Search"
+        placeholder="搜索需求号 / 标题"
+      />
+      <el-select v-model="filters.requirementType" class="filter-control" clearable placeholder="需求类型">
+        <el-option
+          v-for="option in requirementTypeOptions"
+          :key="option.value"
+          :label="option.label"
+          :value="option.value"
+        />
+      </el-select>
+      <el-select v-model="filters.stage" class="filter-control" clearable placeholder="阶段">
+        <el-option v-for="option in stageFilterOptions" :key="option.value" :label="option.label" :value="option.value" />
+      </el-select>
+      <el-select v-model="filters.projectPaths" class="filter-control" multiple clearable collapse-tags placeholder="涉及工程">
+        <el-option v-for="option in projectFilterOptions" :key="option.value" :label="option.label" :value="option.value" />
+      </el-select>
+      <div class="filter-actions">
+        <span class="filter-count">{{ filterSummaryText }}</span>
+        <el-button class="clear-filter-button" :disabled="!hasActiveFilters" link @click="clearFilters">清空</el-button>
+      </div>
+    </div>
+
+    <el-table :data="pagedRequirements" v-loading="store.loading" style="width: 100%">
       <el-table-column prop="requirementId" label="需求号" width="140" />
       <el-table-column prop="title" label="标题" min-width="220" />
       <el-table-column prop="requirementType" label="需求类型" min-width="140" >
@@ -52,6 +80,16 @@
         </template>
       </el-table-column>
     </el-table>
+    <div v-if="filteredRequirements.length" class="pagination-bar">
+      <el-pagination
+        v-model:current-page="currentPage"
+        v-model:page-size="pageSize"
+        :page-sizes="pageSizeOptions"
+        :total="filteredRequirements.length"
+        background
+        layout="total, sizes, prev, pager, next, jumper"
+      />
+    </div>
   </section>
 
   <el-dialog v-model="dialogVisible" :title="dialogTitle" width="620px">
@@ -100,9 +138,9 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { DocumentAdd, Edit, Plus, View } from '@element-plus/icons-vue';
+import { DocumentAdd, Edit, Plus, Search, View } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
-import type { RequirementInput, RequirementWorkflow, RunRecord, WorkflowProject } from '@shared/workflow';
+import type { RequirementInput, RequirementType, RequirementWorkflow, RunRecord, WorkflowProject } from '@shared/workflow';
 import { actionTypeLabels, defaultBranchName, requirementTypeLabels, shouldSyncBranchName, stageLabels, statusLabels } from '@shared/workflow';
 import { useWorkflowStore } from '@/stores/workflow';
 import { apiClient } from '@/api/client';
@@ -123,6 +161,90 @@ const projectHistory = ref<WorkflowProject[]>([]);
 const editingWorkflow = ref<RequirementWorkflow>();
 const isEditingWorkflow = computed(() => Boolean(editingWorkflow.value));
 const dialogTitle = computed(() => (isEditingWorkflow.value ? '编辑需求' : '创建或导入需求'));
+const filters = reactive<{
+  keyword: string;
+  requirementType: RequirementType | '';
+  stage: RequirementWorkflow['currentStage'] | '';
+  projectPaths: string[];
+}>({
+  keyword: '',
+  requirementType: '',
+  stage: '',
+  projectPaths: []
+});
+const currentPage = ref(1);
+const pageSize = ref(10);
+const pageSizeOptions = [10, 20, 50, 100];
+const requirementTypeOptions = computed(() =>
+  (Object.keys(requirementTypeLabels) as RequirementType[]).map((value) => ({
+    value,
+    label: requirementTypeLabels[value]
+  }))
+);
+const stageOrder: RequirementWorkflow['currentStage'][] = ['PRD', 'TECH_DESIGN', 'IMPLEMENTATION', 'CODE_REVIEW', 'DONE'];
+const stageFilterOptions = computed(() => {
+  const stages = new Set(store.requirements.map((workflow) => workflow.currentStage));
+  return stageOrder
+    .filter((stage) => stages.has(stage))
+    .map((value) => ({
+      value,
+      label: stageText(value)
+    }));
+});
+const projectFilterOptions = computed(() => {
+  const options = new Map<string, { label: string; value: string }>();
+  for (const workflow of store.requirements) {
+    for (const project of workflow.projects || []) {
+      const value = project.path.trim();
+      if (value && !options.has(value)) {
+        options.set(value, {
+          value,
+          label: projectDisplayName(project)
+        });
+      }
+    }
+  }
+  return [...options.values()].sort((left, right) => left.label.localeCompare(right.label, 'zh-Hans-CN'));
+});
+const filteredRequirements = computed(() => {
+  const keyword = filters.keyword.trim().toLowerCase();
+  const selectedProjectPaths = new Set(filters.projectPaths);
+
+  return store.requirements.filter((workflow) => {
+    if (keyword) {
+      const requirementId = workflow.requirementId.toLowerCase();
+      const title = workflow.title.toLowerCase();
+      if (!requirementId.includes(keyword) && !title.includes(keyword)) {
+        return false;
+      }
+    }
+    if (filters.requirementType && (workflow.requirementType || 'REQUIREMENT') !== filters.requirementType) {
+      return false;
+    }
+    if (filters.stage && workflow.currentStage !== filters.stage) {
+      return false;
+    }
+    if (selectedProjectPaths.size > 0 && !(workflow.projects || []).some((project) => selectedProjectPaths.has(project.path))) {
+      return false;
+    }
+    return true;
+  });
+});
+const hasActiveFilters = computed(() =>
+  Boolean(filters.keyword.trim() || filters.requirementType || filters.stage || filters.projectPaths.length)
+);
+const filterSummaryText = computed(() => {
+  const total = store.requirements.length;
+  if (!hasActiveFilters.value) {
+    return `共 ${total} 条`;
+  }
+  return `已筛选 ${filteredRequirements.value.length} / 共 ${total} 条`;
+});
+const pageCount = computed(() => Math.max(1, Math.ceil(filteredRequirements.value.length / pageSize.value)));
+const pagedRequirements = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value;
+  return filteredRequirements.value.slice(start, start + pageSize.value);
+});
 
 const branchNamePreview = computed(() => {
   const requirementId = form.requirementId.trim() || '需求号';
@@ -152,7 +274,7 @@ function onBranchNameInput(value: string) {
 }
 
 function stageText(stage: string) {
-  return stage === 'DONE' ? '完成' : stageLabels[stage as keyof typeof stageLabels] || stage;
+  return stage === 'DONE' ? '完成' : stageLabels[stage as keyof typeof stageLabels] || statusLabels[stage as keyof typeof statusLabels] || stage;
 }
 
 function stageRequirementType(requirementType: string) {
@@ -185,6 +307,36 @@ function recentRunText(run?: RunRecord) {
   const statusText = statusLabels[run.status] || run.status;
   return `${actionText}（${statusText}）`;
 }
+
+function clearFilters() {
+  filters.keyword = '';
+  filters.requirementType = '';
+  filters.stage = '';
+  filters.projectPaths = [];
+}
+
+function resetPagination() {
+  currentPage.value = 1;
+}
+
+function clampCurrentPage() {
+  if (currentPage.value < 1) {
+    currentPage.value = 1;
+    return;
+  }
+  if (currentPage.value > pageCount.value) {
+    currentPage.value = pageCount.value;
+  }
+}
+
+watch(
+  () => [filters.keyword, filters.requirementType, filters.stage, filters.projectPaths.join('\u0000')],
+  resetPagination
+);
+
+watch(pageSize, resetPagination);
+
+watch([() => filteredRequirements.value.length, pageSize], clampCurrentPage);
 
 async function loadProjectHistory() {
   // Load projects from configured projectPaths instead of saved history
@@ -270,6 +422,92 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.filter-panel {
+  display: grid;
+  grid-template-columns: minmax(280px, 1.8fr) minmax(150px, 0.6fr) minmax(150px, 0.6fr) minmax(220px, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 16px;
+  border-top: 1px solid #e5e7eb;
+  border-bottom: 1px solid #eef2f7;
+  background: linear-gradient(180deg, #fbfdff 0%, #f8fafc 100%);
+}
+
+.filter-control {
+  min-width: 0;
+}
+
+.filter-control :deep(.el-input__wrapper) {
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 0 0 1px #d7dee8 inset;
+  transition:
+    box-shadow 0.18s ease,
+    background-color 0.18s ease;
+}
+
+.filter-control :deep(.el-input__wrapper:hover) {
+  box-shadow: 0 0 0 1px #9ec5fe inset, 0 8px 18px rgba(15, 23, 42, 0.04);
+}
+
+.filter-control :deep(.el-input__wrapper.is-focus) {
+  background: #ffffff;
+  box-shadow: 0 0 0 1px #3b82f6 inset, 0 0 0 3px rgba(59, 130, 246, 0.14);
+}
+
+.filter-control :deep(.el-input__inner) {
+  color: #334155;
+}
+
+.filter-keyword :deep(.el-input__wrapper) {
+  box-shadow: 0 0 0 1px #bfd3ee inset, 0 10px 22px rgba(15, 23, 42, 0.05);
+}
+
+.filter-keyword :deep(.el-input__prefix) {
+  color: #64748b;
+}
+
+.filter-control :deep(.el-input__inner::placeholder) {
+  color: #94a3b8;
+}
+
+.filter-control :deep(.el-select__tags) {
+  max-width: calc(100% - 28px);
+}
+
+.filter-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 136px;
+  white-space: nowrap;
+}
+
+.filter-count {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.clear-filter-button {
+  font-weight: 600;
+}
+
+.pagination-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 16px;
+  border-top: 1px solid #e5e7eb;
+}
+
 .project-tags {
   display: flex;
   flex-wrap: wrap;
@@ -348,6 +586,20 @@ onMounted(async () => {
 }
 
 @media (max-width: 720px) {
+  .filter-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .filter-actions {
+    justify-content: space-between;
+    min-width: 0;
+  }
+
+  .pagination-bar {
+    justify-content: flex-start;
+    overflow-x: auto;
+  }
+
   .project-picker {
     grid-template-columns: 1fr;
   }

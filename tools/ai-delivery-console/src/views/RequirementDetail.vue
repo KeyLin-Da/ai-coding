@@ -86,41 +86,60 @@
                   <span class="design-source-path">{{ prdDesignSourcePath || '未关联' }}</span>
                 </el-descriptions-item>
               </el-descriptions>
-              <div class="prd-file-panel">
-                <div class="action-line">
-                  <input
-                    ref="techDesignFileInput"
-                    class="hidden-file-input"
-                    type="file"
-                    multiple
-                    accept=".pdf,.md,.markdown,image/*"
-                    @change="uploadTechDesignFiles"
-                  />
-                  <el-button :disabled="requiresPrdApproval && !prdApproved" :icon="Upload" @click="chooseTechDesignFiles">上传补充材料</el-button>
-                  <span class="muted">支持 PDF、图片、Markdown，上传后快照到 technical-design/file 目录并追加到 d 参数。</span>
-                </div>
-                <div v-if="techDesignSourceFiles.length" class="prd-file-list">
-                  <div v-for="file in techDesignSourceFiles" :key="file.id" class="prd-file-item">
-                    <div class="prd-file-meta">
-                      <strong>{{ file.name }}</strong>
-                      <small class="muted">{{ file.path }} · {{ formatFileSize(file.size) }}</small>
+              <section class="design-input-panel" aria-label="技术方案生成输入">
+                <div class="design-input-block">
+                  <div class="design-input-heading">
+                    <div>
+                      <strong>补充材料</strong>
+                      <p class="muted">支持 PDF、图片、Markdown；上传后作为技术方案生成输入。</p>
                     </div>
-                    <el-button type="danger" link :icon="Delete" @click="deleteTechDesignFile(file.id)">删除</el-button>
+                    <input
+                      ref="techDesignFileInput"
+                      class="hidden-file-input"
+                      type="file"
+                      multiple
+                      accept=".pdf,.md,.markdown,image/*"
+                      @change="uploadTechDesignFiles"
+                    />
+                    <el-button class="design-upload-button" :disabled="requiresPrdApproval && !prdApproved" :icon="Upload" @click="chooseTechDesignFiles">
+                      上传补充材料
+                    </el-button>
+                  </div>
+                  <div v-if="techDesignSourceFiles.length" class="prd-file-list design-file-list">
+                    <div v-for="file in techDesignSourceFiles" :key="file.id" class="prd-file-item">
+                      <div class="prd-file-meta">
+                        <strong>{{ file.name }}</strong>
+                        <small class="muted">{{ file.path }} · {{ formatFileSize(file.size) }}</small>
+                      </div>
+                      <el-button type="danger" link :icon="Delete" @click="deleteTechDesignFile(file.id)">删除</el-button>
+                    </div>
                   </div>
                 </div>
-              </div>
-              <el-input
-                v-model="designClarification"
-                type="textarea"
-                :rows="2"
-                maxlength="5000"
-                show-word-limit
-                placeholder="填写评审意见或补充说明，对应 coding-design 的 c 参数（可选），用于二次评审时提供修改建议"
-              />
-              <el-button type="primary" :disabled="!canRunDesign" :icon="primaryActionIcon(Operation)" @click="runDesign">
-                {{ actionButtonText('生成技术方案') }}
-              </el-button>
-              <MarkdownEditor title="技术方案" :artifact-path="stageArtifactPath('TECH_DESIGN')" @saved="reload" />
+                <div class="design-input-block">
+                  <div class="design-input-heading">
+                    <div>
+                      <strong>补充说明</strong>
+                      <p class="muted">用于补充约束、评审意见或二次修改说明。</p>
+                    </div>
+                  </div>
+                  <el-input
+                    v-model="designClarification"
+                    class="design-clarification"
+                    type="textarea"
+                    :rows="4"
+                    maxlength="5000"
+                    show-word-limit
+                    placeholder="补充评审意见、约束或二次修改说明（可选）"
+                  />
+                </div>
+                <div class="design-run-footer">
+                  <span class="muted">生成时会读取补充材料和补充说明。</span>
+                  <el-button class="design-run-button" type="primary" :disabled="!canRunDesign" :icon="primaryActionIcon(Operation)" @click="runDesign">
+                    {{ actionButtonText('生成技术方案') }}
+                  </el-button>
+                </div>
+              </section>
+              <MarkdownEditor title="技术方案" :artifact-path="technicalDesignEditorPath" @saved="reload" />
             </div>
 
             <div v-else-if="activeStage === 'IMPLEMENTATION'" class="stage-actions">
@@ -442,11 +461,18 @@ const openSpecPrdDocumentPath = computed(() => {
   }
   return stageArtifactPath('PRD') || workflow.value.stages.PRD.artifactPath || '';
 });
+const technicalDesignEditorPath = computed(() => {
+  if (!workflow.value) {
+    return '';
+  }
+  const artifactPath = officialTechnicalDesignArtifactPath();
+  return artifactPath || defaultTechnicalDesignDocumentPath(workflow.value.requirementId);
+});
 const openSpecTechnicalDesignDocumentPath = computed(() => {
   if (!workflow.value) {
     return '';
   }
-  return stageArtifactPath('TECH_DESIGN') || workflow.value.stages.TECH_DESIGN.artifactPath || '';
+  return officialTechnicalDesignArtifactPath();
 });
 const stageHint = computed(() => {
   const hints: Record<WorkflowStage, string> = {
@@ -467,6 +493,32 @@ function stageArtifactPath(stage: WorkflowStage) {
     }
   }
   return workflow.value?.artifacts.find((artifact) => artifact.stage === stage && artifact.exists && artifact.kind !== 'directory')?.path;
+}
+
+function defaultTechnicalDesignDocumentPath(requirementId: string) {
+  return `docs/${requirementId}/technical-design/design_review.md`;
+}
+
+function isTechnicalDesignSourcePath(filePath: string) {
+  return filePath.replace(/\\/g, '/').includes('/technical-design/file/');
+}
+
+function officialTechnicalDesignArtifactPath() {
+  if (!workflow.value) {
+    return '';
+  }
+  const defaultPath = defaultTechnicalDesignDocumentPath(workflow.value.requirementId);
+  const officialArtifact = workflow.value.artifacts.find(
+    (artifact) => artifact.exists && artifact.kind !== 'directory' && (artifact.id === 'technical-design' || artifact.path === defaultPath)
+  );
+  if (officialArtifact) {
+    return officialArtifact.path;
+  }
+  const artifactPath = workflow.value.stages.TECH_DESIGN.artifactPath?.trim();
+  if (artifactPath && !isTechnicalDesignSourcePath(artifactPath)) {
+    return artifactPath;
+  }
+  return '';
 }
 
 async function reload() {
@@ -994,6 +1046,76 @@ onMounted(async () => {
   max-width: 360px;
 }
 
+.design-input-panel {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #fbfdff 0%, #f8fbff 100%);
+}
+
+.design-input-block {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.design-input-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+
+.design-input-heading > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.design-input-heading strong {
+  color: #172033;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.design-input-heading p {
+  margin: 0;
+  line-height: 20px;
+}
+
+.design-upload-button {
+  flex: 0 0 auto;
+}
+
+.design-file-list {
+  background: #fff;
+}
+
+.design-clarification :deep(.el-textarea__inner) {
+  min-height: 96px !important;
+  border-radius: 8px;
+  line-height: 1.6;
+}
+
+.design-run-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 2px;
+}
+
+.design-run-footer .muted {
+  line-height: 20px;
+}
+
+.design-run-button {
+  min-width: 132px;
+}
+
 .implementation-step-nav {
   display: grid;
   grid-template-columns: repeat(4, minmax(130px, 1fr));
@@ -1282,6 +1404,17 @@ onMounted(async () => {
 
   .action-line .el-input {
     max-width: none;
+  }
+
+  .design-input-heading,
+  .design-run-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .design-upload-button,
+  .design-run-button {
+    width: 100%;
   }
 
   .stage-toolbar-actions {

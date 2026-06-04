@@ -79,14 +79,15 @@ class MockEventSource {
   }
 }
 
-function artifact(stage: ArtifactRef['stage'], path: string): ArtifactRef {
+function artifact(stage: ArtifactRef['stage'], path: string, overrides: Partial<ArtifactRef> = {}): ArtifactRef {
   return {
     id: `${stage}-${path}`,
     stage,
     label: path,
     path,
     kind: 'markdown',
-    exists: true
+    exists: true,
+    ...overrides
   };
 }
 
@@ -291,6 +292,20 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     expect(designButton(wrapper).attributes('disabled')).toBeUndefined();
   });
 
+  it('技术方案输入区集中展示补充材料、补充说明和生成动作', async () => {
+    const current = defectWorkflow([]);
+    const wrapper = await mountDetail(current);
+
+    const inputPanel = wrapper.find('.design-input-panel');
+
+    expect(inputPanel.exists()).toBe(true);
+    expect(inputPanel.text()).toContain('补充材料');
+    expect(inputPanel.text()).toContain('补充说明');
+    expect(inputPanel.text()).toContain('生成技术方案');
+    expect(inputPanel.find('.design-run-footer').exists()).toBe(true);
+    expect(inputPanel.find('.design-clarification').attributes('rows')).toBe('4');
+  });
+
   it('缺陷生成技术方案时不传 PRD documentPath', async () => {
     const current = defectWorkflow([]);
     const wrapper = await mountDetail(current);
@@ -308,6 +323,62 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
       })
     );
     expect(ElMessage.warning).not.toHaveBeenCalledWith('请先通过 PRD 审核');
+  });
+
+  it('技术方案编辑器在仅有补充材料时指向正式设计文档默认路径', async () => {
+    const current = defectWorkflow([
+      artifact('TECH_DESIGN', 'docs/172014/technical-design/file/screenshot.png', {
+        id: 'technical-design-source-1',
+        kind: 'text'
+      })
+    ]);
+    const wrapper = await mountDetail(current);
+
+    const editor = wrapper.findAll('.markdown-editor').find((item) => item.text().includes('技术方案'));
+
+    expect(editor?.text()).toContain('docs/172014/technical-design/design_review.md');
+    expect(editor?.text()).not.toContain('docs/172014/technical-design/file/screenshot.png');
+  });
+
+  it('技术方案编辑器在正式文档存在时渲染正式文档', async () => {
+    const current = defectWorkflow([
+      artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md', {
+        id: 'technical-design'
+      })
+    ]);
+    const wrapper = await mountDetail(current);
+
+    const editor = wrapper.findAll('.markdown-editor').find((item) => item.text().includes('技术方案'));
+
+    expect(editor?.text()).toContain('docs/172014/technical-design/design_review.md');
+  });
+
+  it('技术方案正式文档和补充材料共存时编辑器仍渲染正式文档且材料列表可见', async () => {
+    const current = defectWorkflow([
+      artifact('TECH_DESIGN', 'docs/172014/technical-design/file/screenshot.png', {
+        id: 'technical-design-source-1',
+        kind: 'text'
+      }),
+      artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md', {
+        id: 'technical-design'
+      })
+    ]);
+    current.techDesignSourceFiles = [
+      {
+        id: 'file-1',
+        name: 'screenshot.png',
+        path: 'docs/172014/technical-design/file/screenshot.png',
+        size: 241000,
+        uploadedAt: new Date().toISOString()
+      }
+    ];
+    const wrapper = await mountDetail(current);
+
+    const editor = wrapper.findAll('.markdown-editor').find((item) => item.text().includes('技术方案'));
+
+    expect(editor?.text()).toContain('docs/172014/technical-design/design_review.md');
+    expect(editor?.text()).not.toContain('docs/172014/technical-design/file/screenshot.png');
+    expect(wrapper.text()).toContain('screenshot.png');
   });
 
   it('缺少 PRD 文档路径时不发起工件生成并提示', async () => {
@@ -353,6 +424,24 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
 
   it('缺少技术方案文档路径时不发起工件生成并提示', async () => {
     const current = workflow([artifact('PRD', 'docs/172014/prd/analysis.md')]);
+    const wrapper = await mountDetail(current);
+
+    await activateImplementationStep(wrapper, '工件生成与评审');
+    await openSpecArtifactButton(wrapper).trigger('click');
+
+    expect(ElMessage.warning).toHaveBeenCalledWith('请先生成、保存或刷新技术方案产物');
+    expect(apiClient.runAction).not.toHaveBeenCalled();
+    expect(apiClient.previewActionCommand).not.toHaveBeenCalled();
+  });
+
+  it('仅有技术方案补充材料时不把补充材料作为 OpenSpec 技术方案文档', async () => {
+    const current = workflow([
+      artifact('PRD', 'docs/172014/prd/analysis.md'),
+      artifact('TECH_DESIGN', 'docs/172014/technical-design/file/screenshot.png', {
+        id: 'technical-design-source-1',
+        kind: 'text'
+      })
+    ]);
     const wrapper = await mountDetail(current);
 
     await activateImplementationStep(wrapper, '工件生成与评审');
