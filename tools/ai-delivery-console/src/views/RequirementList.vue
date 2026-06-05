@@ -39,10 +39,10 @@
     <el-table :data="pagedRequirements" v-loading="store.loading" style="width: 100%">
       <el-table-column prop="requirementId" label="需求号" width="140" />
       <el-table-column prop="title" label="标题" min-width="220" />
-      <el-table-column prop="requirementType" label="需求类型" min-width="140" >
+      <el-table-column prop="requirementType" label="需求类型" min-width="140">
         <template #default="{ row }">
-            <el-tag :class="stageTagClass(row.requirementType)" effect="plain">{{ stageRequirementType(row.requirementType) }}</el-tag>
-         </template>
+          <el-tag :class="stageTagClass(row.requirementType)" effect="plain">{{ stageRequirementType(row.requirementType) }}</el-tag>
+        </template>
       </el-table-column>
       <el-table-column prop="branchName" label="分支" min-width="180" />
       <el-table-column label="涉及工程" min-width="220">
@@ -71,6 +71,16 @@
       <el-table-column label="最近运行" min-width="180">
         <template #default="{ row }">
           <span :class="{ muted: !row.runs[0] }">{{ recentRunText(row.runs[0]) }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="协作" min-width="180">
+        <template #default="{ row }">
+          <div class="collaboration-tags">
+            <el-tag v-if="row.onlineClientCount !== undefined" size="small" type="success" effect="plain">在线 {{ row.onlineClientCount }}</el-tag>
+            <el-tag v-if="row.pendingReviewCount !== undefined" size="small" type="warning" effect="plain">待审 {{ row.pendingReviewCount }}</el-tag>
+            <el-tag v-if="row.jobStatus" size="small" type="info" effect="plain">{{ row.jobStatus }}</el-tag>
+            <span v-if="row.onlineClientCount === undefined && row.pendingReviewCount === undefined && !row.jobStatus" class="muted">-</span>
+          </div>
         </template>
       </el-table-column>
       <el-table-column label="操作" width="190" fixed="right">
@@ -512,6 +522,13 @@ onMounted(async () => {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.collaboration-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
 }
 
 .project-tag {

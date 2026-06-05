@@ -84,4 +84,31 @@ describe('ArtifactSidebar', () => {
     expect(wrapper.text()).not.toContain('PRD 分析文档');
     expect(wrapper.text()).toContain('技术方案评审文档');
   });
+
+  it('展示产物当前版本、历史数量、创建人和来源 run', () => {
+    const wrapper = mount(ArtifactSidebar, {
+      props: {
+        artifacts: [
+          {
+            id: 'prd',
+            stage: 'PRD',
+            label: 'PRD 分析文档',
+            path: 'docs/172014/prd/analysis.md',
+            kind: 'markdown',
+            exists: true,
+            currentVersionNo: 3,
+            versionCount: 5,
+            createdBy: 1,
+            sourceRunId: 900
+          }
+        ],
+        issues: []
+      }
+    });
+
+    expect(wrapper.text()).toContain('v3');
+    expect(wrapper.text()).toContain('5 个版本');
+    expect(wrapper.text()).toContain('创建人 1');
+    expect(wrapper.text()).toContain('run 900');
+  });
 });

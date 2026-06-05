@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import type { ActionInput, AgentProvider, RequirementInput, RequirementWorkflow, ReviewInput, RunEvent } from '@shared/workflow';
 import { apiClient, type DeleteTechDesignQuestionInput } from '@/api/client';
+import { getApiRuntimeConfig, isRemoteApiMode, resolveApiUrl } from '@/api/runtime';
 
 interface WorkflowState {
   requirements: RequirementWorkflow[];
@@ -9,6 +10,7 @@ interface WorkflowState {
   runEvents: RunEvent[];
   agents: AgentProvider[];
   eventSource?: EventSource;
+  workflowEventSource?: EventSource;
 }
 
 export const useWorkflowStore = defineStore('workflow', {
@@ -18,7 +20,8 @@ export const useWorkflowStore = defineStore('workflow', {
     loading: false,
     runEvents: [],
     agents: [],
-    eventSource: undefined
+    eventSource: undefined,
+    workflowEventSource: undefined
   }),
   actions: {
     async loadAgents() {
@@ -77,12 +80,16 @@ export const useWorkflowStore = defineStore('workflow', {
       }
       this.stopRunStream();
       const requirementId = this.current.requirementId;
-      this.eventSource = new EventSource(
-        `/api/ai-delivery/runs/${encodeURIComponent(runId)}/stream?requirementId=${encodeURIComponent(requirementId)}&tail=1`
-      );
-      this.eventSource.onmessage = (event) => {
+      const runtime = getApiRuntimeConfig();
+      const streamPath = isRemoteApiMode()
+        ? `/api/ai-delivery/runs/${encodeURIComponent(runId)}/events/subscribe?userId=${encodeURIComponent(runtime.userId)}`
+        : `/api/ai-delivery/runs/${encodeURIComponent(runId)}/stream?requirementId=${encodeURIComponent(requirementId)}&tail=1`;
+      this.eventSource = new EventSource(resolveApiUrl(streamPath));
+      const appendEvent = (event: MessageEvent) => {
         this.runEvents.push(JSON.parse(event.data) as RunEvent);
       };
+      this.eventSource.onmessage = appendEvent;
+      this.eventSource.addEventListener?.('run-event', appendEvent as EventListener);
       this.eventSource.onerror = () => {
         this.stopRunStream();
       };
@@ -91,6 +98,37 @@ export const useWorkflowStore = defineStore('workflow', {
       if (this.eventSource) {
         this.eventSource.close();
         this.eventSource = undefined;
+      }
+    },
+    streamWorkflowEvents() {
+      if (!this.current || !isRemoteApiMode()) {
+        return;
+      }
+      this.stopWorkflowStream();
+      const runtime = getApiRuntimeConfig();
+      if (!runtime.projectId || !runtime.userId) {
+        return;
+      }
+      const requirementPk = this.current.id ? `&requirementPk=${encodeURIComponent(String(this.current.id))}` : '';
+      this.workflowEventSource = new EventSource(
+        resolveApiUrl(
+          `/api/ai-delivery/events/subscribe?projectId=${encodeURIComponent(runtime.projectId)}&userId=${encodeURIComponent(runtime.userId)}${requirementPk}`
+        )
+      );
+      const refresh = () => {
+        if (this.current) {
+          void this.loadRequirement(this.current.requirementId);
+          void this.loadRequirements();
+        }
+      };
+      this.workflowEventSource.onmessage = refresh;
+      this.workflowEventSource.addEventListener?.('domain-event', refresh as EventListener);
+      this.workflowEventSource.onerror = () => this.stopWorkflowStream();
+    },
+    stopWorkflowStream() {
+      if (this.workflowEventSource) {
+        this.workflowEventSource.close();
+        this.workflowEventSource = undefined;
       }
     },
     async cancelRun(runId: string) {

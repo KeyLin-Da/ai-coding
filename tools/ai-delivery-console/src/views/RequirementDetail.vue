@@ -16,6 +16,9 @@
       <div class="requirement-meta">
         <el-tag size="small" :type="requirementTypeTagType(workflow.requirementType)" effect="light">{{ requirementTypeText }}</el-tag>
         <el-tag size="small" :type="statusTagType(workflow.status)" effect="light">{{ statusLabels[workflow.status] }}</el-tag>
+        <el-tag v-if="workflow.onlineClientCount !== undefined" size="small" type="success" effect="plain">在线 {{ workflow.onlineClientCount }}</el-tag>
+        <el-tag v-if="workflow.pendingReviewCount !== undefined" size="small" type="warning" effect="plain">待审 {{ workflow.pendingReviewCount }}</el-tag>
+        <el-tag v-if="workflow.jobStatus" size="small" type="info" effect="plain">{{ workflow.jobStatus }}</el-tag>
         <span class="branch-pill">{{ workflow.branchName || '未绑定分支' }}</span>
       </div>
       <StageTimeline v-model="activeStage" :workflow="workflow" />
@@ -341,7 +344,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { Back, ChatLineSquare, CopyDocument, DataAnalysis, Delete, DocumentChecked, Operation, Refresh, Tickets, Upload, View } from '@element-plus/icons-vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
@@ -594,6 +597,7 @@ async function reload() {
   if (typeof route.params.requirementId === 'string') {
     await store.loadRequirement(route.params.requirementId);
     await loadOpenSpecSummary();
+    store.streamWorkflowEvents();
   }
 }
 
@@ -1088,6 +1092,11 @@ watch(
 onMounted(async () => {
   await store.loadAgents();
   await reload();
+});
+
+onUnmounted(() => {
+  store.stopRunStream();
+  store.stopWorkflowStream();
 });
 </script>
 

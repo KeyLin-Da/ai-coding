@@ -39,7 +39,11 @@ describe('ArtifactPreviewDialog', () => {
       label: 'PRD 分析文档',
       path: 'docs/172014/prd/analysis.md',
       kind: 'markdown',
-      exists: true
+      exists: true,
+      currentVersionNo: 2,
+      versionCount: 4,
+      createdBy: 1,
+      sourceRunId: 900
     });
     await nextTick();
 
@@ -47,6 +51,9 @@ describe('ArtifactPreviewDialog', () => {
     expect(wrapper.text()).toContain('docs/172014/prd/analysis.md');
     expect(wrapper.html()).toContain('<h1>PRD</h1>');
     expect(wrapper.text()).toContain('产物内容');
+    expect(wrapper.text()).toContain('v2');
+    expect(wrapper.text()).toContain('4 个版本');
+    expect(wrapper.text()).toContain('run 900');
   });
 
   it('护眼模式会切换预览样式并持久化偏好', async () => {

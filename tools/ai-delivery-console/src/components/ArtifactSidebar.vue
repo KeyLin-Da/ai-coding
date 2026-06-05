@@ -16,6 +16,7 @@
             <span class="artifact-main">
               <span>{{ artifact.label }}</span>
               <small>{{ artifact.exists ? artifact.path : '未生成' }}</small>
+              <small v-if="versionText(artifact)" class="version-line">{{ versionText(artifact) }}</small>
             </span>
             <el-tag size="small" :type="artifact.exists ? 'success' : 'info'" effect="light">
               {{ artifact.exists ? '已生成' : '未生成' }}
@@ -65,6 +66,23 @@ const artifactGroups = computed(() =>
     }))
     .filter((group): group is { stage: WorkflowStage; items: ArtifactRef[] } => group.items.length > 0)
 );
+
+function versionText(artifact: ArtifactRef): string {
+  const segments: string[] = [];
+  if (artifact.currentVersionNo) {
+    segments.push(`v${artifact.currentVersionNo}`);
+  }
+  if (artifact.versionCount) {
+    segments.push(`${artifact.versionCount} 个版本`);
+  }
+  if (artifact.createdBy) {
+    segments.push(`创建人 ${artifact.createdBy}`);
+  }
+  if (artifact.sourceRunId) {
+    segments.push(`run ${artifact.sourceRunId}`);
+  }
+  return segments.join(' · ');
+}
 </script>
 
 <style scoped>
@@ -145,6 +163,10 @@ const artifactGroups = computed(() =>
 .artifact-main small,
 .issue-row small {
   color: #697891;
+}
+
+.artifact-main .version-line {
+  color: #2563eb;
 }
 
 .issue-row {

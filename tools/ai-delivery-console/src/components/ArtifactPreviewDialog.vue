@@ -5,6 +5,7 @@
         <div class="preview-title-block">
           <strong>{{ artifact?.label || '产物预览' }}</strong>
           <p class="muted">{{ artifact?.path || '未选择文件' }}</p>
+          <p v-if="versionText" class="muted version-summary">{{ versionText }}</p>
         </div>
         <div class="preview-header-actions">
           <label class="eye-care-toggle" :class="{ active: eyeCareMode }">
@@ -111,6 +112,26 @@ const formattedContent = computed(() => {
   return content.value;
 });
 
+const versionText = computed(() => {
+  if (!artifact.value) {
+    return '';
+  }
+  const segments: string[] = [];
+  if (artifact.value.currentVersionNo) {
+    segments.push(`v${artifact.value.currentVersionNo}`);
+  }
+  if (artifact.value.versionCount) {
+    segments.push(`${artifact.value.versionCount} 个版本`);
+  }
+  if (artifact.value.createdBy) {
+    segments.push(`创建人 ${artifact.value.createdBy}`);
+  }
+  if (artifact.value.sourceRunId) {
+    segments.push(`run ${artifact.value.sourceRunId}`);
+  }
+  return segments.join(' · ');
+});
+
 watch(previewHtml, async () => {
   if (!visible.value || !isMarkdown.value) {
     return;
@@ -209,6 +230,10 @@ defineExpose({ open });
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.version-summary {
+  color: #2563eb;
 }
 
 .preview-header-actions {

@@ -17,7 +17,10 @@
       <div v-for="(event, index) in events" :key="index" class="terminal-line" :class="event.level.toLowerCase()">
         <span class="time">{{ event.time }}</span>
         <span class="type">{{ event.type || event.level }}</span>
-        <pre>{{ event.text || event.message }}</pre>
+        <div class="log-message">
+          <pre>{{ event.text || event.message }}</pre>
+          <small v-if="chunkRef(event)">chunk {{ chunkRef(event) }}</small>
+        </div>
       </div>
     </div>
   </el-drawer>
@@ -44,6 +47,11 @@ function open() {
 
 function toggleFullscreen() {
   isFullscreen.value = !isFullscreen.value;
+}
+
+function chunkRef(event: RunEvent): string {
+  const data = event.data as { textObjectId?: string | number } | undefined;
+  return data?.textObjectId ? String(data.textObjectId) : '';
 }
 
 defineExpose({ open });
@@ -100,6 +108,16 @@ pre {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.log-message {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.log-message small {
+  color: #93c5fd;
 }
 
 @media (max-width: 760px) {

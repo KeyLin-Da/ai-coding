@@ -11,6 +11,18 @@
         <el-button type="primary" :disabled="!artifactPath" :icon="DocumentChecked" @click="save">保存</el-button>
       </div>
     </div>
+    <el-alert
+      v-if="conflictMessage"
+      class="conflict-alert"
+      type="warning"
+      show-icon
+      :closable="false"
+      :title="conflictMessage"
+    >
+      <template #default>
+        <el-button size="small" @click="load">刷新版本</el-button>
+      </template>
+    </el-alert>
     <div class="editor-layout" style="padding: 12px">
       <div class="editor-panel">
         <el-input 
@@ -88,6 +100,8 @@ const md = new MarkdownIt({ html: false, linkify: true, breaks: true });
 md.use(mermaidPlugin);
 const content = ref('');
 const expectedHash = ref<string | undefined>();
+const baseVersionId = ref<string | number | undefined>();
+const conflictMessage = ref('');
 const isFullscreen = ref(false);
 const isScrolling = ref(false);
 
@@ -181,6 +195,8 @@ async function load() {
   const result = await apiClient.readArtifact(props.artifactPath);
   content.value = result.content;
   expectedHash.value = result.artifact.hash;
+  baseVersionId.value = result.artifact.currentVersionId || result.artifact.versionId || result.artifact.hash;
+  conflictMessage.value = '';
 }
 
 async function save() {
@@ -188,11 +204,19 @@ async function save() {
     return;
   }
   try {
-    const result = await apiClient.saveArtifact(props.artifactPath, content.value, expectedHash.value);
+    const result = await apiClient.saveArtifact(props.artifactPath, content.value, expectedHash.value, baseVersionId.value);
     expectedHash.value = result.artifact.hash;
+    baseVersionId.value = result.artifact.currentVersionId || result.artifact.versionId || result.artifact.hash;
+    conflictMessage.value = '';
     emit('saved');
     ElMessage.success('已保存');
   } catch (error: any) {
+    if (error.code === 'B70021') {
+      const currentVersionId = error.data?.currentVersionId || error.data?.currentVersion?.id;
+      conflictMessage.value = currentVersionId ? `当前产物已有新版本 ${currentVersionId}` : '当前产物已有新版本';
+      ElMessage.warning('保存冲突，请刷新后合并');
+      return;
+    }
     ElMessage.error(error.message || '保存失败');
   }
 }
@@ -220,6 +244,8 @@ watch(
   () => {
     content.value = '';
     expectedHash.value = undefined;
+    baseVersionId.value = undefined;
+    conflictMessage.value = '';
     if (props.artifactPath) {
       load();
     }
@@ -235,6 +261,10 @@ watch(
   gap: 12px;
   align-items: stretch;
   min-height: 450px;
+}
+
+.conflict-alert {
+  margin: 0 12px 12px;
 }
 
 .editor-panel {

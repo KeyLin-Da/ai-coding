@@ -1,10 +1,10 @@
-import { createRouter, createWebHistory } from 'vue-router';
+import { createRouter, createWebHashHistory, createWebHistory } from 'vue-router';
 import RequirementList from '@/views/RequirementList.vue';
 import RequirementDetail from '@/views/RequirementDetail.vue';
 import Settings from '@/views/Settings.vue';
 
 const router = createRouter({
-  history: createWebHistory(),
+  history: window.location.protocol === 'file:' ? createWebHashHistory() : createWebHistory(),
   routes: [
     {
       path: '/',

@@ -16,6 +16,7 @@ import { readGitChanges, stageUntrackedFiles } from './services/git-changes';
 import { readProjectHistory, listProjectsFromConfiguredPaths } from './services/project-history';
 import { loadSettings, saveSettings, validateSettings } from './services/project-settings';
 import { deleteTechDesignQuestionRecord, type DeleteTechDesignQuestionInput } from './services/tech-design-questions';
+import { buildCenterImportPlan, importPlanToCenter, type CenterImportConfig } from './services/center-importer';
 import {
   assertAllowedPrdSourceFile,
   deletePrdSourceFileSnapshot,
@@ -197,6 +198,22 @@ export function createRouter(workspaceRoot: string) {
 
       if (request.method === 'GET' && pathname === '/api/ai-delivery/settings') {
         send(response, 200, { data: await loadSettings(workspaceRoot) });
+        return;
+      }
+
+      if (request.method === 'GET' && pathname === '/api/ai-delivery/migration/plan') {
+        send(response, 200, { data: await buildCenterImportPlan(workspaceRoot, await repository.list()) });
+        return;
+      }
+
+      if (request.method === 'POST' && pathname === '/api/ai-delivery/migration/import') {
+        const input = await parseBody<CenterImportConfig & { dryRun?: boolean }>(request);
+        const plan = await buildCenterImportPlan(workspaceRoot, await repository.list());
+        if (input.dryRun) {
+          send(response, 200, { data: plan });
+          return;
+        }
+        send(response, 200, { data: await importPlanToCenter(plan, input) });
         return;
       }
 

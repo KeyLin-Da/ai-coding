@@ -62,6 +62,13 @@ export interface ArtifactRef {
   hash?: string;
   updatedAt?: string;
   summary?: string;
+  artifactId?: string | number;
+  currentVersionId?: string | number;
+  currentVersionNo?: number;
+  versionCount?: number;
+  createdBy?: string | number;
+  sourceRunId?: string | number;
+  baseVersionId?: string | number;
 }
 
 export interface ReviewIssue {
@@ -248,6 +255,7 @@ export interface ImplementationStepState {
 }
 
 export interface RequirementWorkflow {
+  id?: string | number;
   requirementId: string;
   title: string;
   requirementType?: RequirementType;
@@ -269,6 +277,10 @@ export interface RequirementWorkflow {
   runs: RunRecord[];
   reviews: ReviewRecord[];
   issues: ReviewIssue[];
+  onlineClientCount?: number;
+  pendingReviewCount?: number;
+  jobStatus?: string;
+  lastEventId?: string | number;
 }
 
 export interface RequirementInput {

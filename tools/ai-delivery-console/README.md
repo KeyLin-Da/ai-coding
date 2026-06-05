@@ -80,6 +80,67 @@ npm run dev
 AI_DELIVERY_WORKSPACE_ROOT=/Users/key.lin/work/Projects/ai-coding npm run server:dev
 ```
 
+## 🖥️ 桌面客户端与协作模式
+
+控制台现在支持两种运行模式：
+
+- **本地单机模式**：继续使用本机 Node Runner 读写 `docs/` 和 `openspec/`，适合个人离线使用。
+- **远程协作模式**：桌面客户端连接 Spring Boot 中心服务，需求流程、审核、问题、产物版本、Job、运行日志和事件流由中心服务共享；Git、OpenSpec、Agent CLI 仍在各自电脑的 Local Runner 执行。
+
+### 开发态启动桌面客户端
+
+```bash
+cd tools/ai-delivery-console
+npm install
+npm run dev
+AI_DELIVERY_DESKTOP_URL=http://127.0.0.1:5178 npm run desktop:dev
+```
+
+开发态桌面窗口默认加载 `http://127.0.0.1:5178`。生产打包时应用会加载 `dist/index.html`，安装包输出到 `release/`：
+
+```bash
+npm run desktop:build
+```
+
+### 连接中心服务
+
+进入「设置 / 个人中心」，在「团队身份」中选择：
+
+- `apiMode`: `remote`
+- `centerBaseUrl`: 例如 `http://127.0.0.1:8728`
+- `userId`、`teamId`、`projectId`: 当前用户和项目身份
+
+在「本机环境」中维护个人配置：
+
+- `workspaceMappings`: 中心项目到本机目录的映射
+- `agentProviders`: 本机 Agent Provider 命令和能力
+- `terminalPreference`: macOS Terminal/zsh 或 Windows Terminal/PowerShell
+
+这些配置通过 Electron `safeStorage` 保存到本机。中心服务只接收 OS、能力摘要、在线心跳等非敏感信息，不保存本机绝对路径、Agent token 或终端命令密钥。
+
+### 远程协作数据流
+
+1. 用户在桌面端创建或打开需求。
+2. 中心服务返回共享 workflow、阶段、审核、issue 和 artifact 当前版本。
+3. 客户端订阅中心 SSE 事件，按 `lastEventId` 断线补偿。
+4. 本机 Local Runner 领取 Job 后执行 Agent/OpenSpec/Git。
+5. 执行日志上传为 run events，产物文件上传 COS，中心服务创建新的 artifact version 并广播。
+6. Markdown 保存携带 `baseVersionId`，若他人已发布新版本，中心服务返回 `B70021`，客户端提示刷新/合并。
+
+### 本地数据迁移
+
+本地 Runner 提供迁移预览和导入接口，用于把既有 `docs/{需求号}`、`openspec/changes`、`docs/code_review` 产物上传为中心服务初始版本：
+
+```bash
+curl "http://127.0.0.1:8718/api/ai-delivery/migration/plan?centerBaseUrl=http://127.0.0.1:8728&projectId=1"
+
+curl -X POST "http://127.0.0.1:8718/api/ai-delivery/migration/import" \
+  -H "Content-Type: application/json" \
+  -d '{"centerBaseUrl":"http://127.0.0.1:8728","projectId":"1","userId":"1","dryRun":true}'
+```
+
+先使用 `dryRun=true` 检查导入计划，再执行正式导入。导入工具会按 logical path 去重，跳过缺失文件，并在 COS 上传失败时返回错误，不把本地路径作为中心服务事实保存。
+
 ## 📸 界面展示
 
 ### 需求列表 - 全局掌控工作流进度
@@ -294,6 +355,8 @@ CODEX_COMMAND='codex exec -C {workspaceRoot} -'
 - ✅ **显式配置**：Agent Provider 只能来自本地显式配置，页面不能直接传入任意命令。
 - ✅ **并发控制**：修改型动作使用需求级锁文件，避免同一需求并发写入。
 - ✅ **Hash 校验**：Markdown 保存会比较文件 hash，发现外部修改时阻止覆盖，防止数据丢失。
+- ✅ **本地配置隔离**：桌面端 workspace 映射、Agent token、终端偏好只保存在本机安全存储。
+- ✅ **中心权限校验**：远程产物预览、版本发布、审核、issue、Job 和事件订阅均由中心服务校验团队/项目权限。
 
 ---
 
