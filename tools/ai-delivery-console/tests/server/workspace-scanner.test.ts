@@ -8,13 +8,21 @@ async function makeFixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-scan-'));
   await fs.mkdir(path.join(root, 'docs', '172014', 'prd'), { recursive: true });
   await fs.mkdir(path.join(root, 'docs', '172014', 'technical-design', 'file'), { recursive: true });
+  await fs.mkdir(path.join(root, 'docs', '172014', 'technical-design', 'questions'), { recursive: true });
   await fs.mkdir(path.join(root, 'docs', '172014', 'junit', 'req-172014'), { recursive: true });
   await fs.mkdir(path.join(root, 'openspec', 'changes', 'req-172014'), { recursive: true });
+  await fs.mkdir(path.join(root, 'docs', '172014', 'code-review', 'commit'), { recursive: true });
+  await fs.mkdir(path.join(root, 'docs', '172014', 'code-review', 'staged'), { recursive: true });
   await fs.mkdir(path.join(root, 'docs', 'code_review', 'code_review_feature_opp_172014'), { recursive: true });
   await fs.writeFile(path.join(root, 'docs', '172014', 'prd', 'analysis.md'), '# PRD');
   await fs.writeFile(path.join(root, 'docs', '172014', 'technical-design', 'design_review.md'), '# Design');
+  await fs.writeFile(path.join(root, 'docs', '172014', 'technical-design', 'questions.md'), '# Questions');
+  await fs.writeFile(path.join(root, 'docs', '172014', 'technical-design', 'questions', '20260604-173000-question.md'), '# Question');
   await fs.writeFile(path.join(root, 'docs', '172014', 'technical-design', 'file', 'old-design.md'), '# Old Design');
   await fs.writeFile(path.join(root, 'docs', '172014', 'junit', 'req-172014', 'report.md'), '# JUnit');
+  await fs.writeFile(path.join(root, 'docs', '172014', 'code-review', 'summary.md'), '# Review Index');
+  await fs.writeFile(path.join(root, 'docs', '172014', 'code-review', 'commit', 'summary.md'), '# Commit Review');
+  await fs.writeFile(path.join(root, 'docs', '172014', 'code-review', 'staged', 'summary.md'), '# Staged Review');
   await fs.writeFile(path.join(root, 'docs', 'code_review', 'code_review_feature_opp_172014', 'summary.md'), '# Review');
   return root;
 }
@@ -27,12 +35,31 @@ describe('workspace-scanner', () => {
       expect.arrayContaining([
         'docs/172014/prd/analysis.md',
         'docs/172014/technical-design/design_review.md',
+        'docs/172014/technical-design/questions/20260604-173000-question.md',
+        'docs/172014/technical-design/questions.md',
         'docs/172014/technical-design/file/old-design.md',
         'openspec/changes/req-172014',
         'docs/172014/junit/req-172014/report.md',
+        'docs/172014/code-review/summary.md',
+        'docs/172014/code-review/commit/summary.md',
+        'docs/172014/code-review/staged/summary.md',
         'docs/code_review/code_review_feature_opp_172014/summary.md'
       ])
     );
+    const questions = artifacts.find((item) => item.id === 'technical-design-questions');
+    expect(questions).toMatchObject({
+      stage: 'TECH_DESIGN',
+      label: '技术方案答疑记录',
+      kind: 'markdown',
+      exists: true
+    });
+    const questionFile = artifacts.find((item) => item.path === 'docs/172014/technical-design/questions/20260604-173000-question.md');
+    expect(questionFile).toMatchObject({
+      stage: 'TECH_DESIGN',
+      label: '技术方案答疑 20260604-173000-question',
+      kind: 'markdown',
+      exists: true
+    });
   });
 
   it('不再展示旧式 PRD 产物路径', async () => {
@@ -45,5 +72,26 @@ describe('workspace-scanner', () => {
 
     expect(legacyPrd).toBeUndefined();
     expect(artifacts.some((item) => item.label === 'PRD 分析文档（旧路径）')).toBe(false);
+  });
+
+  it('缺陷未生成 PRD 时不返回 PRD 分析文档占位', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-defect-scan-'));
+    const artifacts = await scanRequirementArtifacts(root, '172014', 'bugfix/opp#172014', undefined, 'DEFECT');
+
+    expect(artifacts.some((item) => item.id === 'prd-analysis')).toBe(false);
+    expect(artifacts.some((item) => item.path === 'docs/172014/prd/analysis.md')).toBe(false);
+    expect(artifacts.some((item) => item.id === 'technical-design')).toBe(true);
+  });
+
+  it('缺陷历史 PRD 文件已存在时只索引文件且不删除', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-defect-prd-'));
+    await fs.mkdir(path.join(root, 'docs', '172014', 'prd'), { recursive: true });
+    await fs.writeFile(path.join(root, 'docs', '172014', 'prd', 'analysis.md'), '# Historical PRD');
+
+    const artifacts = await scanRequirementArtifacts(root, '172014', 'bugfix/opp#172014', undefined, 'DEFECT');
+    const prd = artifacts.find((item) => item.id === 'prd-analysis');
+
+    expect(prd?.exists).toBe(true);
+    expect(await fs.readFile(path.join(root, 'docs', '172014', 'prd', 'analysis.md'), 'utf8')).toBe('# Historical PRD');
   });
 });

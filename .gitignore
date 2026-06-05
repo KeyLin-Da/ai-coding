@@ -6,3 +6,4 @@ openspec/*
 !openspec/config.yaml
 docs/*
 logs/*
+.playwright-cli/*

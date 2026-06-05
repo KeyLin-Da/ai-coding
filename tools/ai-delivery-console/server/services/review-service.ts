@@ -1,10 +1,23 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { RequirementWorkflow, ReviewInput, ReviewIssue, WorkflowStage } from '../../shared/workflow';
-import { ensureImplementationSteps, nextImplementationStep } from '../../shared/workflow';
+import { ensureImplementationSteps, isImplementationStep, nextImplementationStep } from '../../shared/workflow';
 import { nextStage, statusAfterReview } from '../../shared/stage-rules';
-import { createId, hashContent, sanitizeBranchName } from './workspace';
+import { createId, hashContent, normalizeRequirementId, sanitizeBranchName } from './workspace';
 import { parseCodeReviewSummary } from './code-review-parser';
+
+async function parseFirstExistingSummary(summaryPaths: string[]): Promise<ReviewIssue[]> {
+  for (const summaryPath of summaryPaths) {
+    const exists = await fs
+      .access(summaryPath)
+      .then(() => true)
+      .catch(() => false);
+    if (exists) {
+      return parseCodeReviewSummary(summaryPath).catch(() => []);
+    }
+  }
+  return [];
+}
 
 export async function applyReview(workspaceRoot: string, workflow: RequirementWorkflow, input: ReviewInput): Promise<RequirementWorkflow> {
   const artifactPath = input.artifactPath || workflow.stages[input.stage].artifactPath;
@@ -30,6 +43,9 @@ export async function applyReview(workspaceRoot: string, workflow: RequirementWo
   workflow.reviews.unshift(review);
 
   if (input.stage === 'IMPLEMENTATION' && input.implementationStep) {
+    if (!isImplementationStep(input.implementationStep)) {
+      return workflow;
+    }
     const steps = ensureImplementationSteps(workflow.implementationSteps);
     const step = input.implementationStep;
     steps[step] = {
@@ -87,7 +103,7 @@ export async function applyReview(workspaceRoot: string, workflow: RequirementWo
   };
 
   if (input.decision === 'APPROVED') {
-    const next = nextStage(input.stage);
+    const next = nextStage(input.stage, workflow);
     workflow.currentStage = next;
     workflow.status = next === 'DONE' ? 'DONE' : 'IN_PROGRESS';
     if (next !== 'DONE' && workflow.stages[next].status === 'NOT_STARTED') {
@@ -104,13 +120,17 @@ export async function applyReview(workspaceRoot: string, workflow: RequirementWo
 }
 
 export async function refreshCodeReviewIssues(workspaceRoot: string, workflow: RequirementWorkflow): Promise<ReviewIssue[]> {
-  if (!workflow.branchName) {
-    return [];
+  const requirementId = normalizeRequirementId(workflow.requirementId);
+  const summaryPaths = [
+    path.join(workspaceRoot, 'docs', requirementId, 'code-review', 'commit', 'summary.md'),
+    path.join(workspaceRoot, 'docs', requirementId, 'code-review', 'summary.md')
+  ];
+
+  if (workflow.branchName) {
+    summaryPaths.push(path.join(workspaceRoot, 'docs', 'code_review', `code_review_${sanitizeBranchName(workflow.branchName)}`, 'summary.md'));
   }
-  const dir = path.join(workspaceRoot, 'docs', 'code_review', `code_review_${sanitizeBranchName(workflow.branchName)}`);
-  const summaryPath = path.join(dir, 'summary.md');
-  const issues = await parseCodeReviewSummary(summaryPath).catch(() => []);
-  return issues;
+
+  return parseFirstExistingSummary(summaryPaths);
 }
 
 export function returnToImplementation(workflow: RequirementWorkflow, issues: ReviewIssue[]): RequirementWorkflow {
@@ -120,7 +140,6 @@ export function returnToImplementation(workflow: RequirementWorkflow, issues: Re
   steps.APPLY.status = 'DRAFT';
   steps.APPLY.comment = `代码评审打回，待修复 ${openBlockers.length} 个阻断问题`;
   steps.CHANGE_INSPECTION.status = 'NOT_STARTED';
-  steps.UNIT_TEST.status = 'NOT_STARTED';
   workflow.implementationSteps = steps;
   workflow.currentStage = 'IMPLEMENTATION';
   workflow.status = 'REJECTED';
@@ -137,7 +156,7 @@ export function stageFromArtifactPath(filePath: string): WorkflowStage {
   if (filePath.includes('/junit/') || filePath.includes('/openspec/')) {
     return 'IMPLEMENTATION';
   }
-  if (filePath.includes('/code_review/')) {
+  if (filePath.includes('/code-review/') || filePath.includes('/code_review/')) {
     return 'CODE_REVIEW';
   }
   return 'PRD';

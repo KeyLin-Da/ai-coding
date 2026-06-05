@@ -1,7 +1,7 @@
 <template>
-  <div class="stage-timeline" aria-label="阶段时间线">
+  <div class="stage-timeline" :style="{ '--stage-count': String(applicableStages.length) }" aria-label="阶段时间线">
     <button
-      v-for="stage in workflowStages"
+      v-for="stage in applicableStages"
       :key="stage"
       class="stage-step"
       :class="{ active: modelValue === stage, approved: workflow.stages[stage].status === 'APPROVED' }"
@@ -18,10 +18,11 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue';
 import type { RequirementWorkflow, WorkflowStage } from '@shared/workflow';
-import { stageLabels, statusLabels, workflowStages } from '@shared/workflow';
+import { stageLabels, statusLabels, workflowStagesForWorkflow } from '@shared/workflow';
 
-defineProps<{
+const props = defineProps<{
   workflow: RequirementWorkflow;
   modelValue: WorkflowStage;
 }>();
@@ -31,14 +32,16 @@ defineEmits<{
 }>();
 
 function stageIndex(stage: WorkflowStage) {
-  return workflowStages.indexOf(stage) + 1;
+  return applicableStages.value.indexOf(stage) + 1;
 }
+
+const applicableStages = computed(() => workflowStagesForWorkflow(props.workflow));
 </script>
 
 <style scoped>
 .stage-timeline {
   display: grid;
-  grid-template-columns: repeat(4, minmax(140px, 1fr));
+  grid-template-columns: repeat(var(--stage-count), minmax(140px, 1fr));
   gap: 0;
   padding: 8px 16px 0;
   border-top: 1px solid #edf1f7;

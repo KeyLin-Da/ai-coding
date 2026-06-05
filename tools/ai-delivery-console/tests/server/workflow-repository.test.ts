@@ -33,6 +33,24 @@ describe('WorkflowRepository', () => {
 
     expect(workflow.requirementType).toBe('DEFECT');
     expect(workflow.branchName).toBe('bugfix/opp#172014');
+    expect(workflow.currentStage).toBe('TECH_DESIGN');
+    expect(workflow.stages.PRD.status).toBe('SKIPPED');
+    expect(workflow.stages.TECH_DESIGN.status).toBe('DRAFT');
+  });
+
+  it('保存历史缺陷时按适用阶段重新推导当前阶段', async () => {
+    const workspace = await tmpWorkspace();
+    const repository = new WorkflowRepository(workspace);
+    const workflow = await repository.upsert({ requirementId: '172014', title: '定位菜单缺陷', requirementType: 'DEFECT' });
+    workflow.currentStage = 'PRD';
+    workflow.stages.PRD.status = 'DRAFT';
+    workflow.stages.TECH_DESIGN.status = 'NOT_STARTED';
+
+    const saved = await repository.save(workflow);
+
+    expect(saved.currentStage).toBe('TECH_DESIGN');
+    expect(saved.stages.PRD.status).toBe('DRAFT');
+    expect(saved.stages.TECH_DESIGN.status).toBe('NOT_STARTED');
   });
 
   it('更新已有 workflow 时保留运行记录', async () => {

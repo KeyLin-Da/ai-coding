@@ -40,4 +40,17 @@ describe('run-selection', () => {
 
     expect(selected?.id).toBe('apply-new');
   });
+
+  it('无子步骤的 JUNIT_GENERATE 不覆盖当前实施子步骤日志', () => {
+    const selected = findLatestStageRun(
+      [
+        run('apply-run', 'OPENSPEC_APPLY', '2026-06-02T01:00:00.000Z', { stage: 'IMPLEMENTATION', implementationStep: 'APPLY' }),
+        run('junit-newer', 'JUNIT_GENERATE', '2026-06-02T03:00:00.000Z', { stage: 'IMPLEMENTATION' })
+      ],
+      'IMPLEMENTATION',
+      'APPLY'
+    );
+
+    expect(selected?.id).toBe('apply-run');
+  });
 });

@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { ArtifactRef, WorkflowStage } from '../../shared/workflow';
+import type { ArtifactRef, RequirementType, WorkflowStage } from '../../shared/workflow';
 import { hashContent, normalizeRequirementId, sanitizeBranchName } from './workspace';
 import { normalizeOpenSpecChangeName, resolveOpenSpecRoot } from './openspec-summary';
 
@@ -25,6 +25,18 @@ async function fileArtifact(workspaceRoot: string, id: string, stage: WorkflowSt
     }
     return { id, stage, label, path: relativePath, kind, exists: false };
   }
+}
+
+async function existingFileArtifact(
+  workspaceRoot: string,
+  id: string,
+  stage: WorkflowStage,
+  label: string,
+  relativePath: string,
+  kind: ArtifactRef['kind']
+): Promise<ArtifactRef | undefined> {
+  const artifact = await fileArtifact(workspaceRoot, id, stage, label, relativePath, kind);
+  return artifact.exists ? artifact : undefined;
 }
 
 async function listFiles(dir: string, maxDepth = 2): Promise<string[]> {
@@ -68,11 +80,45 @@ function artifactKindForFile(filePath: string): ArtifactRef['kind'] {
   return 'text';
 }
 
-export async function scanRequirementArtifacts(workspaceRoot: string, requirementId: string, branchName?: string, changeName?: string): Promise<ArtifactRef[]> {
+export async function scanRequirementArtifacts(
+  workspaceRoot: string,
+  requirementId: string,
+  branchName?: string,
+  changeName?: string,
+  requirementType: RequirementType = 'REQUIREMENT'
+): Promise<ArtifactRef[]> {
   const id = normalizeRequirementId(requirementId);
   const artifacts: ArtifactRef[] = [];
-  artifacts.push(await fileArtifact(workspaceRoot, 'prd-analysis', 'PRD', 'PRD 分析文档', `docs/${id}/prd/analysis.md`, 'markdown'));
+  const prdAnalysis = await fileArtifact(workspaceRoot, 'prd-analysis', 'PRD', 'PRD 分析文档', `docs/${id}/prd/analysis.md`, 'markdown');
+  if (requirementType !== 'DEFECT' || prdAnalysis.exists) {
+    artifacts.push(prdAnalysis);
+  }
   artifacts.push(await fileArtifact(workspaceRoot, 'technical-design', 'TECH_DESIGN', '技术方案评审文档', `docs/${id}/technical-design/design_review.md`, 'markdown'));
+  const techDesignQuestions = await existingFileArtifact(
+    workspaceRoot,
+    'technical-design-questions',
+    'TECH_DESIGN',
+    '技术方案答疑记录',
+    `docs/${id}/technical-design/questions.md`,
+    'markdown'
+  );
+  if (techDesignQuestions) {
+    artifacts.push(techDesignQuestions);
+  }
+  const techDesignQuestionFiles = await listFiles(path.join(workspaceRoot, 'docs', id, 'technical-design', 'questions'), 2);
+  for (const file of techDesignQuestionFiles.filter((item) => /\.md$/i.test(item))) {
+    const relative = path.relative(workspaceRoot, file);
+    artifacts.push(
+      await fileArtifact(
+        workspaceRoot,
+        `technical-design-question-${artifacts.length}`,
+        'TECH_DESIGN',
+        `技术方案答疑 ${path.basename(file, path.extname(file))}`,
+        relative,
+        'markdown'
+      )
+    );
+  }
   const techDesignSourceFiles = await listFiles(path.join(workspaceRoot, 'docs', id, 'technical-design', 'file'), 2);
   for (const file of techDesignSourceFiles) {
     const relative = path.relative(workspaceRoot, file);
@@ -95,6 +141,30 @@ export async function scanRequirementArtifacts(workspaceRoot: string, requiremen
   for (const file of junitFiles.filter((item) => /\.(md|html)$/i.test(item))) {
     const relative = path.relative(workspaceRoot, file);
     artifacts.push(await fileArtifact(workspaceRoot, `junit-${artifacts.length}`, 'IMPLEMENTATION', path.basename(file), relative, file.endsWith('.html') ? 'html' : 'markdown'));
+  }
+
+  const requirementReviewArtifacts = [
+    {
+      id: 'code-review-index',
+      label: '代码评审索引',
+      path: `docs/${id}/code-review/summary.md`
+    },
+    {
+      id: 'code-review-commit',
+      label: '代码评审（commit 正式评审）',
+      path: `docs/${id}/code-review/commit/summary.md`
+    },
+    {
+      id: 'code-review-staged',
+      label: '代码评审（staged 暂存区预审）',
+      path: `docs/${id}/code-review/staged/summary.md`
+    }
+  ];
+  for (const item of requirementReviewArtifacts) {
+    const artifact = await existingFileArtifact(workspaceRoot, item.id, 'CODE_REVIEW', item.label, item.path, 'markdown');
+    if (artifact) {
+      artifacts.push(artifact);
+    }
   }
 
   const reviewDirs = await fs.readdir(path.join(workspaceRoot, 'docs', 'code_review'), { withFileTypes: true }).catch(() => []);

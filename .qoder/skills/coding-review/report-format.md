@@ -8,44 +8,48 @@
 
 ### 1.1 目录命名规则
 
-评审结果统一输出到 `docs/code_review/` 根目录下，按分支名创建子目录：
+评审结果统一输出到 `docs/{需求编号}/code-review/`，并按评审模式分开保存：
 
-```
-docs/code_review/
-└── code_review_{分支名}/                    # 分支名中非字母数字字符转为下划线
-    ├── .checkpoint.json                     # 统一检查点（所有工程的 commit hash）
-    ├── summary.md                           # 汇总评审报告 + 问题清单
-    │
-    ├── {时间戳1}/                           # 第1次评审
-    │   ├── branch_diff_index.md             # Diff文件索引
-    │   ├── branch_diff_{工程名1}.md         # 工程1的Diff
-    │   ├── branch_diff_{工程名2}.md         # 工程2的Diff
-    │   ├── code_review_result_all.md        # 本次评审完整报告
-    │   └── pr_split_suggestion.md           # PR拆分建议（如需要）
-    │
-    └── {时间戳2}/                           # 第2次评审（增量）
-        ├── branch_diff_index.md             # 仅包含增量变更
-        ├── branch_diff_{工程名1}.md         # 仅增量 diff
-        ├── code_review_result_all.md        # 增量评审报告
+```text
+docs/{需求编号}/code-review/
+├── summary.md                              # 根索引：链接最新正式评审和最新暂存区预审
+├── commit/
+│   ├── .checkpoint.json                    # 仅 commit 模式维护
+│   ├── summary.md                          # 正式汇总报告 + 问题清单，可作为合并判定依据
+│   └── {时间戳}/
+│       ├── diff_index.md
+│       ├── commit_diff_{工程名1}.md
+│       ├── commit_diff_{工程名2}.md
+│       ├── code_review_result_all.md
+│       └── pr_split_suggestion.md
+└── staged/
+    ├── summary.md                          # 暂存区预审汇总，不作为正式合并判定
+    └── {时间戳}/
+        ├── diff_index.md
+        ├── staged_diff_{工程名1}.md
+        ├── staged_diff_{工程名2}.md
+        ├── code_review_result_all.md
         └── pr_split_suggestion.md
 ```
 
-**分支名转换规则**：
-- 所有非字母数字字符都转成下划线
-- 示例：
-  - `feature/opp-157396` → `code_review_feature_opp_157396`
-  - `hotfix/CR-123` → `code_review_hotfix_CR_123`
-  - `release/v2.0.0` → `code_review_release_v2_0_0`
+**工程名转换规则**：所有非字母数字字符都转成下划线。
 
-**时间戳格式**：`YYYYMMDD_HHMMSS`，如 `20240115_143000`
+**时间戳格式**：`YYYYMMDD_HHMMSS`，如 `20240115_143000`。
+
+**模式语义**：
+- `commit/summary.md`：正式评审汇总，可用于合并判定。
+- `staged/summary.md`：暂存区预审汇总，仅用于提交前修正参考。
+- 根 `summary.md`：索引页，只汇总和链接最新两类报告。
 
 ### 1.2 检查点文件格式
 
-`.checkpoint.json` 文件结构：
+`commit/.checkpoint.json` 文件结构：
 
 ```json
 {
+  "requirement_id": "172014",
   "branch": "feature/opp-157396",
+  "mode": "commit",
   "created_at": "2024-01-15T14:30:00Z",
   "updated_at": "2024-01-16T10:00:00Z",
   "projects": {
@@ -83,20 +87,50 @@ docs/code_review/
     }
   ],
   "history": [
-    { "timestamp": "20240115_143000", "type": "full" },
-    { "timestamp": "20240116_100000", "type": "incremental" },
-    { "timestamp": "20240117_150000", "type": "full", "reason": "history_rewritten" }
+    { "timestamp": "20240115_143000", "mode": "commit", "type": "full" },
+    { "timestamp": "20240116_100000", "mode": "commit", "type": "incremental" },
+    { "timestamp": "20240117_150000", "mode": "commit", "type": "full", "reason": "history_rewritten" }
   ]
 }
 ```
 
-## 2 汇总报告格式
+`staged` 模式不得创建或更新 `.checkpoint.json`。
 
-`summary.md` 文件结构：
+### 1.3 根索引格式
+
+`docs/{需求编号}/code-review/summary.md` 文件结构：
 
 ```markdown
-【代码评审汇总报告 - {分支名}】
+【代码评审索引 - 需求 {需求编号}】
 
+需求编号：{需求编号}
+最后更新：YYYY-MM-DD HH:MM:SS
+
+══════════════════════════════════════════════════════════════
+【一】正式评审（commit）
+══════════════════════════════════════════════════════════════
+
+最新报告：commit/summary.md
+最新轮次：commit/{时间戳}/code_review_result_all.md
+正式结论：✅ 可以直接合并 / ⚠️ 修改后可合并 / ❌ 不建议合并 / 暂无
+
+══════════════════════════════════════════════════════════════
+【二】暂存区预审（staged）
+══════════════════════════════════════════════════════════════
+
+最新报告：staged/summary.md
+最新轮次：staged/{时间戳}/code_review_result_all.md
+预审结论：仅供提交前修正参考，不作为正式合并判定
+```
+
+## 2 汇总报告格式
+
+`commit/summary.md` 文件结构：
+
+```markdown
+【代码评审汇总报告 - 需求 {需求编号} - commit 正式评审】
+
+需求编号：{需求编号}
 分支名称：{原始分支名}
 创建时间：YYYY-MM-DD HH:MM:SS
 最后更新：YYYY-MM-DD HH:MM:SS
@@ -220,6 +254,45 @@ docs/code_review/
 
 ---
 
+### 2.1 staged 汇总报告格式
+
+`staged/summary.md` 文件结构：
+
+```markdown
+【代码评审汇总报告 - 需求 {需求编号} - staged 暂存区预审】
+
+需求编号：{需求编号}
+当前分支：{当前分支名}
+创建时间：YYYY-MM-DD HH:MM:SS
+最后更新：YYYY-MM-DD HH:MM:SS
+预审轮次：N
+
+⚠️ 本报告仅基于 `git diff --cached`，不作为正式合并判定。
+
+══════════════════════════════════════════════════════════════
+【一】预审历史
+══════════════════════════════════════════════════════════════
+
+| 轮次 | 时间            | 工程数 | staged 文件数 | 新增问题 | 状态 |
+|------|-----------------|--------|---------------|----------|------|
+| 1    | 20240115_143000 | 2      | 8             | 1❌/2⚠️  | 已完成 |
+
+══════════════════════════════════════════════════════════════
+【二】未纳入预审的工作区变更
+══════════════════════════════════════════════════════════════
+
+- unstaged 文件：...
+- untracked 文件：...
+
+══════════════════════════════════════════════════════════════
+【三】预审问题清单
+══════════════════════════════════════════════════════════════
+
+格式同 commit 汇总报告，但结论必须标记为「暂存区预审风险」。
+```
+
+---
+
 ## 3. 评审结果文件格式（详细报告）
 
 文件命名：`code_review_result_all.md`（放在时间戳目录下）
@@ -227,11 +300,15 @@ docs/code_review/
 文件结构：
 
 ```markdown
-【{分支名}】代码评审报告
+【需求 {需求编号}】代码评审报告
 评审时间：YYYY-MM-DD HH:MM:SS
-评审类型：全量评审 / 增量评审
-对比基准：master / {last_commit}
+评审模式：commit 正式评审 / staged 暂存区预审
+评审类型：全量评审 / 增量评审 / 暂存区预审
+对比基准：master / {last_commit} / git diff --cached
 涉及工程：[工程1, 工程2, ...]
+
+当评审模式为 staged 时必须额外输出：
+⚠️ 本报告仅基于 `git diff --cached`，不作为正式合并判定。
 
 【一】本次 Diff 概览
 - 涉及工程数：X

@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import type { ActionInput, AgentProvider, RequirementInput, RequirementWorkflow, ReviewInput, RunEvent } from '@shared/workflow';
-import { apiClient } from '@/api/client';
+import { apiClient, type DeleteTechDesignQuestionInput } from '@/api/client';
 
 interface WorkflowState {
   requirements: RequirementWorkflow[];
@@ -126,6 +126,13 @@ export const useWorkflowStore = defineStore('workflow', {
         return;
       }
       this.current = await apiClient.deleteTechDesignFile(this.current.requirementId, fileId);
+      await this.loadRequirements();
+    },
+    async deleteTechDesignQuestion(input: DeleteTechDesignQuestionInput) {
+      if (!this.current) {
+        return;
+      }
+      this.current = await apiClient.deleteTechDesignQuestion(this.current.requirementId, input);
       await this.loadRequirements();
     }
   }

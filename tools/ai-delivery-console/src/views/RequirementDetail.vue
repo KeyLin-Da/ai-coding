@@ -54,7 +54,7 @@
                 v-model="prdClarification"
                 type="textarea"
                 :rows="3"
-                maxlength="500"
+                maxlength="5000"
                 show-word-limit
                 placeholder="填写 PRD 澄清描述，对应 coding-prd-analyzer 的 c 参数，例如范围边界、排除项、业务前提"
               />
@@ -80,47 +80,76 @@
             </div>
 
             <div v-else-if="activeStage === 'TECH_DESIGN'" class="stage-actions">
-              <el-alert v-if="!prdApproved" type="warning" show-icon title="需要先通过 PRD 审核" />
-              <el-descriptions :column="1" border class="design-source-summary">
+              <el-alert v-if="requiresPrdApproval && !prdApproved" type="warning" show-icon title="需要先通过 PRD 审核" />
+              <el-descriptions v-if="requiresPrdApproval" :column="1" border class="design-source-summary">
                 <el-descriptions-item label="PRD 文档">
                   <span class="design-source-path">{{ prdDesignSourcePath || '未关联' }}</span>
                 </el-descriptions-item>
               </el-descriptions>
-              <div class="prd-file-panel">
-                <div class="action-line">
-                  <input
-                    ref="techDesignFileInput"
-                    class="hidden-file-input"
-                    type="file"
-                    multiple
-                    accept=".pdf,.md,.markdown,image/*"
-                    @change="uploadTechDesignFiles"
-                  />
-                  <el-button :disabled="!prdApproved" :icon="Upload" @click="chooseTechDesignFiles">上传补充材料</el-button>
-                  <span class="muted">支持 PDF、图片、Markdown，上传后快照到 technical-design/file 目录并追加到 d 参数。</span>
-                </div>
-                <div v-if="techDesignSourceFiles.length" class="prd-file-list">
-                  <div v-for="file in techDesignSourceFiles" :key="file.id" class="prd-file-item">
-                    <div class="prd-file-meta">
-                      <strong>{{ file.name }}</strong>
-                      <small class="muted">{{ file.path }} · {{ formatFileSize(file.size) }}</small>
+              <section class="design-input-panel" aria-label="技术方案生成输入">
+                <div class="design-input-block">
+                  <div class="design-input-heading">
+                    <div>
+                      <strong>补充材料</strong>
+                      <p class="muted">支持 PDF、图片、Markdown；上传后作为技术方案生成输入。</p>
                     </div>
-                    <el-button type="danger" link :icon="Delete" @click="deleteTechDesignFile(file.id)">删除</el-button>
+                    <input
+                      ref="techDesignFileInput"
+                      class="hidden-file-input"
+                      type="file"
+                      multiple
+                      accept=".pdf,.md,.markdown,image/*"
+                      @change="uploadTechDesignFiles"
+                    />
+                    <el-button class="design-upload-button" :disabled="requiresPrdApproval && !prdApproved" :icon="Upload" @click="chooseTechDesignFiles">
+                      上传补充材料
+                    </el-button>
+                  </div>
+                  <div v-if="techDesignSourceFiles.length" class="prd-file-list design-file-list">
+                    <div v-for="file in techDesignSourceFiles" :key="file.id" class="prd-file-item">
+                      <div class="prd-file-meta">
+                        <strong>{{ file.name }}</strong>
+                        <small class="muted">{{ file.path }} · {{ formatFileSize(file.size) }}</small>
+                      </div>
+                      <el-button type="danger" link :icon="Delete" @click="deleteTechDesignFile(file.id)">删除</el-button>
+                    </div>
+                  </div>
+                  <div v-if="techDesignQuestionArtifacts.length" class="design-question-context">
+                    <span class="context-badge">答疑记录</span>
+                    <span>{{ techDesignQuestionContextText }}</span>
+                    <small>自动纳入生成上下文</small>
                   </div>
                 </div>
-              </div>
-              <el-input
-                v-model="designClarification"
-                type="textarea"
-                :rows="2"
-                maxlength="500"
-                show-word-limit
-                placeholder="填写评审意见或补充说明，对应 coding-design 的 c 参数（可选），用于二次评审时提供修改建议"
-              />
-              <el-button type="primary" :disabled="!prdApproved || !prdDesignSourcePath" :icon="primaryActionIcon(Operation)" @click="runDesign">
-                {{ actionButtonText('生成技术方案') }}
-              </el-button>
-              <MarkdownEditor title="技术方案" :artifact-path="stageArtifactPath('TECH_DESIGN')" @saved="reload" />
+                <div class="design-input-block">
+                  <div class="design-input-heading">
+                    <div>
+                      <strong>补充说明</strong>
+                      <p class="muted">用于补充约束、评审意见或二次修改说明。</p>
+                    </div>
+                  </div>
+                  <el-input
+                    v-model="designClarification"
+                    class="design-clarification"
+                    type="textarea"
+                    :rows="4"
+                    maxlength="5000"
+                    show-word-limit
+                    placeholder="补充评审意见、约束或二次修改说明（可选）"
+                  />
+                </div>
+                <div class="design-run-footer">
+                  <span class="muted">生成时会读取补充材料和补充说明。</span>
+                  <div class="design-run-actions">
+                    <el-button class="design-question-entry-button" :icon="ChatLineSquare" @click="openDesignQuestionDialog">
+                      {{ techDesignQuestionButtonText }}
+                    </el-button>
+                    <el-button class="design-run-button" type="primary" :disabled="!canRunDesign" :icon="primaryActionIcon(Operation)" @click="runDesign">
+                      {{ actionButtonText('生成技术方案') }}
+                    </el-button>
+                  </div>
+                </div>
+              </section>
+              <MarkdownEditor title="技术方案" :artifact-path="technicalDesignEditorPath" @saved="reload" />
             </div>
 
             <div v-else-if="activeStage === 'IMPLEMENTATION'" class="stage-actions">
@@ -174,13 +203,14 @@
               <template v-if="activeImplementationStep === 'START_CHANGE'">
                 <div class="action-line">
                   <el-input v-model="changeName" placeholder="OpenSpec change name，例如 req-172014" />
-                  <el-button type="primary" :disabled="!techDesignApproved" :icon="primaryActionIcon(Operation)" @click="runOpenSpecNewChange">
+                  <el-button type="primary" :disabled="!canRunOpenSpecNewChange" :icon="primaryActionIcon(Operation)" @click="runOpenSpecNewChange">
                     {{ actionButtonText('开始变更') }}
                   </el-button>
                   <el-button :icon="primaryActionIcon(DataAnalysis)" @click="runOpenSpecStatus">{{ actionButtonText('查看 OpenSpec 状态') }}</el-button>
                   <el-button :icon="DocumentChecked" @click="openReview">审核本步骤</el-button>
                 </div>
                 <el-alert v-if="!techDesignApproved" type="warning" show-icon title="需要先通过技术方案审核" />
+                <el-alert v-else-if="openSpecChangeExists" type="success" show-icon title="已检测到对应 OpenSpec 变更目录，无需重复开始变更" />
               </template>
 
               <template v-if="activeImplementationStep === 'ARTIFACT_REVIEW'">
@@ -245,18 +275,20 @@
                   <el-button :disabled="!canInspectChanges" :icon="DocumentChecked" @click="openReview">审核本步骤</el-button>
                 </div>
                 <el-alert v-if="!canInspectChanges" type="warning" show-icon title="请先完成并审核开始实施步骤" />
-                <GitChangeInspector :summary="gitChanges" />
+                <GitChangeInspector :summary="gitChanges" :requirement-id="workflow.requirementId" @updated="gitChanges = $event" />
               </template>
 
-              <template v-if="activeImplementationStep === 'UNIT_TEST'">
-                <div class="action-line">
-                  <el-input v-model="moduleName" placeholder="单测模块，例如 opp-diy" />
-                  <el-button :disabled="!canRunJunit" :icon="primaryActionIcon(Cpu)" @click="runJunit">{{ actionButtonText('执行单测并生成报告') }}</el-button>
-                  <el-button :icon="DocumentChecked" @click="openReview">审核本步骤</el-button>
+              <section class="openspec-section junit-report-section">
+                <div class="section-title">
+                  <strong>单元测试报告</strong>
+                  <span class="muted">{{ junitArtifactPath || '未生成' }}</span>
                 </div>
-                <el-alert v-if="!canRunJunit" type="warning" show-icon title="请先通过变更文件及代码审核" />
-                <MarkdownEditor title="单元测试报告" :artifact-path="junitArtifactPath" @saved="reload" />
-              </template>
+                <div v-if="junitArtifact" class="report-entry">
+                  <span class="report-path">{{ junitArtifact.path }}</span>
+                  <el-button :icon="View" @click="previewArtifact(junitArtifact)">查看报告</el-button>
+                </div>
+                <el-alert v-else type="warning" show-icon title="尚未扫描到单元测试报告，开始实施任务应产出 docs/{需求号}/junit/** 报告作为验证证据" />
+              </section>
 
               <MarkdownEditor
                 v-if="selectedOpenSpecDocPath && activeImplementationStep === 'ARTIFACT_REVIEW'"
@@ -270,12 +302,17 @@
             <div v-else class="stage-actions">
               <div class="action-line">
                 <el-input v-model="branchName" placeholder="分支名，例如 feature/opp-172014" />
+                <el-radio-group v-model="codeReviewMode" size="small">
+                  <el-radio-button label="commit">正式评审</el-radio-button>
+                  <el-radio-button label="staged">暂存区预审</el-radio-button>
+                </el-radio-group>
                 <el-button type="primary" :icon="primaryActionIcon(Operation)" @click="runCodeReview">{{ actionButtonText('生成代码评审') }}</el-button>
                 <el-button type="danger" :icon="Back" @click="returnToImplementation">打回实施</el-button>
                 <el-button v-if="canArchiveOpenSpec" type="success" :icon="primaryActionIcon(DocumentChecked)" @click="runOpenSpecArchive">
                   {{ actionButtonText('归档 OpenSpec') }}
                 </el-button>
               </div>
+              <el-alert v-if="codeReviewMode === 'staged'" type="warning" show-icon title="暂存区预审仅基于 git diff --cached，不作为正式合并判定" />
               <el-alert v-if="openSpecSummary?.archived" type="success" show-icon :title="`OpenSpec 已归档：${openSpecSummary.archivePath}`" />
               <MarkdownEditor title="代码评审汇总" :artifact-path="stageArtifactPath('CODE_REVIEW')" @saved="reload" />
             </div>
@@ -283,10 +320,20 @@
         </section>
       </main>
 
-      <ArtifactSidebar :artifacts="workflow.artifacts" :issues="workflow.issues" @refresh="runRefresh" @select="previewArtifact" />
+      <ArtifactSidebar :workflow="workflow" :artifacts="workflow.artifacts" :issues="workflow.issues" @refresh="runRefresh" @select="previewArtifact" />
     </div>
 
     <ReviewDialog ref="reviewDialog" @submit="submitReview" />
+    <DesignQuestionDialog
+      ref="designQuestionDialog"
+      :loading="techDesignQuestionLoading"
+      :items="techDesignQuestionItems"
+      :submit-label="actionButtonText('提问')"
+      @open="loadTechDesignQuestionRecords"
+      @progress="openRunLog"
+      @delete="deleteDesignQuestion"
+      @submit="runDesignQuestion"
+    />
     <RunLogDrawer ref="runLogDrawer" :events="store.runEvents" />
     <ArtifactPreviewDialog ref="artifactPreviewDialog" />
   </div>
@@ -296,8 +343,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { Back, CopyDocument, Cpu, DataAnalysis, Delete, DocumentChecked, Operation, Refresh, Tickets, Upload } from '@element-plus/icons-vue';
-import { ElMessage } from 'element-plus';
+import { Back, ChatLineSquare, CopyDocument, DataAnalysis, Delete, DocumentChecked, Operation, Refresh, Tickets, Upload, View } from '@element-plus/icons-vue';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import type {
   ActionInput,
   ArtifactRef,
@@ -318,7 +365,8 @@ import {
   implementationSteps,
   requirementTypeLabels,
   stageLabels,
-  statusLabels
+  statusLabels,
+  workflowStagesForWorkflow
 } from '@shared/workflow';
 import StageTimeline from '@/components/StageTimeline.vue';
 import MarkdownEditor from '@/components/MarkdownEditor.vue';
@@ -327,15 +375,23 @@ import ReviewDialog from '@/components/ReviewDialog.vue';
 import RunLogDrawer from '@/components/RunLogDrawer.vue';
 import ArtifactSidebar from '@/components/ArtifactSidebar.vue';
 import ArtifactPreviewDialog from '@/components/ArtifactPreviewDialog.vue';
+import DesignQuestionDialog from '@/components/DesignQuestionDialog.vue';
 import GitChangeInspector from '@/components/GitChangeInspector.vue';
 import { useWorkflowStore } from '@/stores/workflow';
 import { apiClient } from '@/api/client';
 import { findLatestStageRun } from '@/utils/run-selection';
+import {
+  buildTechDesignQuestionItems,
+  parseTechDesignQuestionRecords,
+  type TechDesignQuestionListItem,
+  type TechDesignQuestionRecord
+} from '@/utils/tech-design-questions';
 
 const route = useRoute();
 const store = useWorkflowStore();
 const activeStage = ref<WorkflowStage>('PRD');
 const reviewDialog = ref<InstanceType<typeof ReviewDialog>>();
+const designQuestionDialog = ref<InstanceType<typeof DesignQuestionDialog>>();
 const runLogDrawer = ref<InstanceType<typeof RunLogDrawer>>();
 const artifactPreviewDialog = ref<InstanceType<typeof ArtifactPreviewDialog>>();
 const prdFileInput = ref<HTMLInputElement>();
@@ -344,11 +400,13 @@ const selectedArtifactPath = ref('');
 const sourceText = ref('');
 const prdClarification = ref('');
 const changeName = ref('');
-const moduleName = ref('');
 const branchName = ref('');
+const codeReviewMode = ref<'commit' | 'staged'>('commit');
 const selectedAgentId = ref('codex');
 const selectedExecutionMode = ref<ExecutionMode>('BACKGROUND');
 const designClarification = ref('');
+const techDesignQuestionLoading = ref(false);
+const techDesignQuestionRecords = ref<TechDesignQuestionRecord[]>([]);
 const openSpecSummary = ref<OpenSpecSummary>();
 const selectedOpenSpecDocPath = ref('');
 const openSpecPreviewVersion = ref(0);
@@ -356,6 +414,9 @@ const activeImplementationStep = ref<ImplementationStep>('START_CHANGE');
 const gitChanges = ref<GitChangeSummary>();
 
 const workflow = computed(() => store.current);
+const applicableStages = computed(() => workflowStagesForWorkflow(workflow.value));
+const isDefectWorkflow = computed(() => workflow.value?.requirementType === 'DEFECT');
+const requiresPrdApproval = computed(() => !isDefectWorkflow.value);
 const implementationStepStates = computed(() => ensureImplementationSteps(workflow.value?.implementationSteps));
 const currentStageRun = computed<RunRecord | undefined>(() => {
   return findLatestStageRun(workflow.value?.runs || [], activeStage.value, activeStage.value === 'IMPLEMENTATION' ? activeImplementationStep.value : undefined);
@@ -380,21 +441,26 @@ const openSpecTaskPercentage = computed(() => {
 });
 const openSpecPendingTaskCount = computed(() => Math.max(0, (openSpecSummary.value?.tasks.total || 0) - (openSpecSummary.value?.tasks.completed || 0)));
 const canArchiveOpenSpec = computed(() => Boolean(workflow.value?.stages.CODE_REVIEW.status === 'APPROVED' && !openSpecSummary.value?.archived));
+const openSpecChangeExists = computed(() => Boolean(openSpecSummary.value?.exists));
+const canRunOpenSpecNewChange = computed(() => Boolean(techDesignApproved.value && !openSpecChangeExists.value));
 const canRunOpenSpecArtifacts = computed(() => Boolean(implementationStepStates.value.START_CHANGE.status === 'APPROVED' && techDesignApproved.value));
 const canRunOpenSpecApply = computed(() => implementationStepStates.value.ARTIFACT_REVIEW.status === 'APPROVED');
+const canRunDesign = computed(() => (requiresPrdApproval.value ? Boolean(prdApproved.value && prdDesignSourcePath.value) : true));
 const canInspectChanges = computed(() => implementationStepStates.value.APPLY.status === 'APPROVED');
-const canRunJunit = computed(() => implementationStepStates.value.CHANGE_INSPECTION.status === 'APPROVED');
 const openIssueCount = computed(() => workflow.value?.issues.filter((item) => item.status === 'OPEN').length || 0);
 const implementationOpenSpecPath = computed(() => openSpecSummary.value?.rootPath || stageArtifactPath('IMPLEMENTATION') || '未关联');
 const implementationArchiveStatus = computed(() => (openSpecSummary.value?.archived ? '已归档' : '进行中'));
 const requirementTypeText = computed(() => requirementTypeLabels[workflow.value?.requirementType || 'REQUIREMENT']);
-const junitArtifactPath = computed(
+const junitArtifact = computed(
   () =>
-    workflow.value?.artifacts.find((artifact) => artifact.stage === 'IMPLEMENTATION' && artifact.exists && artifact.kind !== 'directory' && artifact.path.includes('/junit/'))?.path ||
-    ''
+    workflow.value?.artifacts.find((artifact) => artifact.stage === 'IMPLEMENTATION' && artifact.exists && artifact.kind !== 'directory' && artifact.path.includes('/junit/'))
 );
+const junitArtifactPath = computed(() => junitArtifact.value?.path || '');
 const prdEditorPath = computed(() => {
   if (!workflow.value) {
+    return '';
+  }
+  if (!requiresPrdApproval.value) {
     return '';
   }
   const selected = workflow.value.artifacts.find((artifact) => artifact.path === selectedArtifactPath.value);
@@ -407,10 +473,16 @@ const prdDesignSourcePath = computed(() => {
   if (!workflow.value) {
     return '';
   }
+  if (!requiresPrdApproval.value) {
+    return '';
+  }
   return prdEditorPath.value;
 });
 const openSpecPrdDocumentPath = computed(() => {
   if (!workflow.value) {
+    return '';
+  }
+  if (!requiresPrdApproval.value) {
     return '';
   }
   const selected = workflow.value.artifacts.find((artifact) => artifact.path === selectedArtifactPath.value);
@@ -419,12 +491,58 @@ const openSpecPrdDocumentPath = computed(() => {
   }
   return stageArtifactPath('PRD') || workflow.value.stages.PRD.artifactPath || '';
 });
+const technicalDesignEditorPath = computed(() => {
+  if (!workflow.value) {
+    return '';
+  }
+  const artifactPath = officialTechnicalDesignArtifactPath();
+  return artifactPath || defaultTechnicalDesignDocumentPath(workflow.value.requirementId);
+});
 const openSpecTechnicalDesignDocumentPath = computed(() => {
   if (!workflow.value) {
     return '';
   }
-  return stageArtifactPath('TECH_DESIGN') || workflow.value.stages.TECH_DESIGN.artifactPath || '';
+  return officialTechnicalDesignArtifactPath();
 });
+const legacyTechDesignQuestionPath = computed(() => {
+  if (!workflow.value) {
+    return '';
+  }
+  return `docs/${workflow.value.requirementId}/technical-design/questions.md`;
+});
+const techDesignQuestionArtifacts = computed(() => {
+  if (!workflow.value) {
+    return [];
+  }
+  const requirementId = workflow.value.requirementId;
+  const legacyPath = legacyTechDesignQuestionPath.value;
+  const questionPrefix = `docs/${requirementId}/technical-design/questions/`;
+  return workflow.value.artifacts
+    .filter(
+      (artifact) =>
+        artifact.exists &&
+        artifact.kind !== 'directory' &&
+        (artifact.id === 'technical-design-questions' || artifact.path === legacyPath || artifact.path.replace(/\\/g, '/').startsWith(questionPrefix))
+    )
+    .sort((left, right) => left.path.localeCompare(right.path));
+});
+const techDesignQuestionContextText = computed(() => {
+  if (!techDesignQuestionArtifacts.value.length) {
+    return '';
+  }
+  if (techDesignQuestionArtifacts.value.length === 1) {
+    return techDesignQuestionArtifacts.value[0].path;
+  }
+  return `${techDesignQuestionArtifacts.value.length} 条答疑记录`;
+});
+const techDesignGenerationSourcePaths = computed(() => {
+  const paths = [...techDesignQuestionArtifacts.value.map((artifact) => artifact.path), ...techDesignSourceFiles.value.map((file) => file.path)].filter(
+    (item): item is string => Boolean(item)
+  );
+  return [...new Set(paths)];
+});
+const techDesignQuestionItems = computed(() => buildTechDesignQuestionItems(techDesignQuestionRecords.value, workflow.value?.runs || []));
+const techDesignQuestionButtonText = computed(() => (techDesignQuestionItems.value.length ? `技术方案答疑 ${techDesignQuestionItems.value.length}` : '技术方案答疑'));
 const stageHint = computed(() => {
   const hints: Record<WorkflowStage, string> = {
     PRD: '产品生成并二次编辑 PRD，审核通过后进入技术方案。',
@@ -444,6 +562,32 @@ function stageArtifactPath(stage: WorkflowStage) {
     }
   }
   return workflow.value?.artifacts.find((artifact) => artifact.stage === stage && artifact.exists && artifact.kind !== 'directory')?.path;
+}
+
+function defaultTechnicalDesignDocumentPath(requirementId: string) {
+  return `docs/${requirementId}/technical-design/design_review.md`;
+}
+
+function isTechnicalDesignSourcePath(filePath: string) {
+  return filePath.replace(/\\/g, '/').includes('/technical-design/file/');
+}
+
+function officialTechnicalDesignArtifactPath() {
+  if (!workflow.value) {
+    return '';
+  }
+  const defaultPath = defaultTechnicalDesignDocumentPath(workflow.value.requirementId);
+  const officialArtifact = workflow.value.artifacts.find(
+    (artifact) => artifact.exists && artifact.kind !== 'directory' && (artifact.id === 'technical-design' || artifact.path === defaultPath)
+  );
+  if (officialArtifact) {
+    return officialArtifact.path;
+  }
+  const artifactPath = workflow.value.stages.TECH_DESIGN.artifactPath?.trim();
+  if (artifactPath && !isTechnicalDesignSourcePath(artifactPath)) {
+    return artifactPath;
+  }
+  return '';
 }
 
 async function reload() {
@@ -469,6 +613,32 @@ function previewArtifact(artifact: ArtifactRef) {
   artifactPreviewDialog.value?.open(artifact);
 }
 
+async function loadTechDesignQuestionRecords() {
+  const artifacts = techDesignQuestionArtifacts.value;
+  if (!artifacts.length) {
+    techDesignQuestionRecords.value = [];
+    return;
+  }
+  techDesignQuestionLoading.value = true;
+  try {
+    const records: TechDesignQuestionRecord[] = [];
+    for (const artifact of artifacts) {
+      const result = await apiClient.readArtifact(artifact.path);
+      records.push(...parseTechDesignQuestionRecords(result.content, artifact.path));
+    }
+    techDesignQuestionRecords.value = records;
+  } catch (error) {
+    console.error('读取技术方案答疑记录失败:', error);
+    techDesignQuestionRecords.value = [];
+  } finally {
+    techDesignQuestionLoading.value = false;
+  }
+}
+
+function openDesignQuestionDialog() {
+  designQuestionDialog.value?.open();
+}
+
 async function runRefresh() {
   const result = await store.runAction({ actionType: 'REFRESH_ARTIFACTS' });
   if (result?.run?.id) {
@@ -479,6 +649,10 @@ async function runRefresh() {
 }
 
 async function runPrd() {
+  if (!requiresPrdApproval.value) {
+    ElMessage.warning('缺陷类型不需要 PRD 分析');
+    return;
+  }
   const textSources = sourceText.value
     .split('\n')
     .map((item) => item.trim())
@@ -614,23 +788,88 @@ async function runOrCopyAction(action: ActionInput, afterRun?: () => Promise<voi
 
 async function runDesign() {
   const documentPath = prdDesignSourcePath.value.trim();
-  if (!prdApproved.value) {
+  if (requiresPrdApproval.value && !prdApproved.value) {
     ElMessage.warning('请先通过 PRD 审核');
     return;
   }
-  if (!documentPath) {
+  if (requiresPrdApproval.value && !documentPath) {
     ElMessage.warning('未找到 PRD 文档，请先刷新产物');
     return;
   }
+  const params: Record<string, unknown> = {
+    ...agentActionParams(),
+    sourceFiles: techDesignGenerationSourcePaths.value,
+    clarification: designClarification.value.trim()
+  };
+  if (requiresPrdApproval.value) {
+    params.documentPath = documentPath;
+  }
   await runOrCopyAction({
     actionType: 'DESIGN_GENERATE',
-    params: {
-      ...agentActionParams(),
-      documentPath,
-      sourceFiles: techDesignSourceFiles.value.map((file) => file.path),
-      clarification: designClarification.value.trim()
-    }
+    params
   });
+}
+
+async function runDesignQuestion(rawQuestion: string) {
+  if (!workflow.value) {
+    return;
+  }
+  const question = rawQuestion.trim();
+  if (!question) {
+    ElMessage.warning('请输入技术方案问题');
+    return;
+  }
+  const designDocumentPath = openSpecTechnicalDesignDocumentPath.value.trim();
+  if (!designDocumentPath) {
+    ElMessage.warning('请先生成、保存或刷新技术方案产物');
+    return;
+  }
+  const params: Record<string, unknown> = {
+    ...agentActionParams(),
+    question,
+    designDocumentPath
+  };
+  if (requiresPrdApproval.value) {
+    const prdDocumentPath = openSpecPrdDocumentPath.value.trim();
+    if (!prdDocumentPath) {
+      ElMessage.warning('请先生成、保存或刷新 PRD 产物');
+      return;
+    }
+    params.prdDocumentPath = prdDocumentPath;
+  }
+  await runOrCopyAction({
+    actionType: 'DESIGN_QUESTION',
+    params
+  }, async () => {
+    await reload();
+    await loadTechDesignQuestionRecords();
+    designQuestionDialog.value?.clearQuestion();
+  });
+}
+
+async function deleteDesignQuestion(item: TechDesignQuestionListItem) {
+  if (!workflow.value) {
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(`确认删除问题“${item.summary || item.question}”？`, '删除技术方案答疑', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning'
+    });
+  } catch {
+    return;
+  }
+  await store.deleteTechDesignQuestion({
+    id: item.id,
+    recordId: item.recordId,
+    runId: item.runId,
+    sourcePath: item.sourcePath,
+    question: item.question
+  });
+  await reload();
+  await loadTechDesignQuestionRecords();
+  ElMessage.success('技术方案答疑问题已删除');
 }
 
 async function runOpenSpecStatus() {
@@ -640,6 +879,10 @@ async function runOpenSpecStatus() {
 async function runOpenSpecNewChange() {
   if (!techDesignApproved.value) {
     ElMessage.warning('请先通过技术方案审核');
+    return;
+  }
+  if (openSpecChangeExists.value) {
+    ElMessage.warning('已检测到对应 OpenSpec 变更目录，无需重复开始变更');
     return;
   }
   await runOrCopyAction({ actionType: 'OPENSPEC_NEW_CHANGE', params: { ...agentActionParams(), changeName: changeName.value } }, loadOpenSpecSummary);
@@ -656,7 +899,7 @@ async function runOpenSpecArtifacts() {
   }
   const prdDocumentPath = openSpecPrdDocumentPath.value.trim();
   const documentPath = openSpecTechnicalDesignDocumentPath.value.trim();
-  if (!prdDocumentPath) {
+  if (requiresPrdApproval.value && !prdDocumentPath) {
     ElMessage.warning('请先生成、保存或刷新 PRD 产物');
     return;
   }
@@ -664,18 +907,16 @@ async function runOpenSpecArtifacts() {
     ElMessage.warning('请先生成、保存或刷新技术方案产物');
     return;
   }
-  await runOrCopyAction(
-    {
-      actionType: 'OPENSPEC_FF',
-      params: {
-        ...agentActionParams(),
-        changeName: changeName.value,
-        prdDocumentPath,
-        documentPath
-      }
-    },
-    loadOpenSpecSummary
-  );
+  const params: Record<string, unknown> = {
+    ...agentActionParams(),
+    changeName: changeName.value,
+    documentPath,
+    sourceFiles: techDesignSourceFiles.value.map((file) => file.path)
+  };
+  if (requiresPrdApproval.value) {
+    params.prdDocumentPath = prdDocumentPath;
+  }
+  await runOrCopyAction({ actionType: 'OPENSPEC_FF', params }, loadOpenSpecSummary);
 }
 
 async function runOpenSpecApply() {
@@ -690,14 +931,6 @@ async function runOpenSpecVerify() {
   await runOrCopyAction({ actionType: 'OPENSPEC_VERIFY', params: { ...agentActionParams(), changeName: changeName.value } }, loadOpenSpecSummary);
 }
 
-async function runJunit() {
-  if (!canRunJunit.value) {
-    ElMessage.warning('请先通过变更文件及代码审核');
-    return;
-  }
-  await runOrCopyAction({ actionType: 'JUNIT_GENERATE', params: { ...agentActionParams(), moduleName: moduleName.value } });
-}
-
 async function loadGitChanges() {
   if (!workflow.value) {
     return;
@@ -709,8 +942,33 @@ async function loadGitChanges() {
   }
 }
 
+function hasStagedTrackedChanges(summary: GitChangeSummary) {
+  return summary.projects.some((project) => project.files.some((file) => file.staged));
+}
+
+async function ensureStagedChangesForReview() {
+  if (!workflow.value || codeReviewMode.value !== 'staged') {
+    return true;
+  }
+  try {
+    const summary = await apiClient.getGitChanges(workflow.value.requirementId);
+    gitChanges.value = summary;
+    if (hasStagedTrackedChanges(summary)) {
+      return true;
+    }
+    ElMessage.warning('暂存区没有已暂存文件，请先 git add 后再执行暂存区预审');
+    return false;
+  } catch (error: any) {
+    ElMessage.error(error.message || '读取暂存区变更失败');
+    return false;
+  }
+}
+
 async function runCodeReview() {
-  await runOrCopyAction({ actionType: 'CODE_REVIEW', params: { ...agentActionParams(), branchName: branchName.value } });
+  if (!(await ensureStagedChangesForReview())) {
+    return;
+  }
+  await runOrCopyAction({ actionType: 'CODE_REVIEW', params: { ...agentActionParams(), branchName: branchName.value, reviewMode: codeReviewMode.value } });
 }
 
 async function runOpenSpecArchive() {
@@ -745,11 +1003,11 @@ async function toggleOpenSpecTask(task: OpenSpecTaskItem, completed: boolean) {
 }
 
 function implementationReviewArtifactPath() {
-  if (activeImplementationStep.value === 'UNIT_TEST') {
-    return junitArtifactPath.value;
-  }
   if (activeImplementationStep.value === 'ARTIFACT_REVIEW' || activeImplementationStep.value === 'APPLY') {
     return selectedOpenSpecDocPath.value || stageArtifactPath('IMPLEMENTATION');
+  }
+  if (activeImplementationStep.value === 'CHANGE_INSPECTION') {
+    return junitArtifactPath.value || undefined;
   }
   return undefined;
 }
@@ -798,15 +1056,17 @@ watch(
     sourceText.value = value.sources.filter((source) => !uploadedPaths.has(source)).join('\n');
     prdClarification.value = value.prdClarification || '';
     changeName.value = value.stages.IMPLEMENTATION.changeName || `req-${value.requirementId}`;
-    moduleName.value = moduleName.value || '';
     branchName.value = value.branchName || '';
     designClarification.value = value.techDesignClarification || '';
     void loadOpenSpecSummary();
-    activeStage.value = value.currentStage === 'DONE' ? 'CODE_REVIEW' : value.currentStage;
+    const stages = applicableStages.value;
+    const nextActiveStage = value.currentStage === 'DONE' ? stages[stages.length - 1] : value.currentStage;
+    activeStage.value = stages.includes(nextActiveStage as WorkflowStage) ? (nextActiveStage as WorkflowStage) : stages[0] || 'PRD';
 
     if (activeStage.value === 'IMPLEMENTATION') {
       activeImplementationStep.value = findFirstPendingImplementationStep(value.implementationSteps);
     }
+    void loadTechDesignQuestionRecords();
   },
   { immediate: true }
 );
@@ -816,6 +1076,14 @@ watch(activeImplementationStep, (step) => {
     void loadGitChanges();
   }
 });
+
+watch(
+  () => techDesignQuestionArtifacts.value.map((artifact) => artifact.path).join('|'),
+  () => {
+    void loadTechDesignQuestionRecords();
+  },
+  { immediate: true }
+);
 
 onMounted(async () => {
   await store.loadAgents();
@@ -944,9 +1212,125 @@ onMounted(async () => {
   max-width: 360px;
 }
 
+.design-input-panel {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #fbfdff 0%, #f8fbff 100%);
+}
+
+.design-input-block {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.design-input-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+
+.design-input-heading > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.design-input-heading strong {
+  color: #172033;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.design-input-heading p {
+  margin: 0;
+  line-height: 20px;
+}
+
+.design-upload-button {
+  flex: 0 0 auto;
+}
+
+.design-file-list {
+  background: #fff;
+}
+
+.design-question-context {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #334155;
+  font-size: 13px;
+}
+
+.design-question-context span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.design-question-context small {
+  color: #2563eb;
+  white-space: nowrap;
+}
+
+.context-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 12px;
+}
+
+.design-clarification :deep(.el-textarea__inner) {
+  min-height: 96px !important;
+  border-radius: 8px;
+  line-height: 1.6;
+}
+
+.design-run-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 2px;
+}
+
+.design-run-footer .muted {
+  line-height: 20px;
+}
+
+.design-run-actions {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 10px;
+}
+
+.design-question-entry-button {
+  min-width: 116px;
+}
+
+.design-run-button {
+  min-width: 132px;
+}
+
 .implementation-step-nav {
   display: grid;
-  grid-template-columns: repeat(5, minmax(130px, 1fr));
+  grid-template-columns: repeat(4, minmax(130px, 1fr));
   gap: 10px;
 }
 
@@ -1142,6 +1526,26 @@ onMounted(async () => {
   font-variant-numeric: tabular-nums;
 }
 
+.report-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid #eef2f7;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.report-path {
+  min-width: 0;
+  color: #52637a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .stage-toolbar-actions {
   display: flex;
   align-items: center;
@@ -1214,6 +1618,19 @@ onMounted(async () => {
     max-width: none;
   }
 
+  .design-input-heading,
+  .design-run-footer,
+  .design-run-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .design-upload-button,
+  .design-question-entry-button,
+  .design-run-button {
+    width: 100%;
+  }
+
   .stage-toolbar-actions {
     align-items: stretch;
     flex-direction: column;
@@ -1236,6 +1653,16 @@ onMounted(async () => {
   .metric-card {
     border-left: 0;
     border-top: 1px solid #e3e8f2;
+  }
+
+  .report-entry {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .report-path {
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 }
 </style>

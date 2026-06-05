@@ -52,4 +52,36 @@ describe('ArtifactSidebar', () => {
     await wrapper.find('.artifact-row').trigger('click');
     expect(wrapper.emitted('select')?.[0][0]).toMatchObject({ path: 'docs/172014/prd/analysis.md' });
   });
+
+  it('缺陷工作流过滤 PRD 产物分组', () => {
+    const wrapper = mount(ArtifactSidebar, {
+      props: {
+        workflow: {
+          requirementType: 'DEFECT'
+        },
+        artifacts: [
+          {
+            id: 'prd',
+            stage: 'PRD',
+            label: 'PRD 分析文档',
+            path: 'docs/172014/prd/analysis.md',
+            kind: 'markdown',
+            exists: true
+          },
+          {
+            id: 'technical-design',
+            stage: 'TECH_DESIGN',
+            label: '技术方案评审文档',
+            path: 'docs/172014/technical-design/design_review.md',
+            kind: 'markdown',
+            exists: true
+          }
+        ],
+        issues: []
+      }
+    });
+
+    expect(wrapper.text()).not.toContain('PRD 分析文档');
+    expect(wrapper.text()).toContain('技术方案评审文档');
+  });
 });

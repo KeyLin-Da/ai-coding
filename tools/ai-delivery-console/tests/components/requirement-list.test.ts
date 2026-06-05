@@ -16,12 +16,12 @@ vi.mock('vue-router', () => ({
 }));
 
 vi.mock('@/api/client', () => ({
-	  apiClient: {
-	    listRequirements: vi.fn(),
-	    listProjectHistory: vi.fn(),
-	    listProjects: vi.fn(),
-	    createRequirement: vi.fn()
-	  }
+  apiClient: {
+    listRequirements: vi.fn(),
+    listProjectHistory: vi.fn(),
+    listProjects: vi.fn(),
+    createRequirement: vi.fn()
+  }
 }));
 
 vi.mock('element-plus', async () => {
@@ -98,16 +98,23 @@ function componentStubs() {
     ElSelect: {
       template: '<select multiple><slot /></select>'
     },
+    ElPagination: {
+      props: ['currentPage', 'pageSize', 'total'],
+      emits: ['update:currentPage', 'update:pageSize'],
+      template: '<nav>{{ total }}</nav>'
+    },
     ElTable: { template: '<div><slot /></div>' },
     ElTableColumn: { template: '<div />' },
-    ElTag: { template: '<span><slot /></span>' }
+    ElTag: { template: '<span><slot /></span>' },
+    ElTooltip: { template: '<span><slot /></span>' }
   };
 }
 
-async function mountList(current = workflow()) {
+async function mountList(current: RequirementWorkflow | RequirementWorkflow[] = workflow()) {
   const pinia = createPinia();
   setActivePinia(pinia);
-  vi.mocked(apiClient.listRequirements).mockResolvedValue([current]);
+  const workflows = Array.isArray(current) ? current : [current];
+  vi.mocked(apiClient.listRequirements).mockResolvedValue(workflows);
   vi.mocked(apiClient.listProjectHistory).mockResolvedValue([
     {
       name: 'opp-api',
@@ -129,7 +136,7 @@ async function mountList(current = workflow()) {
     }
   ]);
   vi.mocked(apiClient.createRequirement).mockResolvedValue({
-    ...current,
+    ...workflows[0],
     title: '新标题',
     branchName: 'feature/opp-172014-edit',
     projects: [
@@ -167,13 +174,17 @@ describe('RequirementList', () => {
     await flushPromises();
 
     const inputs = wrapper.findAll('input');
+    const requirementIdInputIndex = inputs.findIndex((input) => input.attributes('disabled') !== undefined);
+    const requirementIdInput = inputs[requirementIdInputIndex];
+    const titleInput = inputs[requirementIdInputIndex + 1];
+    const branchInput = inputs[requirementIdInputIndex + 2];
     expect(wrapper.text()).toContain('编辑需求');
-    expect(inputs[0].attributes('disabled')).toBeDefined();
-    expect(inputs[1].attributes('disabled')).toBeUndefined();
-    expect(inputs[2].attributes('disabled')).toBeUndefined();
+    expect(requirementIdInput.attributes('disabled')).toBeDefined();
+    expect(titleInput.attributes('disabled')).toBeUndefined();
+    expect(branchInput.attributes('disabled')).toBeUndefined();
 
-    await inputs[1].setValue('新标题');
-    await inputs[2].setValue('feature/opp-172014-edit');
+    await titleInput.setValue('新标题');
+    await branchInput.setValue('feature/opp-172014-edit');
     await (wrapper.vm as any).submit();
 
     expect(apiClient.createRequirement).toHaveBeenCalledWith(
@@ -186,5 +197,154 @@ describe('RequirementList', () => {
     );
     expect(routerPush).not.toHaveBeenCalled();
     expect(ElMessage.success).toHaveBeenCalledWith('需求信息已保存');
+  });
+
+  it('列表展示工程名、阶段颜色类和最近运行中文描述', async () => {
+    const current = {
+      ...workflow(),
+      currentStage: 'CODE_REVIEW' as const,
+      projects: [
+        {
+          name: 'opp-learn',
+          path: '/Users/key.lin/work/Projects/opp/opp-learn'
+        },
+        {
+          name: '/Users/key.lin/work/Projects/opp/opp-api',
+          path: '/Users/key.lin/work/Projects/opp/opp-api'
+        }
+      ],
+      runs: [
+        {
+          id: 'run-1',
+          requirementId: '172014',
+          actionType: 'CODE_REVIEW' as const,
+          status: 'SUCCEEDED' as const,
+          startedAt: '2026-06-03T08:00:00.000Z',
+          params: {}
+        }
+      ]
+    };
+    const wrapper = await mountList(current);
+    const vm = wrapper.vm as unknown as {
+      projectDisplayName: (project: { name: string; path: string }) => string;
+      stageTagClass: (stage: 'CODE_REVIEW') => string[];
+      recentRunText: (run?: (typeof current.runs)[number]) => string;
+      stageText: (stage: string) => string;
+    };
+
+    expect(vm.projectDisplayName(current.projects[0])).toBe('opp-learn');
+    expect(vm.projectDisplayName(current.projects[1])).toBe('opp-api');
+    expect(vm.stageTagClass('CODE_REVIEW')).toEqual(['stage-tag', 'stage-tag--CODE_REVIEW']);
+    expect(vm.stageText('TECH_DESIGN')).toBe('技术方案');
+    expect(vm.stageText('SKIPPED')).toBe('已跳过');
+    expect(vm.recentRunText(current.runs[0])).toBe('代码评审（成功）');
+    expect(vm.recentRunText()).toBe('暂无');
+  });
+
+  it('支持按标题或需求号、需求类型、阶段和涉及工程过滤并清空', async () => {
+    const current = workflow();
+    current.title = '新增定位菜单组件';
+    const defectDone: RequirementWorkflow = {
+      ...workflow(),
+      requirementId: '173229',
+      title: '邀请好友积分异常',
+      requirementType: 'DEFECT',
+      branchName: 'bugfix/opp#173229',
+      currentStage: 'DONE',
+      projects: [{ name: 'opp-learn', path: 'opp-learn' }]
+    };
+    const defectDesign: RequirementWorkflow = {
+      ...workflow(),
+      requirementId: '170025',
+      title: '保存卷王测评记录异常修复',
+      requirementType: 'DEFECT',
+      branchName: 'bugfix/opp#170025',
+      currentStage: 'TECH_DESIGN',
+      projects: [{ name: 'opp-diy', path: 'opp-diy' }]
+    };
+    const wrapper = await mountList([current, defectDone, defectDesign]);
+    const vm = wrapper.vm as unknown as {
+      filters: {
+        keyword: string;
+        requirementType: 'REQUIREMENT' | 'DEFECT' | '';
+        stage: RequirementWorkflow['currentStage'] | '';
+        projectPaths: string[];
+      };
+      filteredRequirements: RequirementWorkflow[];
+      filterSummaryText: string;
+      stageFilterOptions: Array<{ label: string; value: string }>;
+      projectFilterOptions: Array<{ label: string; value: string }>;
+      clearFilters: () => void;
+    };
+
+    vm.filters.keyword = '积分';
+    await flushPromises();
+    expect(vm.filteredRequirements.map((item) => item.requirementId)).toEqual(['173229']);
+
+    vm.filters.keyword = '170025';
+    await flushPromises();
+    expect(vm.filteredRequirements.map((item) => item.requirementId)).toEqual(['170025']);
+
+    vm.filters.keyword = '';
+    vm.filters.requirementType = 'DEFECT';
+    vm.filters.stage = 'TECH_DESIGN';
+    vm.filters.projectPaths = ['opp-diy'];
+    await flushPromises();
+
+    expect(vm.filteredRequirements.map((item) => item.requirementId)).toEqual(['170025']);
+    expect(vm.filterSummaryText).toBe('已筛选 1 / 共 3 条');
+    expect(vm.stageFilterOptions).toContainEqual({ label: '完成', value: 'DONE' });
+    expect(vm.projectFilterOptions).toContainEqual({ label: 'opp-diy', value: 'opp-diy' });
+
+    vm.clearFilters();
+    await flushPromises();
+
+    expect(vm.filteredRequirements.map((item) => item.requirementId)).toEqual(['172014', '173229', '170025']);
+    expect(vm.filterSummaryText).toBe('共 3 条');
+  });
+
+  it('支持在筛选结果后分页、切换页大小并保持页码有效', async () => {
+    const workflows = Array.from({ length: 12 }, (_, index) => ({
+      ...workflow(),
+      requirementId: `${170000 + index}`,
+      title: `需求 ${index + 1}`,
+      branchName: `feature/opp-${170000 + index}`
+    }));
+    const wrapper = await mountList(workflows);
+    const vm = wrapper.vm as unknown as {
+      filters: {
+        keyword: string;
+        requirementType: 'REQUIREMENT' | 'DEFECT' | '';
+        stage: RequirementWorkflow['currentStage'] | '';
+        projectPaths: string[];
+      };
+      currentPage: number;
+      pageSize: number;
+      pageCount: number;
+      pagedRequirements: RequirementWorkflow[];
+      clampCurrentPage: () => void;
+    };
+
+    expect(vm.pagedRequirements.map((item) => item.requirementId)).toEqual(workflows.slice(0, 10).map((item) => item.requirementId));
+
+    vm.currentPage = 2;
+    await flushPromises();
+    expect(vm.pagedRequirements.map((item) => item.requirementId)).toEqual(workflows.slice(10).map((item) => item.requirementId));
+
+    vm.pageSize = 20;
+    await flushPromises();
+    expect(vm.currentPage).toBe(1);
+    expect(vm.pagedRequirements.map((item) => item.requirementId)).toEqual(workflows.map((item) => item.requirementId));
+
+    vm.currentPage = 2;
+    vm.filters.keyword = '需求 12';
+    await flushPromises();
+    expect(vm.currentPage).toBe(1);
+    expect(vm.pagedRequirements.map((item) => item.requirementId)).toEqual(['170011']);
+
+    vm.currentPage = 99;
+    vm.clampCurrentPage();
+    await flushPromises();
+    expect(vm.currentPage).toBe(vm.pageCount);
   });
 });

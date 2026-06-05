@@ -137,6 +137,7 @@ rules:
     - 业务代码禁止写在controller层，必须写在service层
     - 涉及前端页面开发时，需要提供参考页面设计（截图、原型图或UI稿）
     - 前端设计需说明组件复用策略和样式规范（Element Plus/Ant Design 组件选型）
+    - 方案设计过程中产生设计文件等，保存路径到根目录 `docs/{需求号}/reports/`
 
   tasks:
     - 始终生成中文版描述

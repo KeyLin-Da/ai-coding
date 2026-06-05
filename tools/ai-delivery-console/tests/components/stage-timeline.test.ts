@@ -47,4 +47,24 @@ describe('StageTimeline', () => {
     await wrapper.findAll('button')[2].trigger('click');
     expect(wrapper.emitted('update:modelValue')?.[0]).toEqual(['IMPLEMENTATION']);
   });
+
+  it('缺陷工作流不展示 PRD 且阶段序号从技术方案开始', () => {
+    const item = {
+      ...workflow(),
+      requirementType: 'DEFECT' as const,
+      currentStage: 'TECH_DESIGN' as const,
+      stages: createEmptyStages('DEFECT')
+    };
+    const wrapper = mount(StageTimeline, {
+      props: {
+        workflow: item,
+        modelValue: 'TECH_DESIGN'
+      }
+    });
+
+    expect(wrapper.text()).not.toContain('PRD');
+    expect(wrapper.findAll('button')).toHaveLength(3);
+    expect(wrapper.find('.step-index').text()).toBe('1');
+    expect(wrapper.find('button').text()).toContain('技术方案');
+  });
 });
