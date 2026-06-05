@@ -79,6 +79,105 @@ describe('action-adapters', () => {
     );
   });
 
+  it('普通需求生成技术方案命令时将答疑记录放在上传补充材料之前', () => {
+    const item = {
+      ...workflow(),
+      artifacts: [
+        {
+          id: 'technical-design-questions',
+          stage: 'TECH_DESIGN' as const,
+          label: '技术方案答疑记录',
+          path: 'docs/172014/technical-design/questions.md',
+          kind: 'markdown' as const,
+          exists: true
+        },
+        {
+          id: 'technical-design-question-1',
+          stage: 'TECH_DESIGN' as const,
+          label: '技术方案答疑 20260604-173000-question',
+          path: 'docs/172014/technical-design/questions/20260604-173000-question.md',
+          kind: 'markdown' as const,
+          exists: true
+        }
+      ],
+      techDesignSourceFiles: [
+        {
+          id: 'source-1',
+          name: '补充图.png',
+          path: 'docs/172014/technical-design/files/source-1.png',
+          size: 100,
+          uploadedAt: new Date().toISOString()
+        }
+      ]
+    };
+
+    expect(internalForTests.buildSkillCommand(item, { actionType: 'DESIGN_GENERATE', params: {} })).toBe(
+      '/coding-design d=docs/172014/prd/analysis.md,docs/172014/technical-design/questions/20260604-173000-question.md,docs/172014/technical-design/questions.md,docs/172014/technical-design/files/source-1.png r=172014'
+    );
+  });
+
+  it('生成技术方案答疑命令并默认使用独立输出路径', () => {
+    const item = {
+      ...workflow(),
+      projects: [
+        { name: 'opp-api', path: 'opp-api' },
+        { name: 'opp-learn', path: 'opp-learn' }
+      ]
+    };
+
+    expect(
+      internalForTests.buildSkillCommand(item, {
+        actionType: 'DESIGN_QUESTION',
+        params: {
+          question: '为什么需要缓存',
+          prdDocumentPath: 'docs/172014/prd/analysis.md',
+          designDocumentPath: 'docs/172014/technical-design/design_review.md'
+        }
+      })
+    ).toMatch(
+      /^\/coding-design-question r=172014 q=为什么需要缓存 d=docs\/172014\/prd\/analysis\.md,docs\/172014\/technical-design\/design_review\.md p=opp-api,opp-learn o=docs\/172014\/technical-design\/questions\/\d{8}-\d{6}-\d{3}-question\.md$/
+    );
+  });
+
+  it('缺陷生成技术方案答疑命令时不自动携带 PRD 文档路径', () => {
+    const item = {
+      ...workflow(),
+      requirementType: 'DEFECT' as const,
+      currentStage: 'TECH_DESIGN' as const,
+      stages: createEmptyStages('DEFECT')
+    };
+
+    const command = internalForTests.buildSkillCommand(item, {
+      actionType: 'DESIGN_QUESTION',
+      params: {
+        question: '为什么不补偿历史数据',
+        designDocumentPath: 'docs/172014/technical-design/design_review.md'
+      }
+    });
+
+    expect(command).toMatch(
+      /^\/coding-design-question r=172014 q=为什么不补偿历史数据 d=docs\/172014\/technical-design\/design_review\.md o=docs\/172014\/technical-design\/questions\/\d{8}-\d{6}-\d{3}-question\.md$/
+    );
+    expect(command).not.toContain('/prd/');
+  });
+
+  it('执行技术方案答疑时把默认独立输出路径写入运行参数', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-design-question-'));
+    const item = workflow();
+    const run = await executeAction(root, item, {
+      actionType: 'DESIGN_QUESTION',
+      params: {
+        question: '为什么需要缓存',
+        designDocumentPath: 'docs/172014/technical-design/design_review.md',
+        agentId: 'missing-agent'
+      }
+    });
+
+    expect(run.status).toBe('WAITING_FOR_AGENT');
+    expect(run.params.outputPath).toEqual(expect.stringMatching(/^docs\/172014\/technical-design\/questions\/\d{8}-\d{6}-\d{3}-question\.md$/));
+    expect(run.commandText).toContain(String(run.params.outputPath));
+  });
+
   it('缺陷生成技术方案命令不自动携带 PRD 文档路径', () => {
     const item = {
       ...workflow(),

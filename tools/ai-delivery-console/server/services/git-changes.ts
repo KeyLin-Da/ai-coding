@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
-import type { GitChangeSummary, GitChangedFile, GitProjectChangeSummary, WorkflowProject } from '../../shared/workflow';
+import type { GitChangeSummary, GitChangedFile, GitProjectChangeSummary, GitStageUntrackedInput, WorkflowProject } from '../../shared/workflow';
 import { loadSettings } from './project-settings';
 import { resolveWorkflowProject } from './project-resolver';
 
@@ -94,6 +94,21 @@ function truncateDiff(diff: string): string {
   return diff.length > maxDiffLength ? `${diff.slice(0, maxDiffLength)}\n\n... diff 内容过长，已截断 ...\n` : diff;
 }
 
+function normalizeStageFilePath(filePath: string): string {
+  const normalized = String(filePath || '').trim().replace(/\\/g, '/');
+  if (!normalized) {
+    throw new Error('待确认新文件路径不能为空');
+  }
+  if (path.isAbsolute(normalized) || /^[A-Za-z]:\//.test(normalized)) {
+    throw new Error(`待确认新文件路径必须是相对路径: ${filePath}`);
+  }
+  const segments = normalized.split('/');
+  if (segments.some((segment) => !segment || segment === '.' || segment === '..')) {
+    throw new Error(`待确认新文件路径不合法: ${filePath}`);
+  }
+  return segments.join('/');
+}
+
 async function readProjectGitChanges(
   workspaceRoot: string,
   project: WorkflowProject,
@@ -183,6 +198,44 @@ export async function readGitChanges(workspaceRoot: string, projects: WorkflowPr
     additions: projectSummaries.reduce((sum, summary) => sum + summary.additions, 0),
     deletions: projectSummaries.reduce((sum, summary) => sum + summary.deletions, 0)
   };
+}
+
+export async function stageUntrackedFiles(
+  workspaceRoot: string,
+  projects: WorkflowProject[] = [],
+  expectedBranch: string | undefined,
+  input: GitStageUntrackedInput
+): Promise<GitChangeSummary> {
+  if (!projects.length) {
+    throw new Error('请先维护涉及工程，再确认待确认新文件');
+  }
+  const projectPath = String(input.projectPath || '').trim();
+  if (!projectPath) {
+    throw new Error('缺少待确认新文件所属工程');
+  }
+  const files = [...new Set((Array.isArray(input.files) ? input.files : []).map(normalizeStageFilePath))];
+  if (!files.length) {
+    throw new Error('请至少选择一个待确认新文件');
+  }
+
+  const settings = await loadSettings(workspaceRoot);
+  const resolvedProjects = await Promise.all(projects.map((project) => resolveWorkflowProject(workspaceRoot, project, settings.projectPaths)));
+  const selected = resolvedProjects.find(
+    (item) => item.project.path === projectPath || item.project.name === projectPath || item.project.path === projectPath.replace(/\\/g, '/')
+  );
+  if (!selected) {
+    throw new Error(`待确认新文件所属工程不在当前需求范围内: ${projectPath}`);
+  }
+
+  const status = await runGit(selected.rootPath, ['status', '--short', '--untracked-files=all']);
+  const untrackedPaths = new Set(parseGitStatusShort(status).filter((file) => file.status === '??').map((file) => file.path.replace(/\\/g, '/')));
+  const invalidFiles = files.filter((file) => !untrackedPaths.has(file));
+  if (invalidFiles.length) {
+    throw new Error(`只能确认当前仍为待确认状态的新文件: ${invalidFiles.join(', ')}`);
+  }
+
+  await runGit(selected.rootPath, ['add', '--', ...files]);
+  return readGitChanges(workspaceRoot, projects, expectedBranch);
 }
 
 export function hasStagedTrackedChanges(summary: GitChangeSummary): boolean {

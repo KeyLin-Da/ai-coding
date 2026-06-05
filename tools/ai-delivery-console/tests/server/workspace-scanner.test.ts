@@ -8,6 +8,7 @@ async function makeFixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-scan-'));
   await fs.mkdir(path.join(root, 'docs', '172014', 'prd'), { recursive: true });
   await fs.mkdir(path.join(root, 'docs', '172014', 'technical-design', 'file'), { recursive: true });
+  await fs.mkdir(path.join(root, 'docs', '172014', 'technical-design', 'questions'), { recursive: true });
   await fs.mkdir(path.join(root, 'docs', '172014', 'junit', 'req-172014'), { recursive: true });
   await fs.mkdir(path.join(root, 'openspec', 'changes', 'req-172014'), { recursive: true });
   await fs.mkdir(path.join(root, 'docs', '172014', 'code-review', 'commit'), { recursive: true });
@@ -15,6 +16,8 @@ async function makeFixture() {
   await fs.mkdir(path.join(root, 'docs', 'code_review', 'code_review_feature_opp_172014'), { recursive: true });
   await fs.writeFile(path.join(root, 'docs', '172014', 'prd', 'analysis.md'), '# PRD');
   await fs.writeFile(path.join(root, 'docs', '172014', 'technical-design', 'design_review.md'), '# Design');
+  await fs.writeFile(path.join(root, 'docs', '172014', 'technical-design', 'questions.md'), '# Questions');
+  await fs.writeFile(path.join(root, 'docs', '172014', 'technical-design', 'questions', '20260604-173000-question.md'), '# Question');
   await fs.writeFile(path.join(root, 'docs', '172014', 'technical-design', 'file', 'old-design.md'), '# Old Design');
   await fs.writeFile(path.join(root, 'docs', '172014', 'junit', 'req-172014', 'report.md'), '# JUnit');
   await fs.writeFile(path.join(root, 'docs', '172014', 'code-review', 'summary.md'), '# Review Index');
@@ -32,6 +35,8 @@ describe('workspace-scanner', () => {
       expect.arrayContaining([
         'docs/172014/prd/analysis.md',
         'docs/172014/technical-design/design_review.md',
+        'docs/172014/technical-design/questions/20260604-173000-question.md',
+        'docs/172014/technical-design/questions.md',
         'docs/172014/technical-design/file/old-design.md',
         'openspec/changes/req-172014',
         'docs/172014/junit/req-172014/report.md',
@@ -41,6 +46,20 @@ describe('workspace-scanner', () => {
         'docs/code_review/code_review_feature_opp_172014/summary.md'
       ])
     );
+    const questions = artifacts.find((item) => item.id === 'technical-design-questions');
+    expect(questions).toMatchObject({
+      stage: 'TECH_DESIGN',
+      label: '技术方案答疑记录',
+      kind: 'markdown',
+      exists: true
+    });
+    const questionFile = artifacts.find((item) => item.path === 'docs/172014/technical-design/questions/20260604-173000-question.md');
+    expect(questionFile).toMatchObject({
+      stage: 'TECH_DESIGN',
+      label: '技术方案答疑 20260604-173000-question',
+      kind: 'markdown',
+      exists: true
+    });
   });
 
   it('不再展示旧式 PRD 产物路径', async () => {

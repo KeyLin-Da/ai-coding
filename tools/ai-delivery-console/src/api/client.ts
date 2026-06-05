@@ -2,6 +2,7 @@ import type {
   ActionInput,
   AgentProvider,
   GitChangeSummary,
+  GitStageUntrackedInput,
   OpenSpecSummary,
   RequirementInput,
   RequirementWorkflow,
@@ -10,6 +11,14 @@ import type {
   RunRecord,
   WorkflowProject
 } from '@shared/workflow';
+
+export interface DeleteTechDesignQuestionInput {
+  id?: string;
+  recordId?: string;
+  runId?: string;
+  sourcePath?: string;
+  question?: string;
+}
 
 interface ApiResult<T> {
   data: T;
@@ -66,6 +75,12 @@ export const apiClient = {
   },
   getGitChanges(requirementId: string) {
     return request<GitChangeSummary>(`/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/git-changes`);
+  },
+  stageUntrackedFiles(requirementId: string, input: GitStageUntrackedInput) {
+    return request<GitChangeSummary>(`/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/git-changes/stage-untracked`, {
+      method: 'POST',
+      body: JSON.stringify(input)
+    });
   },
   runAction(requirementId: string, input: ActionInput) {
     return request<{ run: RunRecord; workflow: RequirementWorkflow }>('/api/ai-delivery/requirements/' + encodeURIComponent(requirementId) + '/actions', {
@@ -138,6 +153,12 @@ export const apiClient = {
         method: 'DELETE'
       }
     );
+  },
+  deleteTechDesignQuestion(requirementId: string, input: DeleteTechDesignQuestionInput) {
+    return request<RequirementWorkflow>(`/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/tech-design-questions`, {
+      method: 'DELETE',
+      body: JSON.stringify(input)
+    });
   },
   getSettings() {
     return request<{ projectPaths: string[] }>('/api/ai-delivery/settings');

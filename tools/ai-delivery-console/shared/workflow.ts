@@ -39,6 +39,7 @@ export type WorkflowImplementationStep = ImplementationStep | LegacyImplementati
 export type ActionType =
   | 'PRD_ANALYZE'
   | 'DESIGN_GENERATE'
+  | 'DESIGN_QUESTION'
   | 'OPENSPEC_STATUS'
   | 'OPENSPEC_NEW_CHANGE'
   | 'OPENSPEC_INSTRUCTIONS'
@@ -207,6 +208,11 @@ export interface GitChangeSummary {
   deletions: number;
 }
 
+export interface GitStageUntrackedInput {
+  projectPath: string;
+  files: string[];
+}
+
 export type AgentInputMode = 'PROMPT_FILE' | 'STDIN' | 'ARGUMENTS' | 'MANUAL';
 
 export interface AgentProvider {
@@ -329,6 +335,7 @@ export const statusLabels: Record<WorkflowStatus | RunStatus, string> = {
 export const actionTypeLabels: Record<ActionType, string> = {
   PRD_ANALYZE: 'PRD 分析',
   DESIGN_GENERATE: '技术方案生成',
+  DESIGN_QUESTION: '技术方案答疑',
   OPENSPEC_STATUS: 'OpenSpec 状态检查',
   OPENSPEC_NEW_CHANGE: '创建 OpenSpec 变更',
   OPENSPEC_INSTRUCTIONS: '读取 OpenSpec 指令',
@@ -420,6 +427,7 @@ export function findFirstPendingImplementationStep(
 export const actionStageMap: Partial<Record<ActionType, WorkflowStage>> = {
   PRD_ANALYZE: 'PRD',
   DESIGN_GENERATE: 'TECH_DESIGN',
+  DESIGN_QUESTION: 'TECH_DESIGN',
   OPENSPEC_STATUS: 'IMPLEMENTATION',
   OPENSPEC_NEW_CHANGE: 'IMPLEMENTATION',
   OPENSPEC_INSTRUCTIONS: 'IMPLEMENTATION',

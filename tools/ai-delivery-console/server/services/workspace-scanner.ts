@@ -94,6 +94,31 @@ export async function scanRequirementArtifacts(
     artifacts.push(prdAnalysis);
   }
   artifacts.push(await fileArtifact(workspaceRoot, 'technical-design', 'TECH_DESIGN', '技术方案评审文档', `docs/${id}/technical-design/design_review.md`, 'markdown'));
+  const techDesignQuestions = await existingFileArtifact(
+    workspaceRoot,
+    'technical-design-questions',
+    'TECH_DESIGN',
+    '技术方案答疑记录',
+    `docs/${id}/technical-design/questions.md`,
+    'markdown'
+  );
+  if (techDesignQuestions) {
+    artifacts.push(techDesignQuestions);
+  }
+  const techDesignQuestionFiles = await listFiles(path.join(workspaceRoot, 'docs', id, 'technical-design', 'questions'), 2);
+  for (const file of techDesignQuestionFiles.filter((item) => /\.md$/i.test(item))) {
+    const relative = path.relative(workspaceRoot, file);
+    artifacts.push(
+      await fileArtifact(
+        workspaceRoot,
+        `technical-design-question-${artifacts.length}`,
+        'TECH_DESIGN',
+        `技术方案答疑 ${path.basename(file, path.extname(file))}`,
+        relative,
+        'markdown'
+      )
+    );
+  }
   const techDesignSourceFiles = await listFiles(path.join(workspaceRoot, 'docs', id, 'technical-design', 'file'), 2);
   for (const file of techDesignSourceFiles) {
     const relative = path.relative(workspaceRoot, file);

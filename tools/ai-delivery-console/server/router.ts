@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import path from 'node:path';
 import { URL } from 'node:url';
-import type { ActionInput, PrdSourceFile, RequirementInput, RequirementWorkflow, ReviewInput, RunRecord, TechDesignSourceFile, WorkflowStatus } from '../shared/workflow';
+import type { ActionInput, GitStageUntrackedInput, PrdSourceFile, RequirementInput, RequirementWorkflow, ReviewInput, RunRecord, TechDesignSourceFile, WorkflowStatus } from '../shared/workflow';
 import { ensureImplementationSteps, isImplementationStep, stageForAction } from '../shared/workflow';
 import { normalizePrdClarification, WorkflowRepository } from './services/workflow-repository';
 import { scanRequirementArtifacts } from './services/workspace-scanner';
@@ -12,9 +12,10 @@ import { readArtifact, saveArtifact } from './services/markdown-service';
 import { applyReview, refreshCodeReviewIssues, returnToImplementation } from './services/review-service';
 import { cancelAgentRun, listAgentProviders, refreshTerminalRunStatuses } from './services/agent-providers';
 import { normalizeOpenSpecChangeName, readOpenSpecSummary, updateOpenSpecTaskStatus } from './services/openspec-summary';
-import { readGitChanges } from './services/git-changes';
+import { readGitChanges, stageUntrackedFiles } from './services/git-changes';
 import { readProjectHistory, listProjectsFromConfiguredPaths } from './services/project-history';
 import { loadSettings, saveSettings, validateSettings } from './services/project-settings';
+import { deleteTechDesignQuestionRecord, type DeleteTechDesignQuestionInput } from './services/tech-design-questions';
 import {
   assertAllowedPrdSourceFile,
   deletePrdSourceFileSnapshot,
@@ -305,6 +306,18 @@ export function createRouter(workspaceRoot: string) {
         return;
       }
 
+      const stageUntrackedMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/git-changes\/stage-untracked$/);
+      if (request.method === 'POST' && stageUntrackedMatch) {
+        const workflow = await repository.load(stageUntrackedMatch[1]);
+        if (!workflow) {
+          send(response, 404, { message: '需求不存在' });
+          return;
+        }
+        const input = await parseBody<GitStageUntrackedInput>(request);
+        send(response, 200, { data: await stageUntrackedFiles(workspaceRoot, workflow.projects || [], workflow.branchName, input) });
+        return;
+      }
+
       const prdFilesMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/prd-files$/);
       if (request.method === 'POST' && prdFilesMatch) {
         const requirementId = prdFilesMatch[1];
@@ -431,6 +444,36 @@ export function createRouter(workspaceRoot: string) {
         return;
       }
 
+      const techDesignQuestionDeleteMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/tech-design-questions$/);
+      if (request.method === 'DELETE' && techDesignQuestionDeleteMatch) {
+        const requirementId = techDesignQuestionDeleteMatch[1];
+        const input = await parseBody<DeleteTechDesignQuestionInput>(request);
+        const lock = new WorkflowLock(workspaceRoot, requirementId);
+        await lock.acquire();
+        try {
+          let workflow = await repository.load(requirementId);
+          if (!workflow) {
+            send(response, 404, { message: '需求不存在' });
+            return;
+          }
+          const nextWorkflow = await deleteTechDesignQuestionRecord(workspaceRoot, workflow, input);
+          workflow = await repository.save({
+            ...nextWorkflow,
+            artifacts: await scanRequirementArtifacts(
+              workspaceRoot,
+              nextWorkflow.requirementId,
+              nextWorkflow.branchName,
+              nextWorkflow.stages.IMPLEMENTATION.changeName,
+              nextWorkflow.requirementType
+            )
+          });
+          send(response, 200, { data: workflow });
+        } finally {
+          await lock.release();
+        }
+        return;
+      }
+
       const actionMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/actions$/);
       if (request.method === 'POST' && actionMatch) {
         const requirementId = actionMatch[1];
@@ -523,7 +566,7 @@ export function createRouter(workspaceRoot: string) {
             );
           }
           // PRD分析、技术方案生成等可能产生产物的操作，执行完成后自动刷新产物索引
-          if (['PRD_ANALYZE', 'DESIGN_GENERATE', 'OPENSPEC_NEW_CHANGE', 'OPENSPEC_ARCHIVE'].includes(action.actionType)) {
+          if (['PRD_ANALYZE', 'DESIGN_GENERATE', 'DESIGN_QUESTION', 'OPENSPEC_NEW_CHANGE', 'OPENSPEC_ARCHIVE'].includes(action.actionType)) {
             workflow.artifacts = await scanRequirementArtifacts(
               workspaceRoot,
               workflow.requirementId,

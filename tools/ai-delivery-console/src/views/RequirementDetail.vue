@@ -114,6 +114,11 @@
                       <el-button type="danger" link :icon="Delete" @click="deleteTechDesignFile(file.id)">删除</el-button>
                     </div>
                   </div>
+                  <div v-if="techDesignQuestionArtifacts.length" class="design-question-context">
+                    <span class="context-badge">答疑记录</span>
+                    <span>{{ techDesignQuestionContextText }}</span>
+                    <small>自动纳入生成上下文</small>
+                  </div>
                 </div>
                 <div class="design-input-block">
                   <div class="design-input-heading">
@@ -134,9 +139,14 @@
                 </div>
                 <div class="design-run-footer">
                   <span class="muted">生成时会读取补充材料和补充说明。</span>
-                  <el-button class="design-run-button" type="primary" :disabled="!canRunDesign" :icon="primaryActionIcon(Operation)" @click="runDesign">
-                    {{ actionButtonText('生成技术方案') }}
-                  </el-button>
+                  <div class="design-run-actions">
+                    <el-button class="design-question-entry-button" :icon="ChatLineSquare" @click="openDesignQuestionDialog">
+                      {{ techDesignQuestionButtonText }}
+                    </el-button>
+                    <el-button class="design-run-button" type="primary" :disabled="!canRunDesign" :icon="primaryActionIcon(Operation)" @click="runDesign">
+                      {{ actionButtonText('生成技术方案') }}
+                    </el-button>
+                  </div>
                 </div>
               </section>
               <MarkdownEditor title="技术方案" :artifact-path="technicalDesignEditorPath" @saved="reload" />
@@ -265,7 +275,7 @@
                   <el-button :disabled="!canInspectChanges" :icon="DocumentChecked" @click="openReview">审核本步骤</el-button>
                 </div>
                 <el-alert v-if="!canInspectChanges" type="warning" show-icon title="请先完成并审核开始实施步骤" />
-                <GitChangeInspector :summary="gitChanges" />
+                <GitChangeInspector :summary="gitChanges" :requirement-id="workflow.requirementId" @updated="gitChanges = $event" />
               </template>
 
               <section class="openspec-section junit-report-section">
@@ -314,6 +324,16 @@
     </div>
 
     <ReviewDialog ref="reviewDialog" @submit="submitReview" />
+    <DesignQuestionDialog
+      ref="designQuestionDialog"
+      :loading="techDesignQuestionLoading"
+      :items="techDesignQuestionItems"
+      :submit-label="actionButtonText('提问')"
+      @open="loadTechDesignQuestionRecords"
+      @progress="openRunLog"
+      @delete="deleteDesignQuestion"
+      @submit="runDesignQuestion"
+    />
     <RunLogDrawer ref="runLogDrawer" :events="store.runEvents" />
     <ArtifactPreviewDialog ref="artifactPreviewDialog" />
   </div>
@@ -323,8 +343,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { Back, CopyDocument, DataAnalysis, Delete, DocumentChecked, Operation, Refresh, Tickets, Upload, View } from '@element-plus/icons-vue';
-import { ElMessage } from 'element-plus';
+import { Back, ChatLineSquare, CopyDocument, DataAnalysis, Delete, DocumentChecked, Operation, Refresh, Tickets, Upload, View } from '@element-plus/icons-vue';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import type {
   ActionInput,
   ArtifactRef,
@@ -355,15 +375,23 @@ import ReviewDialog from '@/components/ReviewDialog.vue';
 import RunLogDrawer from '@/components/RunLogDrawer.vue';
 import ArtifactSidebar from '@/components/ArtifactSidebar.vue';
 import ArtifactPreviewDialog from '@/components/ArtifactPreviewDialog.vue';
+import DesignQuestionDialog from '@/components/DesignQuestionDialog.vue';
 import GitChangeInspector from '@/components/GitChangeInspector.vue';
 import { useWorkflowStore } from '@/stores/workflow';
 import { apiClient } from '@/api/client';
 import { findLatestStageRun } from '@/utils/run-selection';
+import {
+  buildTechDesignQuestionItems,
+  parseTechDesignQuestionRecords,
+  type TechDesignQuestionListItem,
+  type TechDesignQuestionRecord
+} from '@/utils/tech-design-questions';
 
 const route = useRoute();
 const store = useWorkflowStore();
 const activeStage = ref<WorkflowStage>('PRD');
 const reviewDialog = ref<InstanceType<typeof ReviewDialog>>();
+const designQuestionDialog = ref<InstanceType<typeof DesignQuestionDialog>>();
 const runLogDrawer = ref<InstanceType<typeof RunLogDrawer>>();
 const artifactPreviewDialog = ref<InstanceType<typeof ArtifactPreviewDialog>>();
 const prdFileInput = ref<HTMLInputElement>();
@@ -377,6 +405,8 @@ const codeReviewMode = ref<'commit' | 'staged'>('commit');
 const selectedAgentId = ref('codex');
 const selectedExecutionMode = ref<ExecutionMode>('BACKGROUND');
 const designClarification = ref('');
+const techDesignQuestionLoading = ref(false);
+const techDesignQuestionRecords = ref<TechDesignQuestionRecord[]>([]);
 const openSpecSummary = ref<OpenSpecSummary>();
 const selectedOpenSpecDocPath = ref('');
 const openSpecPreviewVersion = ref(0);
@@ -474,6 +504,45 @@ const openSpecTechnicalDesignDocumentPath = computed(() => {
   }
   return officialTechnicalDesignArtifactPath();
 });
+const legacyTechDesignQuestionPath = computed(() => {
+  if (!workflow.value) {
+    return '';
+  }
+  return `docs/${workflow.value.requirementId}/technical-design/questions.md`;
+});
+const techDesignQuestionArtifacts = computed(() => {
+  if (!workflow.value) {
+    return [];
+  }
+  const requirementId = workflow.value.requirementId;
+  const legacyPath = legacyTechDesignQuestionPath.value;
+  const questionPrefix = `docs/${requirementId}/technical-design/questions/`;
+  return workflow.value.artifacts
+    .filter(
+      (artifact) =>
+        artifact.exists &&
+        artifact.kind !== 'directory' &&
+        (artifact.id === 'technical-design-questions' || artifact.path === legacyPath || artifact.path.replace(/\\/g, '/').startsWith(questionPrefix))
+    )
+    .sort((left, right) => left.path.localeCompare(right.path));
+});
+const techDesignQuestionContextText = computed(() => {
+  if (!techDesignQuestionArtifacts.value.length) {
+    return '';
+  }
+  if (techDesignQuestionArtifacts.value.length === 1) {
+    return techDesignQuestionArtifacts.value[0].path;
+  }
+  return `${techDesignQuestionArtifacts.value.length} 条答疑记录`;
+});
+const techDesignGenerationSourcePaths = computed(() => {
+  const paths = [...techDesignQuestionArtifacts.value.map((artifact) => artifact.path), ...techDesignSourceFiles.value.map((file) => file.path)].filter(
+    (item): item is string => Boolean(item)
+  );
+  return [...new Set(paths)];
+});
+const techDesignQuestionItems = computed(() => buildTechDesignQuestionItems(techDesignQuestionRecords.value, workflow.value?.runs || []));
+const techDesignQuestionButtonText = computed(() => (techDesignQuestionItems.value.length ? `技术方案答疑 ${techDesignQuestionItems.value.length}` : '技术方案答疑'));
 const stageHint = computed(() => {
   const hints: Record<WorkflowStage, string> = {
     PRD: '产品生成并二次编辑 PRD，审核通过后进入技术方案。',
@@ -542,6 +611,32 @@ async function loadOpenSpecSummary() {
 
 function previewArtifact(artifact: ArtifactRef) {
   artifactPreviewDialog.value?.open(artifact);
+}
+
+async function loadTechDesignQuestionRecords() {
+  const artifacts = techDesignQuestionArtifacts.value;
+  if (!artifacts.length) {
+    techDesignQuestionRecords.value = [];
+    return;
+  }
+  techDesignQuestionLoading.value = true;
+  try {
+    const records: TechDesignQuestionRecord[] = [];
+    for (const artifact of artifacts) {
+      const result = await apiClient.readArtifact(artifact.path);
+      records.push(...parseTechDesignQuestionRecords(result.content, artifact.path));
+    }
+    techDesignQuestionRecords.value = records;
+  } catch (error) {
+    console.error('读取技术方案答疑记录失败:', error);
+    techDesignQuestionRecords.value = [];
+  } finally {
+    techDesignQuestionLoading.value = false;
+  }
+}
+
+function openDesignQuestionDialog() {
+  designQuestionDialog.value?.open();
 }
 
 async function runRefresh() {
@@ -703,7 +798,7 @@ async function runDesign() {
   }
   const params: Record<string, unknown> = {
     ...agentActionParams(),
-    sourceFiles: techDesignSourceFiles.value.map((file) => file.path),
+    sourceFiles: techDesignGenerationSourcePaths.value,
     clarification: designClarification.value.trim()
   };
   if (requiresPrdApproval.value) {
@@ -713,6 +808,68 @@ async function runDesign() {
     actionType: 'DESIGN_GENERATE',
     params
   });
+}
+
+async function runDesignQuestion(rawQuestion: string) {
+  if (!workflow.value) {
+    return;
+  }
+  const question = rawQuestion.trim();
+  if (!question) {
+    ElMessage.warning('请输入技术方案问题');
+    return;
+  }
+  const designDocumentPath = openSpecTechnicalDesignDocumentPath.value.trim();
+  if (!designDocumentPath) {
+    ElMessage.warning('请先生成、保存或刷新技术方案产物');
+    return;
+  }
+  const params: Record<string, unknown> = {
+    ...agentActionParams(),
+    question,
+    designDocumentPath
+  };
+  if (requiresPrdApproval.value) {
+    const prdDocumentPath = openSpecPrdDocumentPath.value.trim();
+    if (!prdDocumentPath) {
+      ElMessage.warning('请先生成、保存或刷新 PRD 产物');
+      return;
+    }
+    params.prdDocumentPath = prdDocumentPath;
+  }
+  await runOrCopyAction({
+    actionType: 'DESIGN_QUESTION',
+    params
+  }, async () => {
+    await reload();
+    await loadTechDesignQuestionRecords();
+    designQuestionDialog.value?.clearQuestion();
+  });
+}
+
+async function deleteDesignQuestion(item: TechDesignQuestionListItem) {
+  if (!workflow.value) {
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(`确认删除问题“${item.summary || item.question}”？`, '删除技术方案答疑', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning'
+    });
+  } catch {
+    return;
+  }
+  await store.deleteTechDesignQuestion({
+    id: item.id,
+    recordId: item.recordId,
+    runId: item.runId,
+    sourcePath: item.sourcePath,
+    question: item.question
+  });
+  await reload();
+  await loadTechDesignQuestionRecords();
+  ElMessage.success('技术方案答疑问题已删除');
 }
 
 async function runOpenSpecStatus() {
@@ -909,6 +1066,7 @@ watch(
     if (activeStage.value === 'IMPLEMENTATION') {
       activeImplementationStep.value = findFirstPendingImplementationStep(value.implementationSteps);
     }
+    void loadTechDesignQuestionRecords();
   },
   { immediate: true }
 );
@@ -918,6 +1076,14 @@ watch(activeImplementationStep, (step) => {
     void loadGitChanges();
   }
 });
+
+watch(
+  () => techDesignQuestionArtifacts.value.map((artifact) => artifact.path).join('|'),
+  () => {
+    void loadTechDesignQuestionRecords();
+  },
+  { immediate: true }
+);
 
 onMounted(async () => {
   await store.loadAgents();
@@ -1094,6 +1260,41 @@ onMounted(async () => {
   background: #fff;
 }
 
+.design-question-context {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #334155;
+  font-size: 13px;
+}
+
+.design-question-context span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.design-question-context small {
+  color: #2563eb;
+  white-space: nowrap;
+}
+
+.context-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 12px;
+}
+
 .design-clarification :deep(.el-textarea__inner) {
   min-height: 96px !important;
   border-radius: 8px;
@@ -1110,6 +1311,17 @@ onMounted(async () => {
 
 .design-run-footer .muted {
   line-height: 20px;
+}
+
+.design-run-actions {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 10px;
+}
+
+.design-question-entry-button {
+  min-width: 116px;
 }
 
 .design-run-button {
@@ -1407,12 +1619,14 @@ onMounted(async () => {
   }
 
   .design-input-heading,
-  .design-run-footer {
+  .design-run-footer,
+  .design-run-actions {
     align-items: stretch;
     flex-direction: column;
   }
 
   .design-upload-button,
+  .design-question-entry-button,
   .design-run-button {
     width: 100%;
   }

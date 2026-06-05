@@ -81,6 +81,7 @@ describe('stage-rules', () => {
   it('按动作归属独立步骤日志', () => {
     expect(stageForAction('PRD_ANALYZE')).toBe('PRD');
     expect(stageForAction('DESIGN_GENERATE')).toBe('TECH_DESIGN');
+    expect(stageForAction('DESIGN_QUESTION')).toBe('TECH_DESIGN');
     expect(stageForAction('OPENSPEC_VERIFY')).toBe('IMPLEMENTATION');
     expect(stageForAction('JUNIT_GENERATE')).toBe('IMPLEMENTATION');
     expect(stageForAction('CODE_REVIEW')).toBe('CODE_REVIEW');

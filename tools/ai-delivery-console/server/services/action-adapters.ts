@@ -62,12 +62,65 @@ function openSpecPrdDocumentPath(workflow: RequirementWorkflow, params: Record<s
   return artifactPath || workflow.stages.PRD.artifactPath || `docs/${workflow.requirementId}/prd/analysis.md`;
 }
 
+function slugText(value: string): string {
+  return (
+    value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40) || 'question'
+  );
+}
+
+function techDesignQuestionPath(requirementId: string, question = ''): string {
+  const now = new Date();
+  const pad = (value: number, size = 2) => String(value).padStart(size, '0');
+  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}-${pad(now.getMilliseconds(), 3)}`;
+  return `docs/${normalizeRequirementId(requirementId)}/technical-design/questions/${stamp}-${slugText(question)}.md`;
+}
+
+function legacyTechDesignQuestionPath(requirementId: string): string {
+  return `docs/${normalizeRequirementId(requirementId)}/technical-design/questions.md`;
+}
+
+function isTechnicalDesignSourcePath(filePath: string): boolean {
+  return filePath.replace(/\\/g, '/').includes('/technical-design/file/');
+}
+
+function isTechnicalDesignQuestionPath(workflow: RequirementWorkflow, filePath: string): boolean {
+  const normalized = filePath.replace(/\\/g, '/');
+  return normalized === legacyTechDesignQuestionPath(workflow.requirementId) || normalized.startsWith(`docs/${normalizeRequirementId(workflow.requirementId)}/technical-design/questions/`);
+}
+
+function existingTechDesignQuestionPaths(workflow: RequirementWorkflow): string[] {
+  const legacyPath = legacyTechDesignQuestionPath(workflow.requirementId);
+  const questionPrefix = `docs/${normalizeRequirementId(workflow.requirementId)}/technical-design/questions/`;
+  return workflow.artifacts
+    .filter(
+      (item) =>
+        item.exists &&
+        item.kind !== 'directory' &&
+        (item.id === 'technical-design-questions' || item.path === legacyPath || item.path.replace(/\\/g, '/').startsWith(questionPrefix))
+    )
+    .map((item) => item.path)
+    .sort((left, right) => {
+      const leftLegacy = left === legacyPath;
+      const rightLegacy = right === legacyPath;
+      if (leftLegacy !== rightLegacy) {
+        return leftLegacy ? 1 : -1;
+      }
+      return left.localeCompare(right);
+    });
+}
+
 function techDesignSourcePaths(workflow: RequirementWorkflow, params: Record<string, unknown>): string[] {
   const explicitPaths = asStringArray(params.sourceFiles);
+  const questionPaths = existingTechDesignQuestionPaths(workflow);
   if (explicitPaths.length) {
-    return explicitPaths;
+    return uniqueNonEmpty([...questionPaths, ...explicitPaths]);
   }
-  return (workflow.techDesignSourceFiles || []).map((file) => file.path).filter(Boolean);
+  return uniqueNonEmpty([...questionPaths, ...(workflow.techDesignSourceFiles || []).map((file) => file.path).filter(Boolean)]);
 }
 
 function uniqueNonEmpty(values: string[]): string[] {
@@ -92,12 +145,29 @@ function designInputParam(workflow: RequirementWorkflow, params: Record<string, 
 }
 
 function technicalDesignDocumentPath(workflow: RequirementWorkflow, params: Record<string, unknown>): string {
-  const explicitPath = asString(params.documentPath);
+  const explicitPath = asString(params.designDocumentPath) || asString(params.documentPath);
   if (explicitPath) {
     return explicitPath;
   }
-  const artifactPath = workflow.artifacts.find((artifact) => artifact.stage === 'TECH_DESIGN' && artifact.exists && artifact.kind !== 'directory')?.path;
-  return artifactPath || workflow.stages.TECH_DESIGN.artifactPath || `docs/${workflow.requirementId}/technical-design/design_review.md`;
+  const defaultPath = `docs/${normalizeRequirementId(workflow.requirementId)}/technical-design/design_review.md`;
+  const officialArtifact = workflow.artifacts.find(
+    (artifact) => artifact.exists && artifact.kind !== 'directory' && (artifact.id === 'technical-design' || artifact.path === defaultPath)
+  );
+  if (officialArtifact) {
+    return officialArtifact.path;
+  }
+  const artifactPath = workflow.stages.TECH_DESIGN.artifactPath?.trim();
+  if (artifactPath && !isTechnicalDesignSourcePath(artifactPath) && !isTechnicalDesignQuestionPath(workflow, artifactPath)) {
+    return artifactPath;
+  }
+  return defaultPath;
+}
+
+function designQuestionInputParam(workflow: RequirementWorkflow, params: Record<string, unknown>): string {
+  if (workflow.requirementType === 'DEFECT') {
+    return technicalDesignDocumentPath(workflow, params);
+  }
+  return uniqueNonEmpty([openSpecPrdDocumentPath(workflow, params), technicalDesignDocumentPath(workflow, params)]).join(',');
 }
 
 function openSpecInputParam(workflow: RequirementWorkflow, params: Record<string, unknown>): string {
@@ -130,6 +200,8 @@ function buildSkillCommand(workflow: RequirementWorkflow, action: ActionInput): 
   const branchName = asString(params.branchName, workflow.branchName || '');
   const changeName = asString(params.changeName, workflow.stages.IMPLEMENTATION.changeName || `req-${requirementId}`);
   const clarification = asString(params.clarification);
+  const question = asString(params.question, '<question>');
+  const outputPath = asString(params.outputPath, techDesignQuestionPath(requirementId, question));
   const projects = projectParam(workflow);
   const reviewMode = reviewModeParam(params);
 
@@ -138,6 +210,8 @@ function buildSkillCommand(workflow: RequirementWorkflow, action: ActionInput): 
       return `/coding-prd-analyzer id=${requirementId}${prdClarification ? ` c=${prdClarification}` : ''}${sources ? ` ${sources}` : ''}`;
     case 'DESIGN_GENERATE':
       return `/coding-design d=${designInputParam(workflow, params)} r=${requirementId}${projects ? ` p=${projects}` : ''}${clarification ? ` c=${clarification}` : ''}`;
+    case 'DESIGN_QUESTION':
+      return `/coding-design-question r=${requirementId} q=${question} d=${designQuestionInputParam(workflow, params)}${projects ? ` p=${projects}` : ''} o=${outputPath}`;
     case 'JUNIT_GENERATE':
       return `generate-unit-test ${moduleName || '<module-name>'}${description ? ` "${description}"` : ''}`;
     case 'CODE_REVIEW':
@@ -185,7 +259,7 @@ export function buildActionCommand(workflow: RequirementWorkflow, action: Action
 }
 
 function isAgentAction(actionType: ActionInput['actionType']): boolean {
-  return ['PRD_ANALYZE', 'DESIGN_GENERATE', 'OPENSPEC_FF', 'OPENSPEC_APPLY', 'OPENSPEC_VERIFY', 'OPENSPEC_ARCHIVE', 'JUNIT_GENERATE', 'CODE_REVIEW'].includes(actionType);
+  return ['PRD_ANALYZE', 'DESIGN_GENERATE', 'DESIGN_QUESTION', 'OPENSPEC_FF', 'OPENSPEC_APPLY', 'OPENSPEC_VERIFY', 'OPENSPEC_ARCHIVE', 'JUNIT_GENERATE', 'CODE_REVIEW'].includes(actionType);
 }
 
 async function ensureStagedReviewHasChanges(workspaceRoot: string, workflow: RequirementWorkflow, params: Record<string, unknown>, run: RunRecord): Promise<boolean> {
@@ -266,7 +340,7 @@ function runCli(
 export function validateActionInput(workspaceRoot: string, action: ActionInput, options: { skipPathValidation?: boolean } = {}): void {
   const params = action.params || {};
   if (!options.skipPathValidation) {
-    for (const key of ['documentPath', 'prdDocumentPath', 'artifactPath', 'outputPath']) {
+    for (const key of ['documentPath', 'prdDocumentPath', 'designDocumentPath', 'artifactPath', 'outputPath']) {
       const value = params[key];
       if (typeof value === 'string' && value.trim()) {
         assertInsideWorkspace(workspaceRoot, value);
@@ -279,6 +353,7 @@ export function validateActionInput(workspaceRoot: string, action: ActionInput, 
   const allowed = new Set<ActionInput['actionType']>([
     'PRD_ANALYZE',
     'DESIGN_GENERATE',
+    'DESIGN_QUESTION',
     'OPENSPEC_STATUS',
     'OPENSPEC_NEW_CHANGE',
     'OPENSPEC_INSTRUCTIONS',
@@ -302,16 +377,26 @@ export async function executeAction(
   action: ActionInput,
   onRunUpdate: (run: RunRecord) => Promise<void> = async () => undefined
 ): Promise<RunRecord> {
-  validateActionInput(workspaceRoot, action);
+  const normalizedAction =
+    action.actionType === 'DESIGN_QUESTION' && !asString(action.params?.outputPath)
+      ? {
+          ...action,
+          params: {
+            ...(action.params || {}),
+            outputPath: techDesignQuestionPath(workflow.requirementId, asString(action.params?.question))
+          }
+        }
+      : action;
+  validateActionInput(workspaceRoot, normalizedAction);
   const runId = createRunId();
-  const params = action.params || {};
+  const params = normalizedAction.params || {};
   const startedAt = new Date().toISOString();
   const run: RunRecord = {
     id: runId,
     requirementId: workflow.requirementId,
-    actionType: action.actionType,
-    stage: stageForAction(action.actionType),
-    implementationStep: implementationStepForAction(action.actionType),
+    actionType: normalizedAction.actionType,
+    stage: stageForAction(normalizedAction.actionType),
+    implementationStep: implementationStepForAction(normalizedAction.actionType),
     status: 'RUNNING',
     startedAt,
     params,
@@ -321,10 +406,10 @@ export async function executeAction(
   await appendRunEvent(workspaceRoot, workflow.requirementId, runId, {
     type: 'START',
     level: 'INFO',
-    message: `开始执行 ${action.actionType}`
+    message: `开始执行 ${normalizedAction.actionType}`
   });
 
-  if (action.actionType === 'RETURN_TO_IMPLEMENTATION' || action.actionType === 'REFRESH_ARTIFACTS') {
+  if (normalizedAction.actionType === 'RETURN_TO_IMPLEMENTATION' || normalizedAction.actionType === 'REFRESH_ARTIFACTS') {
     run.status = 'SUCCEEDED';
     run.finishedAt = new Date().toISOString();
     await appendRunEvent(workspaceRoot, workflow.requirementId, runId, {
@@ -335,14 +420,14 @@ export async function executeAction(
     return run;
   }
 
-  const cliBase = cliActionMap[action.actionType];
+  const cliBase = cliActionMap[normalizedAction.actionType];
   if (cliBase) {
     const changeName = asString(params.changeName, `req-${workflow.requirementId}`);
     const artifactId = asString(params.artifactId, 'proposal');
     const args =
-      action.actionType === 'OPENSPEC_STATUS'
+      normalizedAction.actionType === 'OPENSPEC_STATUS'
         ? [...cliBase, '--change', changeName, '--json']
-        : action.actionType === 'OPENSPEC_NEW_CHANGE'
+        : normalizedAction.actionType === 'OPENSPEC_NEW_CHANGE'
           ? [...cliBase, changeName]
           : [...cliBase, artifactId, '--change', changeName, '--json'];
     await appendRunEvent(workspaceRoot, workflow.requirementId, runId, {
@@ -363,9 +448,9 @@ export async function executeAction(
     return run;
   }
 
-  if (!isAgentAction(action.actionType)) {
+  if (!isAgentAction(normalizedAction.actionType)) {
     run.status = 'FAILED';
-    run.error = `动作未实现: ${action.actionType}`;
+    run.error = `动作未实现: ${normalizedAction.actionType}`;
     run.finishedAt = new Date().toISOString();
     return run;
   }
@@ -374,7 +459,7 @@ export async function executeAction(
     return run;
   }
 
-  const commandText = buildSkillCommand(workflow, action);
+  const commandText = buildSkillCommand(workflow, normalizedAction);
   const agentId = asString(params.agentId, 'manual');
   run.agentId = agentId;
 

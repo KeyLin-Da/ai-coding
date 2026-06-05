@@ -5,7 +5,7 @@ import type { AgentProvider, ArtifactRef, OpenSpecSummary, RequirementWorkflow, 
 import { createEmptyImplementationSteps, createEmptyStages } from '../../shared/workflow';
 import RequirementDetail from '../../src/views/RequirementDetail.vue';
 import { apiClient } from '@/api/client';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 
 vi.mock('vue-router', () => ({
   useRoute: () => ({
@@ -24,7 +24,9 @@ vi.mock('@/api/client', () => ({
     runAction: vi.fn(),
     getGitChanges: vi.fn(),
     getRunEvents: vi.fn(),
-    previewActionCommand: vi.fn()
+    previewActionCommand: vi.fn(),
+    readArtifact: vi.fn(),
+    deleteTechDesignQuestion: vi.fn()
   }
 }));
 
@@ -36,6 +38,9 @@ vi.mock('element-plus', async () => {
       warning: vi.fn(),
       success: vi.fn(),
       error: vi.fn()
+    },
+    ElMessageBox: {
+      confirm: vi.fn()
     }
   };
 });
@@ -130,6 +135,13 @@ function defectWorkflow(artifacts: ArtifactRef[], currentStage: RequirementWorkf
   return item;
 }
 
+function techDesignWorkflow(artifacts: ArtifactRef[]): RequirementWorkflow {
+  const item = workflow(artifacts);
+  item.currentStage = 'TECH_DESIGN';
+  item.stages.TECH_DESIGN.status = 'DRAFT';
+  return item;
+}
+
 function componentStubs() {
   return {
     StageTimeline: { template: '<div />' },
@@ -142,7 +154,12 @@ function componentStubs() {
     RunLogDrawer: { template: '<div />' },
     ArtifactSidebar: { template: '<div />' },
     ArtifactPreviewDialog: { template: '<div />' },
-    GitChangeInspector: { template: '<div />' },
+    GitChangeInspector: {
+      props: ['summary', 'requirementId'],
+      emits: ['updated'],
+      template:
+        '<div class="git-inspector-stub"><span class="git-summary-updated-at">{{ summary?.updatedAt }}</span><span class="git-requirement-id">{{ requirementId }}</span><button class="git-inspector-emit" @click="$emit(\'updated\', { updatedAt: \'after-stage\', files: [{ path: \'opp-learn/src/new.ts\', status: \'A\', staged: true, unstaged: false }], untrackedFiles: [], diff: \'\', projects: [], additions: 0, deletions: 0 })">emit</button></div>'
+    },
     ElAlert: {
       props: ['title'],
       template: '<div>{{ title }}</div>'
@@ -154,6 +171,11 @@ function componentStubs() {
     ElCheckbox: { template: '<input type="checkbox" />' },
     ElDescriptions: { template: '<div><slot /></div>' },
     ElDescriptionsItem: { template: '<div><slot /></div>' },
+    ElDialog: {
+      props: ['modelValue', 'title'],
+      emits: ['update:modelValue'],
+      template: '<div v-if="modelValue" class="dialog-stub"><h3>{{ title }}</h3><slot /><slot name="footer" /></div>'
+    },
     ElEmpty: { template: '<div><slot /></div>' },
     ElInput: {
       props: ['modelValue'],
@@ -212,6 +234,7 @@ async function mountDetail(current: RequirementWorkflow, openSpecSummary: OpenSp
     params: {}
   };
   vi.mocked(apiClient.runAction).mockResolvedValue({ run, workflow: current });
+  vi.mocked(apiClient.deleteTechDesignQuestion).mockResolvedValue(current);
 
   const wrapper = mount(RequirementDetail, {
     global: {
@@ -268,10 +291,36 @@ function designButton(wrapper: ReturnType<typeof mount>) {
   return button;
 }
 
+function designQuestionEntryButton(wrapper: ReturnType<typeof mount>) {
+  const button = wrapper.findAll('button').find((item) => item.text().includes('技术方案答疑'));
+  if (!button) {
+    throw new Error('未找到技术方案答疑按钮');
+  }
+  return button;
+}
+
+function designQuestionSubmitButton(wrapper: ReturnType<typeof mount>) {
+  const button = wrapper.findAll('button').find((item) => item.text().includes('提问'));
+  if (!button) {
+    throw new Error('未找到技术方案提问按钮');
+  }
+  return button;
+}
+
+async function openDesignQuestionDialog(wrapper: ReturnType<typeof mount>) {
+  await designQuestionEntryButton(wrapper).trigger('click');
+  await flushPromises();
+}
+
 describe('RequirementDetail OpenSpec 工件生成', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     eventSourceUrls = [];
+    vi.mocked(ElMessageBox.confirm).mockResolvedValue(undefined as never);
+    vi.mocked(apiClient.readArtifact).mockResolvedValue({
+      artifact: {},
+      content: ''
+    });
     vi.stubGlobal('EventSource', MockEventSource);
     Object.defineProperty(navigator, 'clipboard', {
       value: {
@@ -301,6 +350,7 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     expect(inputPanel.exists()).toBe(true);
     expect(inputPanel.text()).toContain('补充材料');
     expect(inputPanel.text()).toContain('补充说明');
+    expect(inputPanel.text()).toContain('技术方案答疑');
     expect(inputPanel.text()).toContain('生成技术方案');
     expect(inputPanel.find('.design-run-footer').exists()).toBe(true);
     expect(inputPanel.find('.design-clarification').attributes('rows')).toBe('4');
@@ -379,6 +429,317 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     expect(editor?.text()).toContain('docs/172014/technical-design/design_review.md');
     expect(editor?.text()).not.toContain('docs/172014/technical-design/file/screenshot.png');
     expect(wrapper.text()).toContain('screenshot.png');
+  });
+
+  it('普通需求发起技术方案答疑时传入 PRD 和正式方案，并由后端生成输出路径', async () => {
+    const current = techDesignWorkflow([
+      artifact('PRD', 'docs/172014/prd/analysis.md'),
+      artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md', {
+        id: 'technical-design'
+      })
+    ]);
+    const wrapper = await mountDetail(current);
+
+    await openDesignQuestionDialog(wrapper);
+    await wrapper.find('.design-question-dialog-input').setValue('为什么需要缓存');
+    await designQuestionSubmitButton(wrapper).trigger('click');
+    await flushPromises();
+
+    expect(apiClient.runAction).toHaveBeenCalledWith(
+      '172014',
+      expect.objectContaining({
+        actionType: 'DESIGN_QUESTION',
+        params: expect.objectContaining({
+          question: '为什么需要缓存',
+          prdDocumentPath: 'docs/172014/prd/analysis.md',
+          designDocumentPath: 'docs/172014/technical-design/design_review.md'
+        })
+      })
+    );
+    expect(apiClient.runAction).toHaveBeenCalledWith(
+      '172014',
+      expect.objectContaining({
+        params: expect.not.objectContaining({
+          outputPath: expect.any(String)
+        })
+      })
+    );
+  });
+
+  it('技术方案答疑缺少正式方案时提示并阻止动作', async () => {
+    const current = techDesignWorkflow([artifact('PRD', 'docs/172014/prd/analysis.md')]);
+    const wrapper = await mountDetail(current);
+
+    await openDesignQuestionDialog(wrapper);
+    await wrapper.find('.design-question-dialog-input').setValue('为什么需要缓存');
+    await designQuestionSubmitButton(wrapper).trigger('click');
+
+    expect(ElMessage.warning).toHaveBeenCalledWith('请先生成、保存或刷新技术方案产物');
+    expect(apiClient.runAction).not.toHaveBeenCalled();
+    expect(apiClient.previewActionCommand).not.toHaveBeenCalled();
+  });
+
+  it('普通需求技术方案答疑缺少 PRD 时提示并阻止动作', async () => {
+    const current = techDesignWorkflow([
+      artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md', {
+        id: 'technical-design'
+      })
+    ]);
+    const wrapper = await mountDetail(current);
+
+    await openDesignQuestionDialog(wrapper);
+    await wrapper.find('.design-question-dialog-input').setValue('为什么需要缓存');
+    await designQuestionSubmitButton(wrapper).trigger('click');
+
+    expect(ElMessage.warning).toHaveBeenCalledWith('请先生成、保存或刷新 PRD 产物');
+    expect(apiClient.runAction).not.toHaveBeenCalled();
+    expect(apiClient.previewActionCommand).not.toHaveBeenCalled();
+  });
+
+  it('缺陷技术方案答疑不要求 PRD 文档', async () => {
+    const current = defectWorkflow([
+      artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md', {
+        id: 'technical-design'
+      })
+    ]);
+    const wrapper = await mountDetail(current);
+
+    await openDesignQuestionDialog(wrapper);
+    await wrapper.find('.design-question-dialog-input').setValue('为什么不补偿历史数据');
+    await designQuestionSubmitButton(wrapper).trigger('click');
+    await flushPromises();
+
+    expect(apiClient.runAction).toHaveBeenCalledWith(
+      '172014',
+      expect.objectContaining({
+        actionType: 'DESIGN_QUESTION',
+        params: expect.objectContaining({
+          question: '为什么不补偿历史数据',
+          designDocumentPath: 'docs/172014/technical-design/design_review.md'
+        })
+      })
+    );
+    expect(apiClient.runAction).toHaveBeenCalledWith(
+      '172014',
+      expect.objectContaining({
+        actionType: 'DESIGN_QUESTION',
+        params: expect.not.objectContaining({
+          prdDocumentPath: expect.any(String)
+        })
+      })
+    );
+  });
+
+  it('答疑记录存在时展示自动纳入提示并作为技术方案生成补充项', async () => {
+    const current = techDesignWorkflow([
+      artifact('PRD', 'docs/172014/prd/analysis.md'),
+      artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md', {
+        id: 'technical-design'
+      }),
+      artifact('TECH_DESIGN', 'docs/172014/technical-design/questions.md', {
+        id: 'technical-design-questions'
+      })
+    ]);
+    current.techDesignSourceFiles = [
+      {
+        id: 'file-1',
+        name: 'old-design.md',
+        path: 'docs/172014/technical-design/file/old-design.md',
+        size: 100,
+        uploadedAt: new Date().toISOString()
+      }
+    ];
+    const wrapper = await mountDetail(current);
+
+    expect(wrapper.text()).toContain('自动纳入生成上下文');
+    await designButton(wrapper).trigger('click');
+    await flushPromises();
+
+    expect(apiClient.runAction).toHaveBeenCalledWith(
+      '172014',
+      expect.objectContaining({
+        actionType: 'DESIGN_GENERATE',
+        params: expect.objectContaining({
+          sourceFiles: ['docs/172014/technical-design/questions.md', 'docs/172014/technical-design/file/old-design.md']
+        })
+      })
+    );
+  });
+
+  it('技术方案答疑弹框展示问题状态并支持查看答案和进度', async () => {
+    vi.mocked(apiClient.readArtifact).mockResolvedValue({
+      artifact: {},
+      content: `# 技术方案答疑记录
+
+## 2026-06-04 17:30:00 / 172014
+
+**问题：**
+为什么需要缓存？
+
+**输入上下文：**
+- 文档：docs/172014/prd/analysis.md
+
+**回答：**
+因为存在重复查询。
+
+**依据：**
+- 技术方案缓存策略
+
+**后续建议：**
+- 继续观察缓存命中率`
+    });
+    const current = techDesignWorkflow([
+      artifact('PRD', 'docs/172014/prd/analysis.md'),
+      artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md', {
+        id: 'technical-design'
+      }),
+      artifact('TECH_DESIGN', 'docs/172014/technical-design/questions.md', {
+        id: 'technical-design-questions'
+      })
+    ]);
+    current.runs = [
+      {
+        id: 'run-question-2',
+        requirementId: '172014',
+        actionType: 'DESIGN_QUESTION',
+        stage: 'TECH_DESIGN',
+        status: 'RUNNING',
+        startedAt: '2026-06-04T17:45:00.000Z',
+        params: {
+          question: '页面导航权限如何处理？'
+        }
+      },
+      {
+        id: 'run-question-1',
+        requirementId: '172014',
+        actionType: 'DESIGN_QUESTION',
+        stage: 'TECH_DESIGN',
+        status: 'SUCCEEDED',
+        startedAt: '2026-06-04T17:30:00.000Z',
+        finishedAt: '2026-06-04T17:31:00.000Z',
+        params: {
+          question: '为什么需要缓存？'
+        }
+      }
+    ];
+    const wrapper = await mountDetail(current);
+    await flushPromises();
+
+    expect(designQuestionEntryButton(wrapper).text()).toContain('技术方案答疑 2');
+
+    await openDesignQuestionDialog(wrapper);
+
+    expect(wrapper.text()).toContain('为什么需要缓存？');
+    expect(wrapper.text()).toContain('页面导航权限如何处理？');
+    expect(wrapper.text()).toContain('已回答');
+    expect(wrapper.text()).toContain('回答中');
+
+    const answerButton = wrapper.findAll('button').find((item) => item.text().includes('查看答案'));
+    await answerButton?.trigger('click');
+
+    expect(wrapper.text()).toContain('因为存在重复查询。');
+    expect(wrapper.text()).toContain('技术方案缓存策略');
+    expect(wrapper.text()).toContain('继续观察缓存命中率');
+
+    const collapseButton = wrapper.findAll('button').find((item) => item.text().includes('收起答案'));
+    await collapseButton?.trigger('click');
+
+    expect(wrapper.text()).not.toContain('因为存在重复查询。');
+
+    const progressButton = wrapper.findAll('button').find((item) => item.text().includes('查看进度'));
+    await progressButton?.trigger('click');
+    await flushPromises();
+
+    expect(apiClient.getRunEvents).toHaveBeenCalledWith('172014', 'run-question-2');
+    expect(eventSourceUrls.some((url) => url.includes('run-question-2'))).toBe(true);
+  });
+
+  it('技术方案答疑删除前二次确认，确认后删除问题并刷新记录', async () => {
+    vi.mocked(apiClient.readArtifact).mockResolvedValue({
+      artifact: {},
+      content: `# 技术方案答疑记录
+
+## 2026-06-04 17:30:00 / 172014
+
+**问题：**
+为什么需要缓存？
+
+**回答：**
+因为存在重复查询。`
+    });
+    const current = techDesignWorkflow([
+      artifact('PRD', 'docs/172014/prd/analysis.md'),
+      artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md', {
+        id: 'technical-design'
+      }),
+      artifact('TECH_DESIGN', 'docs/172014/technical-design/questions/20260604-173000-question.md')
+    ]);
+    current.runs = [
+      {
+        id: 'run-question-1',
+        requirementId: '172014',
+        actionType: 'DESIGN_QUESTION',
+        stage: 'TECH_DESIGN',
+        status: 'SUCCEEDED',
+        startedAt: '2026-06-04T17:30:00.000Z',
+        params: {
+          question: '为什么需要缓存？',
+          outputPath: 'docs/172014/technical-design/questions/20260604-173000-question.md'
+        }
+      }
+    ];
+    const wrapper = await mountDetail(current);
+    await openDesignQuestionDialog(wrapper);
+
+    const deleteButton = wrapper.findAll('button').find((item) => item.text().includes('删除'));
+    await deleteButton?.trigger('click');
+    await flushPromises();
+
+    expect(ElMessageBox.confirm).toHaveBeenCalled();
+    expect(apiClient.deleteTechDesignQuestion).toHaveBeenCalledWith(
+      '172014',
+      expect.objectContaining({
+        id: 'run-question-1',
+        runId: 'run-question-1',
+        sourcePath: 'docs/172014/technical-design/questions/20260604-173000-question.md',
+        question: '为什么需要缓存？'
+      })
+    );
+    expect(ElMessage.success).toHaveBeenCalledWith('技术方案答疑问题已删除');
+  });
+
+  it('手动复制技术方案答疑命令且不创建运行记录', async () => {
+    const current = techDesignWorkflow([
+      artifact('PRD', 'docs/172014/prd/analysis.md'),
+      artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md', {
+        id: 'technical-design'
+      })
+    ]);
+    vi.mocked(apiClient.previewActionCommand).mockResolvedValue({
+      commandText:
+        '/coding-design-question r=172014 q=为什么需要缓存 d=docs/172014/prd/analysis.md,docs/172014/technical-design/design_review.md o=docs/172014/technical-design/questions/20260604-173000-question.md'
+    });
+    const wrapper = await mountDetail(current);
+
+    await wrapper.findAll('select')[1].setValue('MANUAL_COPY');
+    await openDesignQuestionDialog(wrapper);
+    await wrapper.find('.design-question-dialog-input').setValue('为什么需要缓存');
+    await designQuestionSubmitButton(wrapper).trigger('click');
+    await flushPromises();
+
+    expect(apiClient.previewActionCommand).toHaveBeenCalledWith(
+      '172014',
+      expect.objectContaining({
+        actionType: 'DESIGN_QUESTION',
+        params: expect.objectContaining({
+          question: '为什么需要缓存',
+          prdDocumentPath: 'docs/172014/prd/analysis.md',
+          designDocumentPath: 'docs/172014/technical-design/design_review.md'
+        })
+      })
+    );
+    expect(apiClient.runAction).not.toHaveBeenCalled();
+    expect(ElMessage.success).toHaveBeenCalledWith('命令已复制');
   });
 
   it('缺少 PRD 文档路径时不发起工件生成并提示', async () => {
@@ -659,5 +1020,22 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     expect(apiClient.getGitChanges).toHaveBeenCalledWith('172014');
     expect(apiClient.runAction).not.toHaveBeenCalled();
     expect(ElMessage.warning).toHaveBeenCalledWith('暂存区没有已暂存文件，请先 git add 后再执行暂存区预审');
+  });
+
+  it('查看变更组件回传 Git 摘要后同步详情页状态', async () => {
+    const current = workflow([]);
+    current.implementationSteps.START_CHANGE.status = 'APPROVED';
+    current.implementationSteps.ARTIFACT_REVIEW.status = 'APPROVED';
+    current.implementationSteps.APPLY.status = 'APPROVED';
+    current.implementationSteps.CHANGE_INSPECTION.status = 'DRAFT';
+
+    const wrapper = await mountDetail(current);
+    await flushPromises();
+
+    expect(wrapper.find('.git-requirement-id').text()).toBe('172014');
+    await wrapper.find('.git-inspector-emit').trigger('click');
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find('.git-summary-updated-at').text()).toBe('after-stage');
   });
 });
