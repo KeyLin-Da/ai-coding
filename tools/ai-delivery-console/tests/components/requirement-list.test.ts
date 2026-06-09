@@ -5,6 +5,7 @@ import type { RequirementWorkflow } from '../../shared/workflow';
 import { createEmptyStages } from '../../shared/workflow';
 import RequirementList from '../../src/views/RequirementList.vue';
 import { apiClient } from '@/api/client';
+import { useSettingsStore } from '@/stores/settings';
 import { ElMessage } from 'element-plus';
 
 const routerPush = vi.fn();
@@ -113,6 +114,15 @@ function componentStubs() {
 async function mountList(current: RequirementWorkflow | RequirementWorkflow[] = workflow()) {
   const pinia = createPinia();
   setActivePinia(pinia);
+  const settings = useSettingsStore();
+  settings.desktopConfig = {
+    ...settings.desktopConfig,
+    centerBaseUrl: 'http://127.0.0.1:8728',
+    userId: '1',
+    projectId: '10',
+    clientSessionId: '100'
+  };
+  settings.projectPaths = ['opp-api', 'opp-diy'];
   const workflows = Array.isArray(current) ? current : [current];
   vi.mocked(apiClient.listRequirements).mockResolvedValue(workflows);
   vi.mocked(apiClient.listProjectHistory).mockResolvedValue([

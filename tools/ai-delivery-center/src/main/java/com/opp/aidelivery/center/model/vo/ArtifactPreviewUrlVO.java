@@ -8,4 +8,7 @@ public class ArtifactPreviewUrlVO {
 
     private String previewUrl;
     private LocalDateTime expireAt;
+    private String sourceType;
+    private String commitSha;
+    private String filePath;
 }

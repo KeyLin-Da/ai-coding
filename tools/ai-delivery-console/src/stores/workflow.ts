@@ -1,7 +1,10 @@
 import { defineStore } from 'pinia';
+import { ElMessage } from 'element-plus';
 import type { ActionInput, AgentProvider, RequirementInput, RequirementWorkflow, ReviewInput, RunEvent } from '@shared/workflow';
 import { apiClient, type DeleteTechDesignQuestionInput } from '@/api/client';
-import { getApiRuntimeConfig, isRemoteApiMode, resolveApiUrl } from '@/api/runtime';
+import { getApiRuntimeConfig } from '@/api/runtime';
+import { RealtimeClient, type RealtimeDomainEvent } from '@/services/realtime-client';
+import { useSettingsStore } from '@/stores/settings';
 
 interface WorkflowState {
   requirements: RequirementWorkflow[];
@@ -9,8 +12,11 @@ interface WorkflowState {
   loading: boolean;
   runEvents: RunEvent[];
   agents: AgentProvider[];
-  eventSource?: EventSource;
-  workflowEventSource?: EventSource;
+  realtimeClient?: RealtimeClient;
+  realtimeStatus: 'CONNECTING' | 'CONNECTED' | 'DISCONNECTED' | 'ERROR';
+  lastEventId: number;
+  activeRunId?: string;
+  runEventSeqs: Record<string, number>;
 }
 
 export const useWorkflowStore = defineStore('workflow', {
@@ -20,12 +26,26 @@ export const useWorkflowStore = defineStore('workflow', {
     loading: false,
     runEvents: [],
     agents: [],
-    eventSource: undefined,
-    workflowEventSource: undefined
+    realtimeClient: undefined,
+    realtimeStatus: 'DISCONNECTED',
+    lastEventId: 0,
+    activeRunId: undefined,
+    runEventSeqs: {}
   }),
   actions: {
     async loadAgents() {
-      this.agents = await apiClient.listAgents();
+      const settings = useSettingsStore();
+      this.agents = settings.desktopConfig.agentProviders.map((provider) => ({
+        id: provider.id.toLowerCase(),
+        name: provider.id,
+        description: `本机命令：${provider.command}`,
+        inputMode: 'STDIN',
+        command: [provider.command],
+        interactiveCommand: [provider.command],
+        available: provider.enabled,
+        supportsStreaming: true,
+        supportsInteractive: true
+      }));
     },
     async loadRequirements() {
       this.loading = true;
@@ -73,63 +93,45 @@ export const useWorkflowStore = defineStore('workflow', {
         return;
       }
       this.runEvents = await apiClient.getRunEvents(this.current.requirementId, runId);
+      this.runEventSeqs[runId] = this.runEvents.length;
     },
     streamRunEvents(runId: string) {
       if (!this.current) {
         return;
       }
       this.stopRunStream();
-      const requirementId = this.current.requirementId;
+      this.activeRunId = runId;
       const runtime = getApiRuntimeConfig();
-      const streamPath = isRemoteApiMode()
-        ? `/api/ai-delivery/runs/${encodeURIComponent(runId)}/events/subscribe?userId=${encodeURIComponent(runtime.userId)}`
-        : `/api/ai-delivery/runs/${encodeURIComponent(runId)}/stream?requirementId=${encodeURIComponent(requirementId)}&tail=1`;
-      this.eventSource = new EventSource(resolveApiUrl(streamPath));
-      const appendEvent = (event: MessageEvent) => {
-        this.runEvents.push(JSON.parse(event.data) as RunEvent);
-      };
-      this.eventSource.onmessage = appendEvent;
-      this.eventSource.addEventListener?.('run-event', appendEvent as EventListener);
-      this.eventSource.onerror = () => {
-        this.stopRunStream();
-      };
+      if (!runtime.projectId || !runtime.userId || !runtime.clientSessionId) {
+        return;
+      }
+      void this.ensureRealtimeClient()
+        .then((client) => client.subscribeRun(runId, this.runEventSeqs[runId] || 0))
+        .catch(() => {
+          this.realtimeStatus = 'ERROR';
+        });
     },
     stopRunStream() {
-      if (this.eventSource) {
-        this.eventSource.close();
-        this.eventSource = undefined;
-      }
+      this.activeRunId = undefined;
     },
     streamWorkflowEvents() {
-      if (!this.current || !isRemoteApiMode()) {
+      if (!this.current) {
         return;
       }
-      this.stopWorkflowStream();
       const runtime = getApiRuntimeConfig();
-      if (!runtime.projectId || !runtime.userId) {
+      if (!runtime.projectId || !runtime.userId || !runtime.clientSessionId) {
         return;
       }
-      const requirementPk = this.current.id ? `&requirementPk=${encodeURIComponent(String(this.current.id))}` : '';
-      this.workflowEventSource = new EventSource(
-        resolveApiUrl(
-          `/api/ai-delivery/events/subscribe?projectId=${encodeURIComponent(runtime.projectId)}&userId=${encodeURIComponent(runtime.userId)}${requirementPk}`
-        )
-      );
-      const refresh = () => {
-        if (this.current) {
-          void this.loadRequirement(this.current.requirementId);
-          void this.loadRequirements();
-        }
-      };
-      this.workflowEventSource.onmessage = refresh;
-      this.workflowEventSource.addEventListener?.('domain-event', refresh as EventListener);
-      this.workflowEventSource.onerror = () => this.stopWorkflowStream();
+      void this.ensureRealtimeClient()
+        .then((client) => client.subscribeProject(runtime.projectId, this.lastEventId, this.current?.id))
+        .catch(() => {
+          this.realtimeStatus = 'ERROR';
+        });
     },
     stopWorkflowStream() {
-      if (this.workflowEventSource) {
-        this.workflowEventSource.close();
-        this.workflowEventSource = undefined;
-      }
+      this.realtimeClient?.disconnect();
+      this.realtimeClient = undefined;
+      this.realtimeStatus = 'DISCONNECTED';
     },
     async cancelRun(runId: string) {
       if (!this.current) {
@@ -172,6 +174,96 @@ export const useWorkflowStore = defineStore('workflow', {
       }
       this.current = await apiClient.deleteTechDesignQuestion(this.current.requirementId, input);
       await this.loadRequirements();
+    },
+    async ensureRealtimeClient(): Promise<RealtimeClient> {
+      if (!this.realtimeClient) {
+        this.realtimeClient = new RealtimeClient({
+          onStatus: (status) => {
+            this.realtimeStatus = status;
+          },
+          onDomainEvent: (event) => {
+            void this.handleRealtimeDomainEvent(event);
+          },
+          onRunEvent: (event, raw) => {
+            const activeRunId = this.activeRunId;
+            if (activeRunId && String(raw.runId) !== String(activeRunId)) {
+              return;
+            }
+            const previousSeq = this.runEventSeqs[String(raw.runId)] || 0;
+            if (raw.seq <= previousSeq) {
+              return;
+            }
+            this.runEventSeqs[String(raw.runId)] = raw.seq;
+            this.runEvents.push(event);
+          },
+          onRefreshRequired: () => {
+            void this.loadRequirements();
+            if (this.current) {
+              void this.loadRequirement(this.current.requirementId);
+            }
+          }
+        });
+      }
+      await this.realtimeClient.connect();
+      return this.realtimeClient;
+    },
+    async handleRealtimeDomainEvent(event: RealtimeDomainEvent) {
+      const runtime = getApiRuntimeConfig();
+      this.lastEventId = Math.max(this.lastEventId, event.eventId || 0);
+      this.realtimeClient?.ack(runtime.projectId, this.lastEventId);
+      this.applyRealtimeHint(event);
+      if (this.current) {
+        await this.loadRequirement(this.current.requirementId);
+      }
+      await this.loadRequirements();
+    },
+    applyRealtimeHint(event: RealtimeDomainEvent) {
+      const payload = parseEventPayload(event.payloadJson);
+      const requirementPk = payload.requirementPk == null ? undefined : String(payload.requirementPk);
+      if (event.eventType === 'artifact.version.created') {
+        ElMessage.info('检测到新产物版本，已刷新');
+      }
+      if (event.eventType === 'artifact.git-sync.completed') {
+        const commitSha = String(payload.commitSha || '');
+        ElMessage.success(commitSha ? `产物已推送：${commitSha}` : '产物Git同步已完成');
+      }
+      if (event.eventType === 'artifact.git-sync.blocked') {
+        ElMessage.warning(String(payload.errorMessage || '产物Git同步被阻断'));
+      }
+      if (event.eventType === 'project.repo.pull-required') {
+        const targetUserIds = Array.isArray(payload.targetUserIds) ? payload.targetUserIds.map((item) => String(item)) : [];
+        if (!targetUserIds.length || targetUserIds.includes(String(runtime.userId))) {
+          ElMessage.warning('项目产物仓有新提交，请点击右上角“同步 Git 仓”后继续操作');
+        }
+      }
+      if (event.eventType === 'project.repo.state-changed') {
+        const status = String(payload.syncStatus || '');
+        if (status && status !== 'READY' && status !== 'PUSHED') {
+          ElMessage.info(`项目产物仓状态：${status}`);
+        }
+      }
+      if (event.eventType === 'execution.lock.updated' && requirementPk) {
+        const status = String(payload.status || '');
+        const stage = String(payload.stage || '');
+        const actionType = String(payload.actionType || '');
+        const label = status === 'ACTIVE' ? `${stage || actionType} 执行中` : undefined;
+        this.requirements = this.requirements.map((item) => (String(item.id) === requirementPk ? { ...item, jobStatus: label } : item));
+        if (this.current && String(this.current.id) === requirementPk) {
+          this.current = { ...this.current, jobStatus: label };
+        }
+      }
     }
   }
 });
+
+function parseEventPayload(payloadJson?: string): Record<string, unknown> {
+  if (!payloadJson) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(payloadJson);
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}

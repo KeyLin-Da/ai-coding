@@ -9,4 +9,12 @@ public interface StorageService {
     String createPreviewUrl(String objectKey, Duration ttl);
 
     StorageObjectMetadata getObjectMetadata(String objectKey);
+
+    default void putObject(String objectKey, byte[] content, String contentType, String sha256) {
+        throw new UnsupportedOperationException("putObject is not supported");
+    }
+
+    default void deleteObject(String objectKey) {
+        throw new UnsupportedOperationException("deleteObject is not supported");
+    }
 }

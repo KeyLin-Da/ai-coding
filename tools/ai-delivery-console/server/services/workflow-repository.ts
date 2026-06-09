@@ -6,7 +6,6 @@ import { deriveCurrentStage } from '../../shared/stage-rules';
 import { normalizeRequirementId } from './workspace';
 import { saveProjectHistory } from './project-history';
 import { normalizeWorkflowProjects } from './project-resolver';
-import { loadSettings } from './project-settings';
 
 export function normalizePrdClarification(value?: string): string | undefined {
   const withoutControls = Array.from(String(value || ''))
@@ -75,7 +74,7 @@ export class WorkflowRepository {
     return updated;
   }
 
-  async upsert(input: RequirementInput): Promise<RequirementWorkflow> {
+  async upsert(input: RequirementInput, projectPaths: string[] = []): Promise<RequirementWorkflow> {
     const requirementId = normalizeRequirementId(input.requirementId);
     const existing = await this.load(requirementId);
     if (existing) {
@@ -98,11 +97,12 @@ export class WorkflowRepository {
         ? input.techDesignSourceFiles || []
         : existing.techDesignSourceFiles || [];
       const projects = hasInputField(input, 'projects')
-        ? await normalizeWorkflowProjects(this.workspaceRoot, input.projects || [], (await loadSettings(this.workspaceRoot)).projectPaths)
+        ? await normalizeWorkflowProjects(this.workspaceRoot, input.projects || [], projectPaths)
         : existing.projects || [];
       await saveProjectHistory(this.workspaceRoot, projects);
       return this.save({
         ...existing,
+        id: input.id || existing.id,
         title: input.title || existing.title,
         requirementType,
         branchName,
@@ -116,9 +116,10 @@ export class WorkflowRepository {
     }
     const now = new Date().toISOString();
     const requirementType: RequirementType = input.requirementType || 'REQUIREMENT';
-    const projects = await normalizeWorkflowProjects(this.workspaceRoot, input.projects || [], (await loadSettings(this.workspaceRoot)).projectPaths);
+    const projects = await normalizeWorkflowProjects(this.workspaceRoot, input.projects || [], projectPaths);
     await saveProjectHistory(this.workspaceRoot, projects);
     const workflow: RequirementWorkflow = {
+      id: input.id,
       requirementId,
       title: input.title || `需求 ${requirementId}`,
       requirementType,

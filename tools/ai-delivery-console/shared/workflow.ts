@@ -284,6 +284,7 @@ export interface RequirementWorkflow {
 }
 
 export interface RequirementInput {
+  id?: string | number;
   requirementId: string;
   title?: string;
   requirementType?: RequirementType;

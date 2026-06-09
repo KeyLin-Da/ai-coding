@@ -1,4 +1,3 @@
-export type ApiMode = 'local' | 'remote';
 export type DesktopOsType = 'MACOS' | 'WINDOWS' | 'LINUX' | 'UNKNOWN';
 
 export interface WorkspaceMapping {
@@ -13,14 +12,20 @@ export interface LocalAgentProviderConfig {
 }
 
 export interface DesktopLocalConfig {
-  apiMode: ApiMode;
   centerBaseUrl: string;
+  runnerBaseUrl: string;
   userId: string;
+  clientSessionId: string;
   teamId: string;
   projectId: string;
   terminalPreference: string;
   workspaceMappings: WorkspaceMapping[];
   agentProviders: LocalAgentProviderConfig[];
+}
+
+export interface Subdirectory {
+  name: string;
+  path: string;
 }
 
 interface DesktopBridge {
@@ -30,6 +35,8 @@ interface DesktopBridge {
     load: () => Promise<DesktopLocalConfig | null>;
     save: (config: DesktopLocalConfig) => Promise<boolean>;
   };
+  selectDirectory?: () => Promise<string | null>;
+  listSubdirectories?: (dirPath: string) => Promise<Subdirectory[]>;
 }
 
 declare global {
@@ -42,9 +49,10 @@ const LOCAL_STORAGE_KEY = 'ai-delivery.desktop.local-config';
 
 export function defaultDesktopLocalConfig(): DesktopLocalConfig {
   return {
-    apiMode: 'local',
     centerBaseUrl: 'http://127.0.0.1:8728',
+    runnerBaseUrl: 'http://127.0.0.1:8718',
     userId: '',
+    clientSessionId: '',
     teamId: '',
     projectId: '',
     terminalPreference: defaultTerminalPreference(detectDesktopOs()),
@@ -71,7 +79,9 @@ export async function loadDesktopLocalConfig(): Promise<DesktopLocalConfig> {
 }
 
 export async function saveDesktopLocalConfig(config: DesktopLocalConfig): Promise<DesktopLocalConfig> {
-  const normalized = mergeConfig(config);
+  // 深度解包 Pinia reactive proxy，避免 Electron IPC 序列化失败
+  const plain = JSON.parse(JSON.stringify(config));
+  const normalized = mergeConfig(plain);
   if (window.aiDeliveryDesktop?.localConfig?.save) {
     await window.aiDeliveryDesktop.localConfig.save(normalized);
   } else {
@@ -119,7 +129,6 @@ function mergeConfig(value: Partial<DesktopLocalConfig>): DesktopLocalConfig {
   return {
     ...defaults,
     ...value,
-    apiMode: value.apiMode === 'remote' ? 'remote' : 'local',
     workspaceMappings: Array.isArray(value.workspaceMappings) ? value.workspaceMappings : defaults.workspaceMappings,
     agentProviders: Array.isArray(value.agentProviders) ? value.agentProviders : defaults.agentProviders
   };

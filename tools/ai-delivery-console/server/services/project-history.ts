@@ -1,7 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { WorkflowProject } from '../../shared/workflow';
-import { loadSettings } from './project-settings';
 import { canonicalProjectPath } from './project-resolver';
 
 interface ProjectHistoryFile {
@@ -49,20 +48,18 @@ export async function snapshotWorkspaceProjects(workspaceRoot: string): Promise<
   return projects;
 }
 
-export async function readProjectHistory(workspaceRoot: string): Promise<WorkflowProject[]> {
-  const settings = await loadSettings(workspaceRoot);
-  if (settings.projectPaths.length) {
-    return listProjectsFromConfiguredPaths(workspaceRoot);
+export async function readProjectHistory(workspaceRoot: string, projectPaths: string[] = []): Promise<WorkflowProject[]> {
+  if (projectPaths.length) {
+    return listProjectsFromConfiguredPaths(workspaceRoot, projectPaths);
   }
   await snapshotWorkspaceProjects(workspaceRoot);
   return readSavedProjectHistory(workspaceRoot);
 }
 
-export async function listProjectsFromConfiguredPaths(workspaceRoot: string): Promise<WorkflowProject[]> {
-  const settings = await loadSettings(workspaceRoot);
+export async function listProjectsFromConfiguredPaths(workspaceRoot: string, projectPaths: string[] = []): Promise<WorkflowProject[]> {
   const projects: WorkflowProject[] = [];
   
-  for (const basePath of settings.projectPaths) {
+  for (const basePath of projectPaths) {
     try {
       const entries = await fs.readdir(basePath, { withFileTypes: true });
       for (const entry of entries) {

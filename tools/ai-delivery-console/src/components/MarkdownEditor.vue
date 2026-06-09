@@ -6,9 +6,9 @@
         <p class="muted">{{ artifactPath || '尚未关联产物' }}</p>
       </div>
       <div>
-        <el-button :disabled="!artifactPath" :icon="View" @click="load">读取</el-button>
+        <el-button :disabled="!artifactPath" :icon="View" :loading="loading" @click="load">读取</el-button>
         <el-button :disabled="!artifactPath || !content" :icon="Download" @click="download">下载</el-button>
-        <el-button type="primary" :disabled="!artifactPath" :icon="DocumentChecked" @click="save">保存</el-button>
+        <el-button type="primary" :disabled="!artifactPath" :icon="DocumentChecked" :loading="saving" @click="save">保存</el-button>
       </div>
     </div>
     <el-alert
@@ -104,6 +104,8 @@ const baseVersionId = ref<string | number | undefined>();
 const conflictMessage = ref('');
 const isFullscreen = ref(false);
 const isScrolling = ref(false);
+const loading = ref(false);
+const saving = ref(false);
 
 const previewHtml = computed(() => {
   const rendered = md.render(content.value || '');
@@ -192,17 +194,23 @@ async function load() {
   if (!props.artifactPath) {
     return;
   }
-  const result = await apiClient.readArtifact(props.artifactPath);
-  content.value = result.content;
-  expectedHash.value = result.artifact.hash;
-  baseVersionId.value = result.artifact.currentVersionId || result.artifact.versionId || result.artifact.hash;
-  conflictMessage.value = '';
+  loading.value = true;
+  try {
+    const result = await apiClient.readArtifact(props.artifactPath);
+    content.value = result.content;
+    expectedHash.value = result.artifact.hash;
+    baseVersionId.value = result.artifact.currentVersionId || result.artifact.versionId || result.artifact.hash;
+    conflictMessage.value = '';
+  } finally {
+    loading.value = false;
+  }
 }
 
 async function save() {
   if (!props.artifactPath) {
     return;
   }
+  saving.value = true;
   try {
     const result = await apiClient.saveArtifact(props.artifactPath, content.value, expectedHash.value, baseVersionId.value);
     expectedHash.value = result.artifact.hash;
@@ -218,6 +226,8 @@ async function save() {
       return;
     }
     ElMessage.error(error.message || '保存失败');
+  } finally {
+    saving.value = false;
   }
 }
 

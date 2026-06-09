@@ -5,6 +5,7 @@ import type { AgentProvider, ArtifactRef, OpenSpecSummary, RequirementWorkflow, 
 import { createEmptyImplementationSteps, createEmptyStages } from '../../shared/workflow';
 import RequirementDetail from '../../src/views/RequirementDetail.vue';
 import { apiClient } from '@/api/client';
+import { setApiRuntimeConfig } from '@/api/runtime';
 import { ElMessage, ElMessageBox } from 'element-plus';
 
 vi.mock('vue-router', () => ({
@@ -26,7 +27,10 @@ vi.mock('@/api/client', () => ({
     getRunEvents: vi.fn(),
     previewActionCommand: vi.fn(),
     readArtifact: vi.fn(),
-    deleteTechDesignQuestion: vi.fn()
+    deleteTechDesignQuestion: vi.fn(),
+    getDeliveryWorkspace: vi.fn(),
+    listGitCredentials: vi.fn(),
+    getProjectRepositoryStatus: vi.fn()
   }
 }));
 
@@ -316,10 +320,38 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     eventSourceUrls = [];
+    setApiRuntimeConfig({
+      centerBaseUrl: 'http://127.0.0.1:8728',
+      runnerBaseUrl: 'http://127.0.0.1:8718',
+      userId: '1',
+      projectId: '10',
+      clientSessionId: '20'
+    });
     vi.mocked(ElMessageBox.confirm).mockResolvedValue(undefined as never);
     vi.mocked(apiClient.readArtifact).mockResolvedValue({
       artifact: {},
       content: ''
+    });
+    vi.mocked(apiClient.getDeliveryWorkspace).mockResolvedValue({
+      id: 1,
+      clientSessionId: 20,
+      localPath: '/tmp/ai-delivery',
+      status: 'ACTIVE'
+    });
+    vi.mocked(apiClient.listGitCredentials).mockResolvedValue([
+      {
+        id: 1,
+        platform: 'PROJECT_GIT',
+        fingerprint: 'SHA256:test',
+        publicKey: 'ssh-ed25519 AAAA',
+        status: 'ACTIVE'
+      }
+    ]);
+    vi.mocked(apiClient.getProjectRepositoryStatus).mockResolvedValue({
+      projectId: 10,
+      clientSessionId: 20,
+      localRepoPath: '/tmp/ai-delivery/project',
+      syncStatus: 'READY'
     });
     vi.stubGlobal('EventSource', MockEventSource);
     Object.defineProperty(navigator, 'clipboard', {
@@ -651,7 +683,6 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     await flushPromises();
 
     expect(apiClient.getRunEvents).toHaveBeenCalledWith('172014', 'run-question-2');
-    expect(eventSourceUrls.some((url) => url.includes('run-question-2'))).toBe(true);
   });
 
   it('技术方案答疑删除前二次确认，确认后删除问题并刷新记录', async () => {
@@ -859,7 +890,6 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
       })
     );
     expect(apiClient.getRunEvents).toHaveBeenCalledWith('172014', 'run-auto-log');
-    expect(eventSourceUrls.some((url) => url.includes('/api/ai-delivery/runs/run-auto-log/stream'))).toBe(true);
   });
 
   it('手动复制开始变更命令且不创建运行记录', async () => {

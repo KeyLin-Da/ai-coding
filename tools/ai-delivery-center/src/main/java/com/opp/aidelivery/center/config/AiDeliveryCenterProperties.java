@@ -14,6 +14,8 @@ public class AiDeliveryCenterProperties {
     private Event event = new Event();
     private Security security = new Security();
     private Websocket websocket = new Websocket();
+    private BootstrapImport bootstrapImport = new BootstrapImport();
+    private Preflight preflight = new Preflight();
 
     @Data
     public static class Cos {
@@ -53,6 +55,23 @@ public class AiDeliveryCenterProperties {
 
     @Data
     public static class Websocket {
-        private Duration heartbeatInterval = Duration.ofSeconds(30);
+        private String endpoint = "/api/ai-delivery/ws";
+        private Duration ticketTtl = Duration.ofMinutes(2);
+        private Duration heartbeatInterval = Duration.ofSeconds(20);
+        private Duration sessionIdleTimeout = Duration.ofSeconds(90);
+        private String broker = "local";
+        private String redisChannelPrefix = "ai-delivery:ws-events";
+        private boolean redisRequired = false;
+    }
+
+    @Data
+    public static class BootstrapImport {
+        private long maxFileSize = 104857600L;
+        private int manifestRetentionDays = 30;
+    }
+
+    @Data
+    public static class Preflight {
+        private boolean objectStorageTestEnabled = true;
     }
 }

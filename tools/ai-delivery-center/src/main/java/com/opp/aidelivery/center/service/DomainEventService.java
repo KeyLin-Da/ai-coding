@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -22,7 +23,7 @@ public class DomainEventService {
 
     private final AiDeliveryCenterProperties properties;
     private final DomainEventRepository domainEventRepository;
-    private final RealtimeEventBroker realtimeEventBroker;
+    private final ObjectProvider<RealtimeEventBroker> realtimeEventBrokerProvider;
 
     public void publishAfterCommit(
         Long projectId,
@@ -59,7 +60,10 @@ public class DomainEventService {
         event.setAggregateId(aggregateId);
         event.setPayloadJson(payloadJson);
         domainEventRepository.save(event);
-        realtimeEventBroker.broadcast(event);
+        RealtimeEventBroker realtimeEventBroker = realtimeEventBrokerProvider.getIfAvailable();
+        if (realtimeEventBroker != null) {
+            realtimeEventBroker.broadcast(event);
+        }
         return event;
     }
 

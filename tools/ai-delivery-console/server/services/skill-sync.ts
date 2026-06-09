@@ -3,7 +3,7 @@ import path from 'node:path';
 
 const AGENT_SKILL_DIRS = ['.codex', '.codebuddy', '.qoder', '.qwen'];
 
-export async function syncCodingSkills(workspaceRoot: string): Promise<{ synced: number; targetDirs: string[] }> {
+export async function syncCodingSkills(workspaceRoot: string, targetWorkspaceRoot = workspaceRoot): Promise<{ synced: number; targetDirs: string[] }> {
   const skillsDir = path.join(workspaceRoot, 'skills');
   
   try {
@@ -26,7 +26,7 @@ export async function syncCodingSkills(workspaceRoot: string): Promise<{ synced:
   const targetDirs: string[] = [];
 
   for (const agentDir of AGENT_SKILL_DIRS) {
-    const targetBase = path.join(workspaceRoot, agentDir, 'skills');
+    const targetBase = path.join(targetWorkspaceRoot, agentDir, 'skills');
     
     // Create target directory if not exists
     await fs.mkdir(targetBase, { recursive: true });

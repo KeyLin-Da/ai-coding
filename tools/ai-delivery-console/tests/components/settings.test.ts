@@ -15,7 +15,13 @@ vi.mock('vue-router', () => ({
 vi.mock('@/api/client', () => ({
   apiClient: {
     getSettings: vi.fn(),
-    saveSettings: vi.fn()
+    saveSettings: vi.fn(),
+    updateProfile: vi.fn(),
+    logout: vi.fn(),
+    listWorkspaceMappings: vi.fn(),
+    saveWorkspaceMapping: vi.fn(),
+    disableWorkspaceMapping: vi.fn(),
+    registerClientSession: vi.fn()
   }
 }));
 
@@ -104,6 +110,14 @@ describe('Settings', () => {
     routerPush.mockReset();
     vi.mocked(apiClient.getSettings).mockResolvedValue({ projectPaths: ['/Users/me/work'] });
     vi.mocked(apiClient.saveSettings).mockResolvedValue({ projectPaths: ['/Users/me/work'] });
+    vi.mocked(apiClient.registerClientSession).mockResolvedValue({ id: 11, clientKey: 'test-client' });
+    vi.mocked(apiClient.listWorkspaceMappings).mockResolvedValue([]);
+    vi.mocked(apiClient.saveWorkspaceMapping).mockResolvedValue({
+      id: 1,
+      projectId: 2,
+      localPath: '/Users/me/work',
+      status: 'ACTIVE'
+    });
     const values = new Map<string, string>();
     Object.defineProperty(window, 'localStorage', {
       configurable: true,
@@ -117,7 +131,7 @@ describe('Settings', () => {
     delete window.aiDeliveryDesktop;
   });
 
-  it('支持从个人中心返回需求列表', async () => {
+  it('未选择项目时从个人中心返回项目列表', async () => {
     const wrapper = mount(Settings, {
       global: {
         plugins: [createPinia()],
@@ -126,8 +140,45 @@ describe('Settings', () => {
     });
     await flushPromises();
 
-    await wrapper.findAll('button').find((button) => button.text().includes('返回列表'))?.trigger('click');
+    await wrapper.findAll('button').find((button) => button.text().includes('返回'))?.trigger('click');
 
-    expect(routerPush).toHaveBeenCalledWith({ name: 'requirements' });
+    expect(routerPush).toHaveBeenCalledWith({ name: 'projects' });
+  });
+
+  it('在个人中心为当前项目添加私有工程目录', async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const { useAuthStore } = await import('@/stores/auth');
+    const { useProjectStore } = await import('@/stores/project');
+    useAuthStore().applySession({
+      token: 'token-1',
+      expireAt: new Date(Date.now() + 86_400_000).toISOString(),
+      user: {
+        id: 7,
+        account: 'key.lin',
+        displayName: 'Key Lin',
+        status: 'ACTIVE'
+      }
+    });
+    const project = useProjectStore();
+    project.current = {
+      id: 2,
+      name: 'AI Delivery',
+      code: 'ai-delivery',
+      status: 'ACTIVE',
+      role: 'OWNER'
+    };
+
+    const wrapper = mount(Settings, {
+      global: {
+        plugins: [pinia],
+        stubs: stubs()
+      }
+    });
+    await flushPromises();
+    (wrapper.vm as any).newPath = '/Users/me/work';
+    await (wrapper.vm as any).addPath();
+
+    expect(apiClient.saveWorkspaceMapping).toHaveBeenCalledWith(2, { localPath: '/Users/me/work' });
   });
 });

@@ -66,7 +66,18 @@ ai-delivery:
       retained-window: ${AI_DELIVERY_CENTER_EVENT_RETAINED_WINDOW:7d}
       page-size: ${AI_DELIVERY_CENTER_EVENT_PAGE_SIZE:500}
     websocket:
-      heartbeat-interval: ${AI_DELIVERY_CENTER_WEBSOCKET_HEARTBEAT_INTERVAL:30s}
+      endpoint: ${AI_DELIVERY_CENTER_WEBSOCKET_ENDPOINT:/api/ai-delivery/ws}
+      ticket-ttl: ${AI_DELIVERY_CENTER_WEBSOCKET_TICKET_TTL:2m}
+      heartbeat-interval: ${AI_DELIVERY_CENTER_WEBSOCKET_HEARTBEAT_INTERVAL:20s}
+      session-idle-timeout: ${AI_DELIVERY_CENTER_WEBSOCKET_SESSION_IDLE_TIMEOUT:90s}
+      broker: ${AI_DELIVERY_CENTER_WEBSOCKET_BROKER:local}
+      redis-channel-prefix: ${AI_DELIVERY_CENTER_WEBSOCKET_REDIS_CHANNEL_PREFIX:ai-delivery:ws-events}
+      redis-required: ${AI_DELIVERY_CENTER_WEBSOCKET_REDIS_REQUIRED:false}
+    bootstrap-import:
+      max-file-size: ${AI_DELIVERY_CENTER_IMPORT_MAX_FILE_SIZE:104857600}
+      manifest-retention-days: ${AI_DELIVERY_CENTER_IMPORT_MANIFEST_RETENTION_DAYS:30}
+    preflight:
+      object-storage-test-enabled: ${AI_DELIVERY_CENTER_PREFLIGHT_OBJECT_STORAGE_TEST_ENABLED:true}
     security:
       jwt-issuer: ${AI_DELIVERY_CENTER_JWT_ISSUER:ai-delivery-center}
       jwt-secret: ${AI_DELIVERY_CENTER_JWT_SECRET:change-me}

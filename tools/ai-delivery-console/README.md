@@ -4,7 +4,7 @@
 
 > **当前版本：** v0.1.0 | **最后更新：** 2026-05-26
 
-面向本地工作区的可视化工具，用于按需求号聚合 PRD、技术方案、OpenSpec 实施验证、单元测试报告和代码评审报告。让 AI 辅助编程的整个流程清晰可见、可控可追溯。
+面向 Git-backed AI 交付工作区的可视化工具，用于按需求号聚合 PRD、技术方案、OpenSpec 实施验证、单元测试报告和代码评审报告。让 AI 辅助编程的整个流程清晰可见、可控可追溯。
 
 ## 🎯 解决的核心痛点
 
@@ -57,7 +57,7 @@
 
 - 🎯 **一站式管理**：一个界面掌控从需求到代码的全链路交付
 - 📊 **可视化工作流**：直观展示每个阶段的进度和状态
-- 🔄 **实时反馈**：SSE 技术实时展示 Agent 执行日志
+- 🔄 **实时反馈**：本地 SSE 展示 Agent 执行日志，远程模式通过 WebSocket 同步流程、产物和运行事件
 - 🔒 **安全可靠**：工作区路径限制、锁文件机制、hash 校验三重保障
 - ⚡ **灵活集成**：支持 Codex CLI 自动化或自定义 Agent Provider
 - 📈 **产物聚合**：自动索引所有相关文档和报告
@@ -84,8 +84,30 @@ AI_DELIVERY_WORKSPACE_ROOT=/Users/key.lin/work/Projects/ai-coding npm run server
 
 控制台现在支持两种运行模式：
 
-- **本地单机模式**：继续使用本机 Node Runner 读写 `docs/` 和 `openspec/`，适合个人离线使用。
-- **远程协作模式**：桌面客户端连接 Spring Boot 中心服务，需求流程、审核、问题、产物版本、Job、运行日志和事件流由中心服务共享；Git、OpenSpec、Agent CLI 仍在各自电脑的 Local Runner 执行。
+- **本地 Runner 模式**：本机 Node Runner 负责 Git、OpenSpec 和 Agent CLI 执行。
+- **远程协作模式**：桌面客户端连接 Spring Boot 中心服务，需求流程、审核、问题、运行日志和事件流由中心服务共享；AI 交付产物以项目 Git 仓 commit/blob/hash 为事实源。
+
+### Git-backed 产物仓
+
+每个登录用户需要在「个人中心 / 交付工作区」完成两项配置：
+
+- `deliveryWorkspaceRoot`: 用户本机选择的全局交付工作区，项目产物仓会 clone 到 `<deliveryWorkspaceRoot>/<projectCode>`。
+- Git SSH 凭证：点击生成后，私钥只保存到 `<deliveryWorkspaceRoot>/.ai-delivery/keys/{fingerprint}`，中心只保存公钥、fingerprint、平台和状态。
+
+项目创建时必须填写 AI 产物 Git 仓地址、平台和默认分支，创建后不支持修改。项目仓只存 AI 交付产物和 Agent skill 目录：
+
+```text
+docs/{需求号}/
+docs/code_review/
+openspec/changes/
+openspec/specs/
+.codex/skills/
+.codebuddy/skills/
+.qoder/skills/
+.qwen/skills/
+```
+
+Runner 在 clone 项目仓后会把工具链仓 `skills/coding-*` 同步到项目仓各 Agent skill 目录，不会创建 `<projectCode>/skills`。
 
 ### 开发态启动桌面客户端
 
@@ -108,7 +130,7 @@ npm run desktop:build
 
 - `apiMode`: `remote`
 - `centerBaseUrl`: 例如 `http://127.0.0.1:8728`
-- `userId`、`teamId`、`projectId`: 当前用户和项目身份
+- `userId`、`projectId`、`clientSessionId`: 当前用户、项目和桌面客户端会话身份
 
 在「本机环境」中维护个人配置：
 
@@ -122,14 +144,16 @@ npm run desktop:build
 
 1. 用户在桌面端创建或打开需求。
 2. 中心服务返回共享 workflow、阶段、审核、issue 和 artifact 当前版本。
-3. 客户端订阅中心 SSE 事件，按 `lastEventId` 断线补偿。
+3. 客户端获取 WebSocket ticket 后订阅中心事件，按 `lastEventId` 断线补偿。
 4. 本机 Local Runner 领取 Job 后执行 Agent/OpenSpec/Git。
-5. 执行日志上传为 run events，产物文件上传 COS，中心服务创建新的 artifact version 并广播。
-6. Markdown 保存携带 `baseVersionId`，若他人已发布新版本，中心服务返回 `B70021`，客户端提示刷新/合并。
+5. 执行日志上传为 run events；阶段审核通过和公开同步先展示文件列表与 diff，用户确认后由 Runner git add/commit/pull --rebase/push。
+6. push 成功后 Runner 回写中心 Git 版本索引；中心广播 `artifact.git-sync.completed`，其他用户收到 `project.repo.pull-required` 后需要拉取最新仓库。
+
+WebSocket 连接失败时，远程模式仍可通过 HTTP 读取列表、详情和补偿事件；页面会显示实时连接异常，运行日志和在线状态不会实时追加，用户可手动刷新恢复最新状态。
 
 ### 本地数据迁移
 
-本地 Runner 提供迁移预览和导入接口，用于把既有 `docs/{需求号}`、`openspec/changes`、`docs/code_review` 产物上传为中心服务初始版本：
+本地 Runner 提供迁移预览接口。Git-backed 模式下，既有 `docs/{需求号}`、`openspec/changes`、`docs/code_review` 产物应先进入项目产物仓并完成公开同步，再由中心记录 Git 版本索引：
 
 ```bash
 curl "http://127.0.0.1:8718/api/ai-delivery/migration/plan?centerBaseUrl=http://127.0.0.1:8728&projectId=1"
@@ -139,7 +163,7 @@ curl -X POST "http://127.0.0.1:8718/api/ai-delivery/migration/import" \
   -d '{"centerBaseUrl":"http://127.0.0.1:8728","projectId":"1","userId":"1","dryRun":true}'
 ```
 
-先使用 `dryRun=true` 检查导入计划，再执行正式导入。导入工具会按 logical path 去重，跳过缺失文件，并在 COS 上传失败时返回错误，不把本地路径作为中心服务事实保存。
+先使用 `dryRun=true` 检查导入计划。旧 COS 产物仅作为 `LEGACY_COS` 历史只读版本保留；新流程不得再把 COS 作为产物事实源。
 
 ## 📸 界面展示
 
@@ -171,7 +195,7 @@ curl -X POST "http://127.0.0.1:8718/api/ai-delivery/migration/import" \
 
 ![实施验证阶段](screenshots/04-implementation-verify.png)
 
-> 💡 **功能亮点**：任务清单可视化、测试覆盖率统计、运行日志实时展示（SSE）。
+> 💡 **功能亮点**：任务清单可视化、测试覆盖率统计、运行日志实时展示（本地 SSE / 远程 WebSocket）。
 
 ---
 
@@ -183,7 +207,7 @@ curl -X POST "http://127.0.0.1:8718/api/ai-delivery/migration/import" \
 
 ---
 
-### 运行日志 - SSE 实时终端输出
+### 运行日志 - 实时终端输出
 
 ![运行日志](screenshots/06-run-log-sse.png)
 
@@ -331,7 +355,7 @@ CODEX_COMMAND='codex exec -C {workspaceRoot} -'
 
 1. Runner 会把技能动作包装成 `docs/{需求号}/workflow/prompts/{runId}.md`
 2. 将 stdout/stderr 写入 `docs/{需求号}/workflow/runs/{runId}.jsonl`
-3. 页面通过 SSE 实时展示终端输出
+3. 本地模式通过 SSE 实时展示终端输出，远程中心模式通过 WebSocket run event 追加日志
 4. 用户可以复制生成的命令文本交给 Agent 执行；执行完成后在页面点击「刷新产物」重新索引文件。
 
 ### 本地终端执行
@@ -365,7 +389,7 @@ CODEX_COMMAND='codex exec -C {workspaceRoot} -'
 - **前端框架**：Vue 3 + TypeScript + Vite
 - **状态管理**：Pinia
 - **UI 组件**：Element Plus
-- **实时通信**：Server-Sent Events (SSE)
+- **实时通信**：本地 Server-Sent Events (SSE)，远程 WebSocket/STOMP
 - **后端服务**：Node.js + Express
 - **代码高亮**：highlight.js
 - **Markdown 渲染**：markdown-it + mermaid
@@ -385,7 +409,7 @@ CODEX_COMMAND='codex exec -C {workspaceRoot} -'
 ## 💬 常见问题
 
 ### Q: 如何查看 Agent 执行的详细日志？
-A: 在每个需求详情页，点击「运行日志」按钮，会打开抽屉展示 SSE 实时输出的终端日志。
+A: 在每个需求详情页，点击「运行日志」按钮，会打开抽屉展示实时终端日志。本地模式使用 SSE，远程中心模式使用 WebSocket run event，断线后会通过补偿接口补齐。
 
 ### Q: 支持哪些 Agent Provider？
 A: 默认支持 `codex`（Codex CLI）。可通过配置文件注册其他自定义 Agent。下拉框默认选中 Codex，简化了用户操作流程。

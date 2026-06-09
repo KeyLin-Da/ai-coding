@@ -10,5 +10,7 @@ contextBridge.exposeInMainWorld('aiDeliveryDesktop', {
   localConfig: {
     load: () => ipcRenderer.invoke('local-config:read'),
     save: (config) => ipcRenderer.invoke('local-config:write', config)
-  }
+  },
+  selectDirectory: () => ipcRenderer.invoke('desktop:select-directory'),
+  listSubdirectories: (dirPath) => ipcRenderer.invoke('desktop:list-subdirectories', dirPath)
 });

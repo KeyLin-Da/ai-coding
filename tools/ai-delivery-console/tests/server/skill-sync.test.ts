@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { syncCodingSkills } from '../../server/services/skill-sync';
 
 describe('skill-sync', () => {
@@ -91,5 +91,28 @@ describe('skill-sync', () => {
     
     const updatedContent = await fs.readFile(path.join(targetSkillDir, 'SKILL.md'), 'utf8');
     expect(updatedContent).toBe('# v2');
+  });
+
+  it('支持把源 skills 同步到项目仓 Agent 目录且不创建顶层 skills', async () => {
+    const codingDir = path.join(skillsDir, 'coding-review');
+    await fs.mkdir(codingDir, { recursive: true });
+    await fs.writeFile(path.join(codingDir, 'SKILL.md'), '# coding-review');
+    const projectRepo = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-project-repo-'));
+
+    try {
+      const result = await syncCodingSkills(tempDir, projectRepo);
+
+      expect(result.synced).toBe(1);
+      expect(result.targetDirs).toEqual([
+        path.join(projectRepo, '.codex', 'skills'),
+        path.join(projectRepo, '.codebuddy', 'skills'),
+        path.join(projectRepo, '.qoder', 'skills'),
+        path.join(projectRepo, '.qwen', 'skills')
+      ]);
+      await expect(fs.access(path.join(projectRepo, '.codex', 'skills', 'coding-review', 'SKILL.md'))).resolves.toBeUndefined();
+      await expect(fs.access(path.join(projectRepo, 'skills'))).rejects.toThrow();
+    } finally {
+      await fs.rm(projectRepo, { recursive: true, force: true });
+    }
   });
 });

@@ -164,6 +164,7 @@ CREATE TABLE IF NOT EXISTS ad_artifact_version (
     version_no INT NOT NULL COMMENT '业务版本号，从 1 递增',
     base_version_id BIGINT NULL COMMENT '保存时基于的上一版本ID，用于多人冲突检测',
     file_object_id BIGINT NOT NULL COMMENT '文件对象ID，关联 ad_file_object.id',
+    content_sha256 CHAR(64) NULL COMMENT '产物版本内容SHA-256摘要，用于初始化导入幂等查重',
     status VARCHAR(32) NOT NULL DEFAULT 'CURRENT' COMMENT '版本状态：CURRENT 当前版本，ARCHIVED 历史版本等',
     source_run_id BIGINT NULL COMMENT '来源运行记录ID，关联 ad_run.id',
     created_by BIGINT NOT NULL COMMENT '创建人用户ID，关联 ad_user.id',
@@ -172,6 +173,7 @@ CREATE TABLE IF NOT EXISTS ad_artifact_version (
     deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除标记：0 未删除，1 已删除',
     PRIMARY KEY (id),
     UNIQUE KEY uk_artifact_version (artifact_id, version_no),
+    KEY idx_artifact_content_hash (artifact_id, content_sha256),
     KEY idx_file_object (file_object_id),
     KEY idx_source_run (source_run_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI交付产物业务版本表';
@@ -196,6 +198,48 @@ CREATE TABLE IF NOT EXISTS ad_artifact_upload_session (
     KEY idx_artifact_status (artifact_id, status),
     KEY idx_expire_at (expire_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI交付产物COS上传会话表';
+
+CREATE TABLE IF NOT EXISTS ad_import_session (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    project_id BIGINT NOT NULL COMMENT '导入目标项目ID，关联 ad_project.id',
+    mode VARCHAR(32) NOT NULL COMMENT '导入模式：DRY_RUN预演，IMPORT正式导入',
+    status VARCHAR(32) NOT NULL DEFAULT 'RUNNING' COMMENT '导入会话状态：RUNNING、COMPLETED、FAILED、CANCELLED',
+    source VARCHAR(32) NOT NULL DEFAULT 'LOCAL_BOOTSTRAP' COMMENT '导入来源：LOCAL_BOOTSTRAP 本地初始化导入',
+    manifest_sha256 CHAR(64) NULL COMMENT '本地导入清单SHA-256摘要',
+    total_count INT NOT NULL DEFAULT 0 COMMENT '计划处理记录总数',
+    imported_count INT NOT NULL DEFAULT 0 COMMENT '成功导入记录数',
+    skipped_count INT NOT NULL DEFAULT 0 COMMENT '跳过记录数',
+    failed_count INT NOT NULL DEFAULT 0 COMMENT '失败记录数',
+    duplicated_count INT NOT NULL DEFAULT 0 COMMENT '重复记录数',
+    conflicted_count INT NOT NULL DEFAULT 0 COMMENT '冲突记录数',
+    error_message VARCHAR(2000) NULL COMMENT '导入失败或取消原因',
+    created_by BIGINT NOT NULL COMMENT '创建人用户ID，关联 ad_user.id',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除标记：0 未删除，1 已删除',
+    PRIMARY KEY (id),
+    KEY idx_project_status (project_id, status),
+    KEY idx_created_by (created_by, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI交付初始化导入会话表';
+
+CREATE TABLE IF NOT EXISTS ad_import_item (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    import_session_id BIGINT NOT NULL COMMENT '导入会话ID，关联 ad_import_session.id',
+    item_type VARCHAR(32) NOT NULL COMMENT '导入记录类型：REQUIREMENT、STAGE、REVIEW、ISSUE、RUN、RUN_EVENT、ARTIFACT、ARTIFACT_VERSION',
+    source_key VARCHAR(512) NOT NULL COMMENT '源记录逻辑键，不包含本地绝对路径',
+    source_sha256 CHAR(64) NULL COMMENT '源文件或源记录SHA-256摘要',
+    target_type VARCHAR(32) NULL COMMENT '中心目标类型',
+    target_id BIGINT NULL COMMENT '中心目标主键ID',
+    status VARCHAR(32) NOT NULL DEFAULT 'PENDING' COMMENT '导入记录状态：PENDING、IMPORTED、DUPLICATED、CONFLICTED、SKIPPED、FAILED',
+    error_message VARCHAR(2000) NULL COMMENT '记录导入失败或冲突原因',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除标记：0 未删除，1 已删除',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_session_item (import_session_id, item_type, source_key),
+    KEY idx_status (status),
+    KEY idx_target (target_type, target_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI交付初始化导入记录明细表';
 
 CREATE TABLE IF NOT EXISTS ad_client_session (
     id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
@@ -283,3 +327,93 @@ CREATE TABLE IF NOT EXISTS ad_domain_event (
     KEY idx_project_event (project_id, event_id),
     KEY idx_created_at (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI交付协作领域事件表';
+
+CREATE TABLE IF NOT EXISTS ad_ws_session (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    user_id BIGINT NOT NULL COMMENT '用户ID，关联 ad_user.id',
+    client_session_id BIGINT NOT NULL COMMENT '桌面客户端会话ID，关联 ad_client_session.id',
+    last_project_id BIGINT NULL COMMENT '最近一次 presence 心跳所属项目ID，用于离线通知',
+    session_id VARCHAR(128) NOT NULL COMMENT 'WebSocket会话ID，由STOMP连接生成',
+    connected_at DATETIME NOT NULL COMMENT 'WebSocket连接建立时间',
+    last_seen_at DATETIME NOT NULL COMMENT '最近心跳或消息时间',
+    last_ack_event_id BIGINT NOT NULL DEFAULT 0 COMMENT '客户端最近确认处理的领域事件ID',
+    status VARCHAR(32) NOT NULL DEFAULT 'ONLINE' COMMENT 'WebSocket会话状态：ONLINE在线，OFFLINE离线',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除标记：0 未删除，1 已删除',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_session_id (session_id),
+    KEY idx_user_status (user_id, status),
+    KEY idx_client_session (client_session_id),
+    KEY idx_project_status (last_project_id, status),
+    KEY idx_last_seen (last_seen_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI交付WebSocket在线会话表';
+
+CREATE TABLE IF NOT EXISTS ad_execution_lock (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    requirement_pk BIGINT NOT NULL COMMENT '需求主键ID，关联 ad_requirement.id',
+    stage VARCHAR(32) NOT NULL COMMENT '流程阶段：PRD、TECH_DESIGN、IMPLEMENTATION、CODE_REVIEW',
+    action_type VARCHAR(64) NOT NULL COMMENT '人工触发动作类型，如 PRD、TECH_DESIGN、OPENSPEC_APPLY、CODE_REVIEW',
+    holder_user_id BIGINT NOT NULL COMMENT '占用动作的用户ID，关联 ad_user.id',
+    client_session_id BIGINT NOT NULL COMMENT '占用动作的客户端会话ID，关联 ad_client_session.id',
+    expire_at DATETIME NOT NULL COMMENT '占用过期时间，超过后允许他人接管',
+    status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE' COMMENT '占用状态：ACTIVE占用中，RELEASED已释放，EXPIRED已过期',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除标记：0 未删除，1 已删除',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_requirement_stage_action (requirement_pk, stage, action_type),
+    KEY idx_holder_user (holder_user_id),
+    KEY idx_expire_at (expire_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI交付人工阶段动作占用表';
+
+CREATE TABLE IF NOT EXISTS ad_collab_document (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    artifact_id BIGINT NOT NULL COMMENT '逻辑产物ID，关联 ad_artifact.id',
+    base_version_id BIGINT NULL COMMENT '协同草稿基于的产物版本ID，关联 ad_artifact_version.id',
+    document_type VARCHAR(32) NOT NULL COMMENT '协同文档类型：TEXT、MARKDOWN、JSON、HTML等',
+    status VARCHAR(32) NOT NULL DEFAULT 'DRAFT' COMMENT '草稿状态：DRAFT编辑中，PUBLISHED已发布，DISCARDED已废弃',
+    version BIGINT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+    current_snapshot_id BIGINT NULL COMMENT '当前快照ID，关联 ad_collab_snapshot.id',
+    created_by BIGINT NOT NULL COMMENT '创建人用户ID，关联 ad_user.id',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除标记：0 未删除，1 已删除',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_artifact_draft (artifact_id, base_version_id, status),
+    KEY idx_base_version (base_version_id),
+    KEY idx_status_updated (status, updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI交付协同编辑文档草稿表';
+
+CREATE TABLE IF NOT EXISTS ad_collab_operation (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    document_id BIGINT NOT NULL COMMENT '协同文档ID，关联 ad_collab_document.id',
+    seq BIGINT NOT NULL COMMENT '文档内操作序号，从1递增',
+    actor_id BIGINT NOT NULL COMMENT '操作用户ID，关联 ad_user.id',
+    operation_type VARCHAR(32) NOT NULL COMMENT '操作类型：INSERT、DELETE、REPLACE、UPDATE等',
+    operation_payload MEDIUMTEXT NOT NULL COMMENT '操作载荷，预留CRDT或OT协议内容',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除标记：0 未删除，1 已删除',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_document_seq (document_id, seq),
+    KEY idx_actor_created (actor_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI交付协同编辑操作日志表';
+
+CREATE TABLE IF NOT EXISTS ad_collab_snapshot (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    document_id BIGINT NOT NULL COMMENT '协同文档ID，关联 ad_collab_document.id',
+    seq BIGINT NOT NULL COMMENT '快照覆盖到的操作序号',
+    content MEDIUMTEXT NOT NULL COMMENT '协同文档文本快照内容',
+    sha256 CHAR(64) NOT NULL COMMENT '快照内容SHA-256摘要',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除标记：0 未删除，1 已删除',
+    PRIMARY KEY (id),
+    KEY idx_document_seq (document_id, seq)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI交付协同编辑文档快照表';
+
+UPDATE ad_artifact_version av
+JOIN ad_file_object fo ON fo.id = av.file_object_id
+SET av.content_sha256 = fo.sha256
+WHERE av.content_sha256 IS NULL;

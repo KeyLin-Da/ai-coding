@@ -15,7 +15,6 @@ import java.util.List;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @Service
 @RequiredArgsConstructor
@@ -48,11 +47,6 @@ public class RunEventService {
         return runEventRepository.listAfterSeq(runId, afterSeq).stream()
             .map(this::toVO)
             .collect(Collectors.toList());
-    }
-
-    public SseEmitter subscribe(Long userId, Long runId) {
-        loadRunAndCheckPermission(userId, runId);
-        return realtimeEventBroker.subscribeRun(runId);
     }
 
     private RunEntity loadRunAndCheckPermission(Long userId, Long runId) {

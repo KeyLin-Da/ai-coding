@@ -6,6 +6,7 @@ import com.opp.aidelivery.center.common.error.BusinessException;
 import com.opp.aidelivery.center.config.AiDeliveryCenterProperties;
 import com.opp.aidelivery.center.mapper.ArtifactMapper;
 import com.opp.aidelivery.center.mapper.ArtifactUploadSessionMapper;
+import com.opp.aidelivery.center.mapper.ArtifactGitVersionMapper;
 import com.opp.aidelivery.center.mapper.ArtifactVersionMapper;
 import com.opp.aidelivery.center.mapper.FileObjectMapper;
 import com.opp.aidelivery.center.mapper.RequirementMapper;
@@ -13,6 +14,7 @@ import com.opp.aidelivery.center.model.dto.ArtifactCreateRequest;
 import com.opp.aidelivery.center.model.dto.ArtifactUploadSessionCreateRequest;
 import com.opp.aidelivery.center.model.dto.ArtifactVersionCompleteRequest;
 import com.opp.aidelivery.center.model.entity.ArtifactEntity;
+import com.opp.aidelivery.center.model.entity.ArtifactGitVersionEntity;
 import com.opp.aidelivery.center.model.entity.ArtifactUploadSessionEntity;
 import com.opp.aidelivery.center.model.entity.ArtifactVersionEntity;
 import com.opp.aidelivery.center.model.entity.FileObjectEntity;
@@ -24,6 +26,8 @@ import com.opp.aidelivery.center.model.vo.ArtifactVersionVO;
 import com.opp.aidelivery.center.model.vo.ArtifactVO;
 import com.opp.aidelivery.center.storage.StorageObjectMetadata;
 import com.opp.aidelivery.center.storage.StorageService;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -44,6 +48,7 @@ public class ArtifactService {
     private final ArtifactUploadSessionMapper uploadSessionMapper;
     private final FileObjectMapper fileObjectMapper;
     private final ArtifactVersionMapper artifactVersionMapper;
+    private final ArtifactGitVersionMapper artifactGitVersionMapper;
     private final DomainEventService domainEventService;
 
     @Transactional(rollbackFor = Exception.class)
@@ -111,6 +116,12 @@ public class ArtifactService {
         }
         ArtifactEntity artifact = loadArtifact(session.getArtifactId());
         RequirementEntity requirement = loadRequirementAndCheckPermission(userId, artifact);
+        ArtifactVersionEntity duplicate = findCompletedVersionByHash(artifact.getId(), session.getExpectedSha256());
+        if (duplicate != null) {
+            session.setStatus("COMPLETED");
+            uploadSessionMapper.updateById(session);
+            return toVO(duplicate);
+        }
         assertBaseVersionMatches(artifact, request.getBaseVersionId());
         StorageObjectMetadata metadata = storageService.getObjectMetadata(session.getCosKey());
         assertMetadataMatches(session, metadata);
@@ -129,14 +140,17 @@ public class ArtifactService {
         version.setVersionNo(nextVersionNo(artifact.getId()));
         version.setBaseVersionId(request.getBaseVersionId());
         version.setFileObjectId(fileObject.getId());
-        version.setStatus("CURRENT");
+        version.setContentSha256(session.getExpectedSha256());
+        version.setStatus("LEGACY_COS");
         version.setSourceRunId(request.getSourceRunId());
         version.setCreatedBy(userId);
         artifactVersionMapper.insert(version);
 
-        artifact.setCurrentVersionId(version.getId());
-        if (artifactMapper.updateById(artifact) != 1) {
-            throw new BusinessException(AiDeliveryErrorCode.WORKFLOW_VERSION_CONFLICT, "产物当前版本更新失败");
+        if (artifact.getCurrentVersionId() == null) {
+            artifact.setCurrentVersionId(version.getId());
+            if (artifactMapper.updateById(artifact) != 1) {
+                throw new BusinessException(AiDeliveryErrorCode.WORKFLOW_VERSION_CONFLICT, "产物当前版本更新失败");
+            }
         }
         session.setStatus("COMPLETED");
         uploadSessionMapper.updateById(session);
@@ -147,17 +161,34 @@ public class ArtifactService {
     public List<ArtifactVersionVO> listVersions(Long userId, Long artifactId) {
         ArtifactEntity artifact = loadArtifact(artifactId);
         loadRequirementAndCheckPermission(userId, artifact);
-        return artifactVersionMapper.selectList(new LambdaQueryWrapper<ArtifactVersionEntity>()
+        List<ArtifactVersionVO> versions = new ArrayList<>();
+        versions.addAll(artifactGitVersionMapper.selectList(new LambdaQueryWrapper<ArtifactGitVersionEntity>()
+                .eq(ArtifactGitVersionEntity::getArtifactId, artifactId))
+            .stream()
+            .map(this::toGitVO)
+            .collect(Collectors.toList()));
+        versions.addAll(artifactVersionMapper.selectList(new LambdaQueryWrapper<ArtifactVersionEntity>()
                 .eq(ArtifactVersionEntity::getArtifactId, artifactId)
                 .orderByDesc(ArtifactVersionEntity::getVersionNo))
             .stream()
             .map(this::toVO)
+            .collect(Collectors.toList()));
+        return versions.stream()
+            .sorted(Comparator.comparing(ArtifactVersionVO::getVersionNo, Comparator.nullsLast(Integer::compareTo)).reversed())
             .collect(Collectors.toList());
     }
 
     public ArtifactPreviewUrlVO previewUrl(Long userId, Long artifactId, Long versionId) {
         ArtifactEntity artifact = loadArtifact(artifactId);
         loadRequirementAndCheckPermission(userId, artifact);
+        ArtifactGitVersionEntity gitVersion = artifactGitVersionMapper.selectById(versionId);
+        if (gitVersion != null && artifactId.equals(gitVersion.getArtifactId())) {
+            ArtifactPreviewUrlVO vo = new ArtifactPreviewUrlVO();
+            vo.setSourceType("GIT");
+            vo.setCommitSha(gitVersion.getCommitSha());
+            vo.setFilePath(gitVersion.getFilePath());
+            return vo;
+        }
         ArtifactVersionEntity version = artifactVersionMapper.selectById(versionId);
         if (version == null || !artifactId.equals(version.getArtifactId())) {
             throw new BusinessException(AiDeliveryErrorCode.RESOURCE_NOT_FOUND, "产物版本不存在");
@@ -167,6 +198,7 @@ public class ArtifactService {
             throw new BusinessException(AiDeliveryErrorCode.RESOURCE_NOT_FOUND, "产物文件不存在");
         }
         ArtifactPreviewUrlVO vo = new ArtifactPreviewUrlVO();
+        vo.setSourceType("LEGACY_COS");
         vo.setPreviewUrl(storageService.createPreviewUrl(fileObject.getCosKey(), properties.getCos().getSignedUrlTtl()));
         vo.setExpireAt(LocalDateTime.now().plus(properties.getCos().getSignedUrlTtl()));
         return vo;
@@ -177,6 +209,10 @@ public class ArtifactService {
         loadRequirementAndCheckPermission(userId, artifact);
         if (artifact.getCurrentVersionId() == null) {
             return null;
+        }
+        ArtifactGitVersionEntity gitVersion = artifactGitVersionMapper.selectById(artifact.getCurrentVersionId());
+        if (gitVersion != null && artifactId.equals(gitVersion.getArtifactId())) {
+            return toGitVO(gitVersion);
         }
         ArtifactVersionEntity version = artifactVersionMapper.selectById(artifact.getCurrentVersionId());
         if (version == null) {
@@ -263,13 +299,44 @@ public class ArtifactService {
         vo.setSourceRunId(version.getSourceRunId());
         vo.setCreatedBy(version.getCreatedBy());
         vo.setCreatedAt(version.getCreatedAt());
+        vo.setSourceType("LEGACY_COS");
+        vo.setContentSha256(version.getContentSha256());
         FileObjectEntity fileObject = fileObjectMapper.selectById(version.getFileObjectId());
         if (fileObject != null) {
+            if (vo.getContentSha256() == null) {
+                vo.setContentSha256(fileObject.getSha256());
+            }
             vo.setSha256(fileObject.getSha256());
             vo.setSize(fileObject.getSize());
             vo.setContentType(fileObject.getContentType());
         }
         return vo;
+    }
+
+    private ArtifactVersionVO toGitVO(ArtifactGitVersionEntity version) {
+        ArtifactVersionVO vo = new ArtifactVersionVO();
+        vo.setId(version.getId());
+        vo.setArtifactId(version.getArtifactId());
+        vo.setVersionNo(version.getVersionNo());
+        vo.setStatus(version.getStatus());
+        vo.setSourceRunId(version.getSourceRunId());
+        vo.setCreatedBy(version.getCreatedBy());
+        vo.setCreatedAt(version.getCreatedAt());
+        vo.setSourceType("GIT");
+        vo.setContentSha256(version.getContentSha256());
+        vo.setSha256(version.getContentSha256());
+        vo.setCommitSha(version.getCommitSha());
+        vo.setBlobSha(version.getBlobSha());
+        vo.setFilePath(version.getFilePath());
+        vo.setBaseCommitSha(version.getBaseCommitSha());
+        return vo;
+    }
+
+    private ArtifactVersionEntity findCompletedVersionByHash(Long artifactId, String sha256) {
+        return artifactVersionMapper.selectOne(new LambdaQueryWrapper<ArtifactVersionEntity>()
+            .eq(ArtifactVersionEntity::getArtifactId, artifactId)
+            .eq(ArtifactVersionEntity::getContentSha256, sha256)
+            .last("LIMIT 1"));
     }
 
     private ArtifactVersionConflictVO buildConflict(ArtifactEntity artifact, Long baseVersionId) {
@@ -278,9 +345,14 @@ public class ArtifactService {
         vo.setBaseVersionId(baseVersionId);
         vo.setCurrentVersionId(artifact.getCurrentVersionId());
         if (artifact.getCurrentVersionId() != null) {
-            ArtifactVersionEntity current = artifactVersionMapper.selectById(artifact.getCurrentVersionId());
-            if (current != null) {
-                vo.setCurrentVersion(toVO(current));
+            ArtifactGitVersionEntity gitCurrent = artifactGitVersionMapper.selectById(artifact.getCurrentVersionId());
+            if (gitCurrent != null) {
+                vo.setCurrentVersion(toGitVO(gitCurrent));
+            } else {
+                ArtifactVersionEntity current = artifactVersionMapper.selectById(artifact.getCurrentVersionId());
+                if (current != null) {
+                    vo.setCurrentVersion(toVO(current));
+                }
             }
         }
         return vo;

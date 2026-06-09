@@ -38,6 +38,7 @@ export interface CenterImportConfig {
   centerBaseUrl: string;
   userId: string | number;
   projectId: string | number;
+  accessToken?: string;
   fetchImpl?: typeof fetch;
 }
 
@@ -171,10 +172,7 @@ function contentTypeForPath(filePath: string): string {
 async function postJson(fetcher: typeof fetch, config: CenterImportConfig, urlPath: string, payload: unknown): Promise<any> {
   const response = await fetcher(`${config.centerBaseUrl.replace(/\/+$/, '')}${urlPath}`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-User-Id': String(config.userId)
-    },
+    headers: authHeaders(config),
     body: JSON.stringify(payload)
   });
   const data = await response.json().catch(() => null);
@@ -182,4 +180,11 @@ async function postJson(fetcher: typeof fetch, config: CenterImportConfig, urlPa
     throw new Error(data?.message || `中心服务导入失败: ${response.status}`);
   }
   return data?.data ?? data;
+}
+
+function authHeaders(config: CenterImportConfig): Record<string, string> {
+  return {
+    'Content-Type': 'application/json',
+    ...(config.accessToken ? { Authorization: `Bearer ${config.accessToken}` } : { 'X-User-Id': String(config.userId) })
+  };
 }

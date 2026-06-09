@@ -20,7 +20,9 @@
 - `ad_requirement`、`ad_workflow_stage`、`ad_review`、`ad_issue`: 共享流程、阶段、审核和问题
 - `ad_artifact`、`ad_artifact_version`、`ad_file_object`: 逻辑产物、业务版本和 COS 对象元数据
 - `ad_job`、`ad_run`、`ad_run_event`: Local Runner Job 和共享运行日志
-- `ad_domain_event`、`ad_client_session`: 实时协作事件和在线客户端
+- `ad_domain_event`、`ad_client_session`、`ad_ws_session`: 实时协作事件、桌面客户端和 WebSocket 在线会话
+- `ad_execution_lock`: 人工阶段动作占用
+- `ad_collab_document`、`ad_collab_operation`、`ad_collab_snapshot`: 文本类协同草稿预留模型
 
 `ad_run_event` 和 `ad_domain_event` 需要按月分区或按 `created_at` 做归档，默认事件保留窗口由 `AI_DELIVERY_CENTER_EVENT_RETAINED_WINDOW` 控制。
 
@@ -53,6 +55,12 @@
 | `AI_DELIVERY_CENTER_JOB_MAX_RETRY_TIMES` | Job 最大重试次数 | `3` |
 | `AI_DELIVERY_CENTER_EVENT_RETAINED_WINDOW` | 事件补偿保留窗口 | `7d` |
 | `AI_DELIVERY_CENTER_EVENT_PAGE_SIZE` | 事件补偿分页大小 | `500` |
+| `AI_DELIVERY_CENTER_WEBSOCKET_ENDPOINT` | WebSocket STOMP endpoint | `/api/ai-delivery/ws` |
+| `AI_DELIVERY_CENTER_WEBSOCKET_TICKET_TTL` | WebSocket ticket 有效期 | `2m` |
+| `AI_DELIVERY_CENTER_WEBSOCKET_HEARTBEAT_INTERVAL` | 客户端心跳建议间隔 | `20s` |
+| `AI_DELIVERY_CENTER_WEBSOCKET_SESSION_IDLE_TIMEOUT` | WebSocket session 空闲离线阈值 | `90s` |
+| `AI_DELIVERY_CENTER_WEBSOCKET_BROKER` | 实时事件广播实现：`local` 或 `redis` | `local` |
+| `AI_DELIVERY_CENTER_WEBSOCKET_REDIS_CHANNEL_PREFIX` | Redis Pub/Sub channel 前缀 | `ai-delivery:ws-events` |
 | `AI_DELIVERY_CENTER_JWT_ISSUER` | JWT issuer | `ai-delivery-center` |
 | `AI_DELIVERY_CENTER_JWT_SECRET` | JWT 签名密钥 | `change-me` |
 | `AI_DELIVERY_CENTER_ACCESS_TOKEN_TTL` | Access token 有效期 | `8h` |
@@ -121,17 +129,42 @@ curl http://127.0.0.1:8728/actuator/health
 
 桌面客户端远程模式默认连接 `http://127.0.0.1:8728`，也可以在「设置 / 个人中心」中修改 `centerBaseUrl`。
 
+## WebSocket 实时协作
+
+中心服务使用 WebSocket/STOMP 作为唯一远程实时通道：
+
+- Endpoint: `/api/ai-delivery/ws`
+- Ticket: `POST /api/ai-delivery/ws-tickets`
+- Project subscription: `/app/projects/{projectId}/subscribe`
+- Requirement subscription: `/app/requirements/{requirementPk}/subscribe`
+- Run subscription: `/app/runs/{runId}/subscribe`
+- Ack: `/app/events/ack`
+- Heartbeat: `/app/presence/heartbeat`
+
+客户端断线重连时携带 `lastEventId`，服务端先通过 `ad_domain_event` 补偿缺失事件，再继续推送实时事件。若事件超过 `AI_DELIVERY_CENTER_EVENT_RETAINED_WINDOW`，服务端返回刷新要求，客户端执行全量刷新。
+
+多实例部署时，将 `AI_DELIVERY_CENTER_WEBSOCKET_BROKER` 设为 `redis`。事件会发布到 `ai-delivery:ws-events:{scopeId}` 格式的 Redis channel，各实例只向本机 WebSocket session 投递，客户端按 `eventId` 去重并通过 ack 记录最大已处理事件。
+
 ## 权限与事件
 
 - 所有需求、产物、审核、issue、Job、run event 和 domain event 访问都必须校验用户团队/项目成员关系。
-- SSE 订阅支持 `X-User-Id` header；浏览器 EventSource 无法传自定义 header 时，可临时使用 `userId` query 参数。生产环境应切换为 JWT 或会话 token。
-- `GET /api/ai-delivery/events?projectId=&afterEventId=` 用于断线补偿；事件过期时客户端需要做全量刷新。
-- 多实例部署时，需用 Redis 保存在线会话和 Job 租约。后续如接入 RocketMQ，事件消费者应按 `eventId` 幂等处理。
+- WebSocket 连接使用短期 ticket，订阅项目、需求和 run topic 时继续校验项目成员关系。
+- `GET /api/ai-delivery/events?projectId=&afterEventId=` 用于断线补偿；`/api/ai-delivery/events/subscribe` SSE 入口已废弃。
+- 多实例部署时，需用 Redis Pub/Sub 分发实时事件，并用客户端 `eventId` 去重。后续如接入 RocketMQ，事件消费者仍应按 `eventId` 幂等处理。
+
+## 故障排查
+
+- `B70031`: ticket 缺失、过期或已被错误客户端使用。重新调用 `/ws-tickets` 并确认 `clientSessionId` 属于当前用户。
+- `B70032`: 订阅的 project、requirement 或 run 不属于当前用户可访问项目。检查 `X-User-Id`、`projectId` 和团队成员关系。
+- `B70033`: `lastEventId` 已超过保留窗口。客户端需要刷新列表和详情后重新订阅。
+- `B70034`: 阶段动作被其他客户端占用。等待占用释放、过期，或由持有人主动释放。
+- 连接建立但无事件：确认 `AI_DELIVERY_CENTER_WEBSOCKET_ENDPOINT`、反向代理 WebSocket upgrade、Redis broker 配置和客户端 `ack` 逻辑。
 
 ## 运维检查
 
 - MySQL 表结构已执行 Flyway migration，`ad_*` 表存在。
 - Redis 可用，`ai-delivery:job:{jobId}:lease` 能正常设置过期时间。
+- Redis Pub/Sub 可用；多实例模式下可观察到 `ai-delivery:ws-events:*` channel 消息。
 - COS Bucket region、bucket、SecretId、SecretKey 配置正确，预签名上传/预览 URL 可用。
 - Bucket Versioning 已开启或明确接受只使用业务不可变 key。
 - `AI_DELIVERY_CENTER_JWT_SECRET` 已替换默认值。

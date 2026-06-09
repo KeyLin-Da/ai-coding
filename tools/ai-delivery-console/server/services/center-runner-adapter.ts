@@ -3,8 +3,9 @@ import { validateActionInput } from './action-adapters';
 
 export interface CenterRunnerConfig {
   centerBaseUrl: string;
-  userId: string | number;
+  userId?: string | number;
   clientSessionId: string | number;
+  accessToken?: string;
   fetchImpl?: typeof fetch;
 }
 
@@ -93,10 +94,7 @@ async function postJson(config: CenterRunnerConfig, path: string, payload: unkno
   const baseUrl = config.centerBaseUrl.replace(/\/+$/, '');
   const response = await fetcher(`${baseUrl}${path}`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-User-Id': String(config.userId)
-    },
+    headers: authHeaders(config),
     body: JSON.stringify(payload)
   });
   const data = await response.json().catch(() => null);
@@ -104,4 +102,14 @@ async function postJson(config: CenterRunnerConfig, path: string, payload: unkno
     throw new Error(data?.message || `中心服务请求失败: ${response.status}`);
   }
   return data?.data ?? data;
+}
+
+function authHeaders(config: CenterRunnerConfig): Record<string, string> {
+  if (!config.accessToken && !config.userId) {
+    throw new Error('缺少登录态 accessToken 或迁移期 userId');
+  }
+  return {
+    'Content-Type': 'application/json',
+    ...(config.accessToken ? { Authorization: `Bearer ${config.accessToken}` } : { 'X-User-Id': String(config.userId) })
+  };
 }

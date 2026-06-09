@@ -1,5 +1,6 @@
 package com.opp.aidelivery.center.model.dto;
 
+import java.util.List;
 import javax.validation.constraints.NotBlank;
 import javax.validation.constraints.NotNull;
 import javax.validation.constraints.Size;
@@ -23,4 +24,6 @@ public class RequirementCreateRequest {
 
     @Size(max = 256)
     private String branchName;
+
+    private List<String> projectNames;
 }

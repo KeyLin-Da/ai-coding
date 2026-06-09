@@ -6,8 +6,8 @@ import { createRunId, appendRunEvent } from './run-log';
 import { assertInsideWorkspace, normalizeRequirementId } from './workspace';
 import { getAgentProvider, startAgentInTerminal, startAgentProcess } from './agent-providers';
 import { normalizePrdClarification } from './workflow-repository';
-import { loadSettings } from './project-settings';
 import { hasStagedTrackedChanges, readGitChanges } from './git-changes';
+import { buildArtifactPublishEvents, captureControlledArtifactSnapshot } from './manual-artifact-sharing';
 
 const cliActionMap: Partial<Record<ActionInput['actionType'], string[]>> = {
   OPENSPEC_STATUS: ['openspec', 'status'],
@@ -262,12 +262,18 @@ function isAgentAction(actionType: ActionInput['actionType']): boolean {
   return ['PRD_ANALYZE', 'DESIGN_GENERATE', 'DESIGN_QUESTION', 'OPENSPEC_FF', 'OPENSPEC_APPLY', 'OPENSPEC_VERIFY', 'OPENSPEC_ARCHIVE', 'JUNIT_GENERATE', 'CODE_REVIEW'].includes(actionType);
 }
 
-async function ensureStagedReviewHasChanges(workspaceRoot: string, workflow: RequirementWorkflow, params: Record<string, unknown>, run: RunRecord): Promise<boolean> {
+async function ensureStagedReviewHasChanges(
+  workspaceRoot: string,
+  workflow: RequirementWorkflow,
+  params: Record<string, unknown>,
+  run: RunRecord,
+  projectPaths: string[] = []
+): Promise<boolean> {
   if (run.actionType !== 'CODE_REVIEW' || reviewModeParam(params) !== 'staged') {
     return true;
   }
   try {
-    const summary = await readGitChanges(workspaceRoot, workflow.projects || [], workflow.branchName);
+    const summary = await readGitChanges(workspaceRoot, workflow.projects || [], workflow.branchName, projectPaths);
     if (hasStagedTrackedChanges(summary)) {
       return true;
     }
@@ -375,7 +381,8 @@ export async function executeAction(
   workspaceRoot: string,
   workflow: RequirementWorkflow,
   action: ActionInput,
-  onRunUpdate: (run: RunRecord) => Promise<void> = async () => undefined
+  onRunUpdate: (run: RunRecord) => Promise<void> = async () => undefined,
+  options: { projectPaths?: string[] } = {}
 ): Promise<RunRecord> {
   const normalizedAction =
     action.actionType === 'DESIGN_QUESTION' && !asString(action.params?.outputPath)
@@ -402,6 +409,17 @@ export async function executeAction(
     params,
     executionMode: executionMode(params)
   };
+  const artifactSnapshot = await captureControlledArtifactSnapshot(workspaceRoot, workflow);
+
+  async function appendChangedArtifactEvents(updatedRun: RunRecord): Promise<void> {
+    if (!['SUCCEEDED', 'FAILED', 'CANCELLED', 'COMPLETED'].includes(updatedRun.status)) {
+      return;
+    }
+    const artifactEvents = await buildArtifactPublishEvents(workspaceRoot, workflow, updatedRun, artifactSnapshot);
+    for (const event of artifactEvents) {
+      await appendRunEvent(workspaceRoot, workflow.requirementId, updatedRun.id, event);
+    }
+  }
 
   await appendRunEvent(workspaceRoot, workflow.requirementId, runId, {
     type: 'START',
@@ -417,6 +435,7 @@ export async function executeAction(
       level: 'INFO',
       message: '本地状态动作已完成'
     });
+    await appendChangedArtifactEvents(run);
     return run;
   }
 
@@ -445,6 +464,7 @@ export async function executeAction(
       message: result.status === 'SUCCEEDED' ? 'OpenSpec 命令执行完成' : 'OpenSpec 命令执行失败',
       data: { output: result.output, error: result.error }
     });
+    await appendChangedArtifactEvents(run);
     return run;
   }
 
@@ -455,7 +475,8 @@ export async function executeAction(
     return run;
   }
 
-  if (!(await ensureStagedReviewHasChanges(workspaceRoot, workflow, params, run))) {
+  const projectPaths = options.projectPaths || [];
+  if (!(await ensureStagedReviewHasChanges(workspaceRoot, workflow, params, run, projectPaths))) {
     return run;
   }
 
@@ -478,10 +499,13 @@ export async function executeAction(
     return run;
   }
 
-  const settings = await loadSettings(workspaceRoot);
+  const onRunUpdateWithArtifacts = async (updatedRun: RunRecord) => {
+    await appendChangedArtifactEvents(updatedRun);
+    await onRunUpdate(updatedRun);
+  };
   return ['TERMINAL', 'INTERACTIVE_TERMINAL'].includes(executionMode(params))
-    ? startAgentInTerminal(workspaceRoot, workflow, run, provider, commandText, settings.projectPaths)
-    : startAgentProcess(workspaceRoot, workflow, run, provider, commandText, onRunUpdate, settings.projectPaths);
+    ? startAgentInTerminal(workspaceRoot, workflow, run, provider, commandText, projectPaths)
+    : startAgentProcess(workspaceRoot, workflow, run, provider, commandText, onRunUpdateWithArtifacts, projectPaths);
 }
 
 export const internalForTests = {

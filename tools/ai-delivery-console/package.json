@@ -9,6 +9,8 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 5178",
     "server:dev": "tsx watch server/index.ts",
+    "bootstrap:plan": "tsx server/bootstrap-import.ts --plan",
+    "bootstrap:import": "tsx server/bootstrap-import.ts",
     "desktop:dev": "electron electron/main.cjs",
     "desktop:build": "npm run build && electron-builder",
     "build": "vite build",

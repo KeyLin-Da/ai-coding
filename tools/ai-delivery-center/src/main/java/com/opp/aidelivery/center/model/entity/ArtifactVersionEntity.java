@@ -13,6 +13,7 @@ public class ArtifactVersionEntity extends BaseEntity {
     private Integer versionNo;
     private Long baseVersionId;
     private Long fileObjectId;
+    private String contentSha256;
     private String status;
     private Long sourceRunId;
     private Long createdBy;

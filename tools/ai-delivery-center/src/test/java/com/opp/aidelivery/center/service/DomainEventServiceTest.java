@@ -23,6 +23,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @ExtendWith(MockitoExtension.class)
@@ -32,6 +33,8 @@ class DomainEventServiceTest {
     private DomainEventRepository domainEventRepository;
     @Mock
     private RealtimeEventBroker realtimeEventBroker;
+    @Mock
+    private ObjectProvider<RealtimeEventBroker> realtimeEventBrokerProvider;
 
     private AiDeliveryCenterProperties properties;
     private DomainEventService domainEventService;
@@ -41,8 +44,9 @@ class DomainEventServiceTest {
         properties = new AiDeliveryCenterProperties();
         properties.getEvent().setRetainedWindow(Duration.ofDays(7));
         properties.getEvent().setPageSize(100);
-        domainEventService = new DomainEventService(properties, domainEventRepository, realtimeEventBroker);
+        domainEventService = new DomainEventService(properties, domainEventRepository, realtimeEventBrokerProvider);
         lenient().when(domainEventRepository.save(any(DomainEventEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        lenient().when(realtimeEventBrokerProvider.getIfAvailable()).thenReturn(realtimeEventBroker);
     }
 
     @AfterEach

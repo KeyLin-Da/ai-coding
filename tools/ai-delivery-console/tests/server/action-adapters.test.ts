@@ -300,6 +300,41 @@ describe('action-adapters', () => {
     expect(run.error).toContain('暂存区没有已暂存文件');
     expect(events.some((event) => event.message.includes('暂存区没有已暂存文件'))).toBe(true);
   });
+
+  it('staged 模式代码评审使用当前用户项目私有工程目录做 Git 预检查', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-review-'));
+    const projectParent = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-projects-'));
+    const projectRoot = path.join(projectParent, 'opp-learn');
+    await fs.mkdir(path.join(projectRoot, 'src'), { recursive: true });
+    await git(projectRoot, ['init']);
+    await fs.writeFile(path.join(projectRoot, 'src', 'a.txt'), 'old\n', 'utf8');
+    await git(projectRoot, ['add', '.']);
+    await git(projectRoot, ['-c', 'user.email=test@example.com', '-c', 'user.name=Test', 'commit', '-m', 'init']);
+    await fs.writeFile(path.join(projectRoot, 'src', 'a.txt'), 'old\nnew\n', 'utf8');
+    await git(projectRoot, ['add', 'src/a.txt']);
+    const item = {
+      ...workflow(),
+      projects: [{ name: 'opp-learn', path: 'opp-learn' }]
+    };
+
+    const run = await executeAction(
+      root,
+      item,
+      {
+        actionType: 'CODE_REVIEW',
+        params: {
+          reviewMode: 'staged',
+          agentId: 'missing-agent'
+        }
+      },
+      async () => undefined,
+      { projectPaths: [projectParent] }
+    );
+
+    expect(run.status).toBe('WAITING_FOR_AGENT');
+    expect(run.error).toBeUndefined();
+    expect(run.commandText).toContain('p=opp-learn');
+  });
 });
 
 describe('agent-providers', () => {

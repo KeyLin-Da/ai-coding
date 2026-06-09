@@ -15,7 +15,13 @@ public class ArtifactVersionVO {
     private Long sourceRunId;
     private Long createdBy;
     private LocalDateTime createdAt;
+    private String sourceType;
+    private String contentSha256;
     private String sha256;
     private Long size;
     private String contentType;
+    private String commitSha;
+    private String blobSha;
+    private String filePath;
+    private String baseCommitSha;
 }

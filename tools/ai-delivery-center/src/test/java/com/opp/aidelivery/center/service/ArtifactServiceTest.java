@@ -15,6 +15,7 @@ import com.opp.aidelivery.center.common.error.BusinessException;
 import com.opp.aidelivery.center.config.AiDeliveryCenterProperties;
 import com.opp.aidelivery.center.mapper.ArtifactMapper;
 import com.opp.aidelivery.center.mapper.ArtifactUploadSessionMapper;
+import com.opp.aidelivery.center.mapper.ArtifactGitVersionMapper;
 import com.opp.aidelivery.center.mapper.ArtifactVersionMapper;
 import com.opp.aidelivery.center.mapper.FileObjectMapper;
 import com.opp.aidelivery.center.mapper.RequirementMapper;
@@ -61,6 +62,8 @@ class ArtifactServiceTest {
     @Mock
     private ArtifactVersionMapper artifactVersionMapper;
     @Mock
+    private ArtifactGitVersionMapper artifactGitVersionMapper;
+    @Mock
     private DomainEventService domainEventService;
 
     private AiDeliveryCenterProperties properties;
@@ -80,6 +83,7 @@ class ArtifactServiceTest {
             uploadSessionMapper,
             fileObjectMapper,
             artifactVersionMapper,
+            artifactGitVersionMapper,
             domainEventService
         );
     }
@@ -110,12 +114,12 @@ class ArtifactServiceTest {
 
     @Test
     void completeUploadCreatesFileVersionCurrentPointerAndDomainEvent() {
-        ArtifactUploadSessionEntity session = session(400L);
+        ArtifactUploadSessionEntity session = session(null);
         ArtifactVersionEntity previous = version(400L, 1, 500L);
         AtomicReference<FileObjectEntity> insertedFile = new AtomicReference<>();
 
         when(uploadSessionMapper.selectById(300L)).thenReturn(session);
-        when(artifactMapper.selectById(200L)).thenReturn(artifact(400L));
+        when(artifactMapper.selectById(200L)).thenReturn(artifact(null));
         when(requirementMapper.selectById(100L)).thenReturn(requirement());
         when(storageService.getObjectMetadata("cos/key.md")).thenReturn(new StorageObjectMetadata(HASH, 1024L, "text/markdown", "cos-version-1"));
         when(artifactVersionMapper.selectList(any())).thenReturn(Collections.singletonList(previous));
@@ -133,10 +137,11 @@ class ArtifactServiceTest {
         }).when(artifactVersionMapper).insert(any(ArtifactVersionEntity.class));
         when(artifactMapper.updateById(any(ArtifactEntity.class))).thenReturn(1);
 
-        ArtifactVersionVO result = artifactService.completeUpload(1L, completeRequest(400L));
+        ArtifactVersionVO result = artifactService.completeUpload(1L, completeRequest(null));
 
         assertThat(result.getId()).isEqualTo(401L);
         assertThat(result.getVersionNo()).isEqualTo(2);
+        assertThat(result.getSourceType()).isEqualTo("LEGACY_COS");
         assertThat(result.getSha256()).isEqualTo(HASH);
         assertThat(result.getSize()).isEqualTo(1024L);
         verify(uploadSessionMapper).updateById(session);
@@ -144,6 +149,27 @@ class ArtifactServiceTest {
         verify(artifactMapper).updateById(artifactCaptor.capture());
         assertThat(artifactCaptor.getValue().getCurrentVersionId()).isEqualTo(401L);
         verify(domainEventService).publishAfterCommit(eq(10L), eq("artifact.version.created"), eq("ARTIFACT"), eq(200L), anyString());
+    }
+
+    @Test
+    void completeUploadReturnsExistingVersionWhenContentHashAlreadyImported() {
+        // 验证初始化导入重复执行时，同一 artifact + hash 不会创建新版本。
+        ArtifactUploadSessionEntity session = session(null);
+        ArtifactVersionEntity existing = version(450L, 3, 550L);
+        existing.setContentSha256(HASH);
+        when(uploadSessionMapper.selectById(300L)).thenReturn(session);
+        when(artifactMapper.selectById(200L)).thenReturn(artifact(450L));
+        when(requirementMapper.selectById(100L)).thenReturn(requirement());
+        when(artifactVersionMapper.selectOne(any())).thenReturn(existing);
+        when(fileObjectMapper.selectById(550L)).thenReturn(fileObject(550L));
+
+        ArtifactVersionVO result = artifactService.completeUpload(1L, completeRequest(null));
+
+        assertThat(result.getId()).isEqualTo(450L);
+        assertThat(result.getContentSha256()).isEqualTo(HASH);
+        verify(fileObjectMapper, never()).insert(any());
+        verify(artifactVersionMapper, never()).insert(any());
+        verify(artifactMapper, never()).updateById(any());
     }
 
     @Test

@@ -5,6 +5,8 @@ import com.qcloud.cos.COSClient;
 import com.qcloud.cos.http.HttpMethodName;
 import com.qcloud.cos.model.GeneratePresignedUrlRequest;
 import com.qcloud.cos.model.ObjectMetadata;
+import com.qcloud.cos.model.PutObjectRequest;
+import java.io.ByteArrayInputStream;
 import java.time.Duration;
 import java.util.Date;
 import lombok.RequiredArgsConstructor;
@@ -47,6 +49,25 @@ public class CosStorageService implements StorageService {
         ObjectMetadata metadata = cosClient.getObjectMetadata(properties.getCos().getBucket(), objectKey);
         String sha256 = metadata.getUserMetaDataOf(SHA256_META_KEY);
         return new StorageObjectMetadata(sha256, metadata.getContentLength(), metadata.getContentType(), null);
+    }
+
+    @Override
+    public void putObject(String objectKey, byte[] content, String contentType, String sha256) {
+        ObjectMetadata metadata = new ObjectMetadata();
+        metadata.setContentLength(content.length);
+        metadata.setContentType(contentType);
+        metadata.addUserMetadata(SHA256_META_KEY, sha256);
+        cosClient.putObject(new PutObjectRequest(
+            properties.getCos().getBucket(),
+            objectKey,
+            new ByteArrayInputStream(content),
+            metadata
+        ));
+    }
+
+    @Override
+    public void deleteObject(String objectKey) {
+        cosClient.deleteObject(properties.getCos().getBucket(), objectKey);
     }
 
     private Date expiration(Duration ttl) {

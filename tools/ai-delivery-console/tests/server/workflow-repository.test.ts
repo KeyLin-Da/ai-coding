@@ -4,7 +4,6 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { WorkflowRepository } from '../../server/services/workflow-repository';
 import { readProjectHistory } from '../../server/services/project-history';
-import { saveSettings } from '../../server/services/project-settings';
 
 async function tmpWorkspace() {
   return fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-repo-'));
@@ -116,14 +115,13 @@ describe('WorkflowRepository', () => {
     const workspace = await tmpWorkspace();
     const projectParent = await tmpWorkspace();
     await fs.mkdir(path.join(projectParent, 'opp-api'), { recursive: true });
-    await saveSettings(workspace, { projectPaths: [projectParent] });
     const repository = new WorkflowRepository(workspace);
 
     const workflow = await repository.upsert({
       requirementId: '172014',
       title: '定位菜单',
       projects: [{ name: 'opp-api', path: 'opp-api' }]
-    });
+    }, [projectParent]);
 
     expect(workflow.projects).toEqual([{ name: 'opp-api', path: path.join(projectParent, 'opp-api') }]);
   });

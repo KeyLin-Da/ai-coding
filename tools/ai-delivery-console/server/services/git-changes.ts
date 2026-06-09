@@ -1,7 +1,6 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import type { GitChangeSummary, GitChangedFile, GitProjectChangeSummary, GitStageUntrackedInput, WorkflowProject } from '../../shared/workflow';
-import { loadSettings } from './project-settings';
 import { resolveWorkflowProject } from './project-resolver';
 
 const maxDiffLength = 120_000;
@@ -170,12 +169,16 @@ async function readProjectGitChanges(
   }
 }
 
-export async function readGitChanges(workspaceRoot: string, projects: WorkflowProject[] = [], expectedBranch?: string): Promise<GitChangeSummary> {
+export async function readGitChanges(
+  workspaceRoot: string,
+  projects: WorkflowProject[] = [],
+  expectedBranch?: string,
+  projectPaths: string[] = []
+): Promise<GitChangeSummary> {
   if (!projects.length) {
     throw new Error('请先维护涉及工程，再查看变更文件及代码');
   }
-  const settings = await loadSettings(workspaceRoot);
-  const projectSummaries = await Promise.all(projects.map((project) => readProjectGitChanges(workspaceRoot, project, expectedBranch, settings.projectPaths)));
+  const projectSummaries = await Promise.all(projects.map((project) => readProjectGitChanges(workspaceRoot, project, expectedBranch, projectPaths)));
   const files = projectSummaries.flatMap((summary) =>
     summary.files.map((file) => ({
       ...file,
@@ -204,7 +207,8 @@ export async function stageUntrackedFiles(
   workspaceRoot: string,
   projects: WorkflowProject[] = [],
   expectedBranch: string | undefined,
-  input: GitStageUntrackedInput
+  input: GitStageUntrackedInput,
+  projectPaths: string[] = []
 ): Promise<GitChangeSummary> {
   if (!projects.length) {
     throw new Error('请先维护涉及工程，再确认待确认新文件');
@@ -218,8 +222,7 @@ export async function stageUntrackedFiles(
     throw new Error('请至少选择一个待确认新文件');
   }
 
-  const settings = await loadSettings(workspaceRoot);
-  const resolvedProjects = await Promise.all(projects.map((project) => resolveWorkflowProject(workspaceRoot, project, settings.projectPaths)));
+  const resolvedProjects = await Promise.all(projects.map((project) => resolveWorkflowProject(workspaceRoot, project, projectPaths)));
   const selected = resolvedProjects.find(
     (item) => item.project.path === projectPath || item.project.name === projectPath || item.project.path === projectPath.replace(/\\/g, '/')
   );
@@ -235,7 +238,7 @@ export async function stageUntrackedFiles(
   }
 
   await runGit(selected.rootPath, ['add', '--', ...files]);
-  return readGitChanges(workspaceRoot, projects, expectedBranch);
+  return readGitChanges(workspaceRoot, projects, expectedBranch, projectPaths);
 }
 
 export function hasStagedTrackedChanges(summary: GitChangeSummary): boolean {

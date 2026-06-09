@@ -13,10 +13,17 @@ import { applyReview, refreshCodeReviewIssues, returnToImplementation } from './
 import { cancelAgentRun, listAgentProviders, refreshTerminalRunStatuses } from './services/agent-providers';
 import { normalizeOpenSpecChangeName, readOpenSpecSummary, updateOpenSpecTaskStatus } from './services/openspec-summary';
 import { readGitChanges, stageUntrackedFiles } from './services/git-changes';
+import { buildArtifactGitSyncPlan, confirmArtifactGitSync, type ArtifactGitSyncConfirmInput, type ArtifactGitSyncPlanInput } from './services/artifact-git-sync';
 import { readProjectHistory, listProjectsFromConfiguredPaths } from './services/project-history';
-import { loadSettings, saveSettings, validateSettings } from './services/project-settings';
+import { assertProjectPathsConfigured, loadPrivateProjectSettings, loadSettings, saveSettings, validateSettings } from './services/project-settings';
+import { parseLocalRequestContext, type LocalRequestContext } from './services/local-request-context';
+import { generateLocalGitCredential, regenerateLocalGitCredential, type LocalGitCredentialGenerateInput } from './services/local-git-credentials';
+import { cloneProjectRepository, commitAndPushProjectRepository, inspectProjectRepository, resolveProjectRepoPath, syncProjectRepository } from './services/project-repository';
+import { syncCodingSkills } from './services/skill-sync';
 import { deleteTechDesignQuestionRecord, type DeleteTechDesignQuestionInput } from './services/tech-design-questions';
-import { buildCenterImportPlan, importPlanToCenter, type CenterImportConfig } from './services/center-importer';
+import { buildBootstrapImportPlan, importBootstrapPlan, type BootstrapImportConfig } from './services/bootstrap-importer';
+import { listCenterRequirementWorkflows, loadCenterRequirementWorkflow, mergeRequirementWorkflow } from './services/requirement-workflow-view';
+import { assertRequirementWorkspaceWritable, reportRequirementWorkspaceState, requirementNotMaterializedMessage } from './services/requirement-workspace-state';
 import {
   assertAllowedPrdSourceFile,
   deletePrdSourceFileSnapshot,
@@ -158,7 +165,7 @@ function send(response: ServerResponse, status: number, body: unknown): void {
   response.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type,Authorization,X-User-Id,X-Project-Id,X-Client-Session-Id,X-Center-Base-Url,X-AI-Delivery-Center-Base-Url,X-Runner-Base-Url',
     'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
   });
   response.end(JSON.stringify(body));
@@ -169,7 +176,76 @@ function match(pathname: string, pattern: RegExp): RegExpMatchArray | null {
 }
 
 export function createRouter(workspaceRoot: string) {
-  const repository = new WorkflowRepository(workspaceRoot);
+  const fallbackRepository = new WorkflowRepository(workspaceRoot);
+
+  async function loadCurrentProjectPaths(context: LocalRequestContext, required = false): Promise<string[]> {
+    const settings = await loadPrivateProjectSettings(context);
+    if (required) {
+      assertProjectPathsConfigured(settings);
+    }
+    return settings.projectPaths;
+  }
+
+  async function resolveArtifactRoot(context: LocalRequestContext, required = false): Promise<string> {
+    try {
+      return (await resolveProjectRepoPath(context)).repoPath;
+    } catch (error) {
+      if (required) {
+        throw error;
+      }
+      return workspaceRoot;
+    }
+  }
+
+  async function resolveWorkflowStore(context: LocalRequestContext, required = false): Promise<{ root: string; repository: WorkflowRepository }> {
+    const root = await resolveArtifactRoot(context, required);
+    return {
+      root,
+      repository: root === workspaceRoot ? fallbackRepository : new WorkflowRepository(root)
+    };
+  }
+
+  async function loadMergedWorkflow(context: LocalRequestContext, requirementId: string, requiredRoot = false): Promise<{
+    root: string;
+    repository: WorkflowRepository;
+    workflow: RequirementWorkflow | null;
+  }> {
+    const store = await resolveWorkflowStore(context, requiredRoot);
+    const localWorkflow = await store.repository.load(requirementId);
+    const centerWorkflow = await loadCenterRequirementWorkflow(context, requirementId).catch(() => null);
+    const workflow = centerWorkflow ? mergeRequirementWorkflow(centerWorkflow, localWorkflow) : localWorkflow;
+    return {
+      ...store,
+      workflow
+    };
+  }
+
+  async function saveWithArtifacts(
+    root: string,
+    repository: WorkflowRepository,
+    workflow: RequirementWorkflow
+  ): Promise<RequirementWorkflow> {
+    const artifacts = await scanRequirementArtifacts(
+      root,
+      workflow.requirementId,
+      workflow.branchName,
+      workflow.stages.IMPLEMENTATION.changeName,
+      workflow.requirementType
+    );
+    return repository.save({
+      ...workflow,
+      artifacts
+    });
+  }
+
+  async function assertWritableWorkflow(context: LocalRequestContext, workflow: RequirementWorkflow): Promise<void> {
+    await assertRequirementWorkspaceWritable(context, workflow);
+  }
+
+  function requirementIdFromArtifactPath(filePath: string): string | undefined {
+    const normalized = String(filePath || '').replace(/\\/g, '/');
+    return normalized.match(/^docs\/([^/]+)\//)?.[1];
+  }
 
   return async function router(request: IncomingMessage, response: ServerResponse): Promise<void> {
     if (request.method === 'OPTIONS') {
@@ -180,6 +256,12 @@ export function createRouter(workspaceRoot: string) {
     try {
       const url = new URL(request.url || '/', 'http://localhost');
       const pathname = url.pathname;
+      const requestContext = parseLocalRequestContext(request, url);
+
+      if (request.method === 'GET' && pathname === '/api/ai-delivery/health') {
+        send(response, 200, { data: { status: 'UP', timestamp: new Date().toISOString() } });
+        return;
+      }
 
       if (request.method === 'GET' && pathname === '/api/ai-delivery/agents') {
         send(response, 200, { data: await listAgentProviders() });
@@ -187,12 +269,55 @@ export function createRouter(workspaceRoot: string) {
       }
 
       if (request.method === 'GET' && pathname === '/api/ai-delivery/project-history') {
-        send(response, 200, { data: await readProjectHistory(workspaceRoot) });
+        send(response, 200, { data: await readProjectHistory(workspaceRoot, await loadCurrentProjectPaths(requestContext)) });
         return;
       }
 
       if (request.method === 'GET' && pathname === '/api/ai-delivery/projects') {
-        send(response, 200, { data: await listProjectsFromConfiguredPaths(workspaceRoot) });
+        send(response, 200, { data: await listProjectsFromConfiguredPaths(workspaceRoot, await loadCurrentProjectPaths(requestContext)) });
+        return;
+      }
+
+      if (request.method === 'POST' && pathname === '/api/ai-delivery/git-credentials/generate-local') {
+        const input = await parseBody<LocalGitCredentialGenerateInput>(request);
+        send(response, 200, { data: await generateLocalGitCredential(requestContext, input) });
+        return;
+      }
+
+      const regenerateGitCredentialMatch = match(pathname, /^\/api\/ai-delivery\/git-credentials\/([^/]+)\/regenerate-local$/);
+      if (request.method === 'POST' && regenerateGitCredentialMatch) {
+        const input = await parseBody<LocalGitCredentialGenerateInput>(request);
+        send(response, 200, { data: await regenerateLocalGitCredential(requestContext, regenerateGitCredentialMatch[1], input) });
+        return;
+      }
+
+      const projectRepositoryCloneMatch = match(pathname, /^\/api\/ai-delivery\/projects\/([^/]+)\/repository\/clone$/);
+      if (request.method === 'POST' && projectRepositoryCloneMatch) {
+        const state = await cloneProjectRepository({ ...requestContext, projectId: projectRepositoryCloneMatch[1] });
+        await syncCodingSkills(workspaceRoot, state.localRepoPath);
+        send(response, 200, { data: state });
+        return;
+      }
+
+      const projectRepositoryPushMatch = match(pathname, /^\/api\/ai-delivery\/projects\/([^/]+)\/repository\/push$/);
+      if (request.method === 'POST' && projectRepositoryPushMatch) {
+        const input = await parseBody<{ message?: string }>(request);
+        const state = await commitAndPushProjectRepository({ ...requestContext, projectId: projectRepositoryPushMatch[1] }, input);
+        send(response, 200, { data: state });
+        return;
+      }
+
+      const projectRepositorySyncMatch = match(pathname, /^\/api\/ai-delivery\/projects\/([^/]+)\/repository\/sync$/);
+      if (request.method === 'POST' && projectRepositorySyncMatch) {
+        const state = await syncProjectRepository({ ...requestContext, projectId: projectRepositorySyncMatch[1] });
+        await syncCodingSkills(workspaceRoot, state.localRepoPath);
+        send(response, 200, { data: state });
+        return;
+      }
+
+      const projectRepositoryStatusMatch = match(pathname, /^\/api\/ai-delivery\/projects\/([^/]+)\/repository\/status$/);
+      if (request.method === 'GET' && projectRepositoryStatusMatch) {
+        send(response, 200, { data: await inspectProjectRepository({ ...requestContext, projectId: projectRepositoryStatusMatch[1] }) });
         return;
       }
 
@@ -202,18 +327,28 @@ export function createRouter(workspaceRoot: string) {
       }
 
       if (request.method === 'GET' && pathname === '/api/ai-delivery/migration/plan') {
-        send(response, 200, { data: await buildCenterImportPlan(workspaceRoot, await repository.list()) });
+        send(response, 200, { data: await buildBootstrapImportPlan(workspaceRoot) });
         return;
       }
 
       if (request.method === 'POST' && pathname === '/api/ai-delivery/migration/import') {
-        const input = await parseBody<CenterImportConfig & { dryRun?: boolean }>(request);
-        const plan = await buildCenterImportPlan(workspaceRoot, await repository.list());
+        const input = await parseBody<BootstrapImportConfig & { dryRun?: boolean }>(request);
+        const plan = await buildBootstrapImportPlan(workspaceRoot);
         if (input.dryRun) {
           send(response, 200, { data: plan });
           return;
         }
-        send(response, 200, { data: await importPlanToCenter(plan, input) });
+        send(response, 200, {
+          data: await importBootstrapPlan(plan, {
+            ...input,
+            centerBaseUrl: input.centerBaseUrl || requestContext.centerBaseUrl || 'http://127.0.0.1:8728',
+            projectId: input.projectId || requestContext.projectId || '',
+            clientSessionId: input.clientSessionId || requestContext.clientSessionId,
+            userId: input.userId || requestContext.userId,
+            accessToken: input.accessToken || requestContext.accessToken,
+            workspaceRoot
+          })
+        });
         return;
       }
 
@@ -229,63 +364,75 @@ export function createRouter(workspaceRoot: string) {
       }
 
       if (request.method === 'GET' && pathname === '/api/ai-delivery/requirements') {
-        const workflows = await Promise.all(
-          (await repository.list()).map(async (workflow) => {
-            const refreshed = await refreshTerminalRunStatuses(workspaceRoot, workflow);
-            return refreshed.changed ? repository.save(refreshed.workflow) : refreshed.workflow;
-          })
-        );
+        const { root, repository } = await resolveWorkflowStore(requestContext);
+        let workflows: RequirementWorkflow[];
+        try {
+          const centerWorkflows = await listCenterRequirementWorkflows(requestContext);
+          workflows = await Promise.all(centerWorkflows.map(async (centerWorkflow) => {
+            const localWorkflow = await repository.load(centerWorkflow.requirementId);
+            const merged = mergeRequirementWorkflow(centerWorkflow, localWorkflow);
+            if (!localWorkflow) {
+              return merged;
+            }
+            const refreshed = await refreshTerminalRunStatuses(root, merged);
+            return saveWithArtifacts(root, repository, refreshed.workflow);
+          }));
+        } catch {
+          workflows = await repository.list();
+        }
         send(response, 200, { data: workflows });
         return;
       }
 
       if (request.method === 'POST' && pathname === '/api/ai-delivery/requirements') {
         const input = await parseBody<RequirementInput>(request);
-        let workflow = await repository.upsert(input);
-        workflow.artifacts = await scanRequirementArtifacts(
-          workspaceRoot,
-          workflow.requirementId,
-          workflow.branchName,
-          workflow.stages.IMPLEMENTATION.changeName,
-          workflow.requirementType
-        );
-        workflow = await repository.save(workflow);
+        const projectPaths = input.projects?.length ? await loadCurrentProjectPaths(requestContext, true) : [];
+        const { root, repository } = await resolveWorkflowStore(requestContext);
+        let workflow = await repository.upsert(input, projectPaths);
+        workflow = await saveWithArtifacts(root, repository, workflow);
+        await reportRequirementWorkspaceState(requestContext, workflow).catch(() => undefined);
         send(response, 200, { data: workflow });
         return;
       }
 
       const requirementMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)$/);
       if (request.method === 'GET' && requirementMatch) {
-        let workflow = await repository.load(requirementMatch[1]);
+        const store = await resolveWorkflowStore(requestContext);
+        const localWorkflow = await store.repository.load(requirementMatch[1]);
+        const centerWorkflow = await loadCenterRequirementWorkflow(requestContext, requirementMatch[1]).catch(() => null);
+        if (centerWorkflow && !localWorkflow && store.root !== workspaceRoot) {
+          const repoState = await inspectProjectRepository(requestContext).catch(() => undefined);
+          const message = repoState?.syncStatus === 'NOT_CLONED'
+            ? '项目产物仓尚未 clone，请先点击右上角“同步Git仓”初始化本地仓库'
+            : repoState?.syncStatus === 'BEHIND_REMOTE'
+              ? '本地项目产物仓落后远端，请先点击右上角“同步Git仓”拉取最新提交'
+              : requirementNotMaterializedMessage(centerWorkflow.requirementId);
+          send(response, 409, { message, code: 'REQUIREMENT_ARTIFACTS_NOT_SYNCED' });
+          return;
+        }
+        let workflow = centerWorkflow ? mergeRequirementWorkflow(centerWorkflow, localWorkflow) : localWorkflow;
         if (!workflow) {
           send(response, 404, { message: '需求不存在' });
           return;
         }
-        const refreshed = await refreshTerminalRunStatuses(workspaceRoot, workflow);
+        await reportRequirementWorkspaceState(requestContext, workflow).catch(() => undefined);
+        const refreshed = await refreshTerminalRunStatuses(store.root, workflow);
         workflow = refreshed.workflow;
-        // 扫描并更新产物索引
-        workflow.artifacts = await scanRequirementArtifacts(
-          workspaceRoot,
-          workflow.requirementId,
-          workflow.branchName,
-          workflow.stages.IMPLEMENTATION.changeName,
-          workflow.requirementType
-        );
-        workflow = await repository.save(workflow);
+        workflow = await saveWithArtifacts(store.root, store.repository, workflow);
         send(response, 200, { data: workflow });
         return;
       }
 
       const openSpecSummaryMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/openspec-summary$/);
       if (request.method === 'GET' && openSpecSummaryMatch) {
-        const workflow = await repository.load(openSpecSummaryMatch[1]);
+        const { root, workflow } = await loadMergedWorkflow(requestContext, openSpecSummaryMatch[1]);
         if (!workflow) {
           send(response, 404, { message: '需求不存在' });
           return;
         }
         const fallbackChangeName = workflow.stages.IMPLEMENTATION.changeName || `req-${workflow.requirementId}`;
         const changeName = normalizeOpenSpecChangeName(url.searchParams.get('changeName') || fallbackChangeName, fallbackChangeName);
-        send(response, 200, { data: await readOpenSpecSummary(workspaceRoot, changeName, fallbackChangeName) });
+        send(response, 200, { data: await readOpenSpecSummary(root, changeName, fallbackChangeName) });
         return;
       }
 
@@ -293,7 +440,8 @@ export function createRouter(workspaceRoot: string) {
       if (request.method === 'POST' && openSpecTaskMatch) {
         const requirementId = openSpecTaskMatch[1];
         const input = await parseBody<{ changeName?: string; line: number; completed: boolean; raw?: string }>(request);
-        const lock = new WorkflowLock(workspaceRoot, requirementId);
+        const { root, repository } = await resolveWorkflowStore(requestContext, true);
+        const lock = new WorkflowLock(root, requirementId);
         await lock.acquire();
         try {
           const workflow = await repository.load(requirementId);
@@ -301,11 +449,12 @@ export function createRouter(workspaceRoot: string) {
             send(response, 404, { message: '需求不存在' });
             return;
           }
+          await assertWritableWorkflow(requestContext, workflow);
           const fallbackChangeName = workflow.stages.IMPLEMENTATION.changeName || `req-${workflow.requirementId}`;
           const changeName = normalizeOpenSpecChangeName(input.changeName || fallbackChangeName, fallbackChangeName);
-          send(response, 200, {
-            data: await updateOpenSpecTaskStatus(workspaceRoot, changeName, fallbackChangeName, Number(input.line), Boolean(input.completed), input.raw)
-          });
+          const summary = await updateOpenSpecTaskStatus(root, changeName, fallbackChangeName, Number(input.line), Boolean(input.completed), input.raw);
+          await reportRequirementWorkspaceState(requestContext, workflow).catch(() => undefined);
+          send(response, 200, { data: summary });
         } finally {
           await lock.release();
         }
@@ -314,24 +463,53 @@ export function createRouter(workspaceRoot: string) {
 
       const gitChangesMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/git-changes$/);
       if (request.method === 'GET' && gitChangesMatch) {
-        const workflow = await repository.load(gitChangesMatch[1]);
+        const { root, workflow } = await loadMergedWorkflow(requestContext, gitChangesMatch[1]);
         if (!workflow) {
           send(response, 404, { message: '需求不存在' });
           return;
         }
-        send(response, 200, { data: await readGitChanges(workspaceRoot, workflow.projects || [], workflow.branchName) });
+        send(response, 200, { data: await readGitChanges(root, workflow.projects || [], workflow.branchName, await loadCurrentProjectPaths(requestContext, true)) });
+        return;
+      }
+
+      const artifactGitSyncPlanMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/artifact-git-syncs\/plan$/);
+      if (request.method === 'POST' && artifactGitSyncPlanMatch) {
+        const { workflow } = await loadMergedWorkflow(requestContext, artifactGitSyncPlanMatch[1], true);
+        if (!workflow) {
+          send(response, 404, { message: '需求不存在' });
+          return;
+        }
+        await assertWritableWorkflow(requestContext, workflow);
+        const input = await parseBody<ArtifactGitSyncPlanInput>(request);
+        send(response, 200, { data: await buildArtifactGitSyncPlan(requestContext, workflow, input) });
+        return;
+      }
+
+      const artifactGitSyncConfirmMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/artifact-git-syncs\/confirm$/);
+      if (request.method === 'POST' && artifactGitSyncConfirmMatch) {
+        const { workflow } = await loadMergedWorkflow(requestContext, artifactGitSyncConfirmMatch[1], true);
+        if (!workflow) {
+          send(response, 404, { message: '需求不存在' });
+          return;
+        }
+        await assertWritableWorkflow(requestContext, workflow);
+        const input = await parseBody<ArtifactGitSyncConfirmInput>(request);
+        const result = await confirmArtifactGitSync(requestContext, workflow, input);
+        await reportRequirementWorkspaceState(requestContext, workflow).catch(() => undefined);
+        send(response, 200, { data: result });
         return;
       }
 
       const stageUntrackedMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/git-changes\/stage-untracked$/);
       if (request.method === 'POST' && stageUntrackedMatch) {
-        const workflow = await repository.load(stageUntrackedMatch[1]);
+        const { root, workflow } = await loadMergedWorkflow(requestContext, stageUntrackedMatch[1]);
         if (!workflow) {
           send(response, 404, { message: '需求不存在' });
           return;
         }
+        await assertWritableWorkflow(requestContext, workflow);
         const input = await parseBody<GitStageUntrackedInput>(request);
-        send(response, 200, { data: await stageUntrackedFiles(workspaceRoot, workflow.projects || [], workflow.branchName, input) });
+        send(response, 200, { data: await stageUntrackedFiles(root, workflow.projects || [], workflow.branchName, input, await loadCurrentProjectPaths(requestContext, true)) });
         return;
       }
 
@@ -343,18 +521,20 @@ export function createRouter(workspaceRoot: string) {
           send(response, 400, { message: '请至少选择一个 PRD 来源文件' });
           return;
         }
-        const lock = new WorkflowLock(workspaceRoot, requirementId);
+        const { root, repository } = await resolveWorkflowStore(requestContext, true);
+        const lock = new WorkflowLock(root, requirementId);
         await lock.acquire();
         try {
-          let workflow = await repository.load(requirementId);
+          let workflow = (await loadMergedWorkflow(requestContext, requirementId, true)).workflow;
           if (!workflow) {
             send(response, 404, { message: '需求不存在' });
             return;
           }
+          await assertWritableWorkflow(requestContext, workflow);
           files.forEach(assertAllowedPrdSourceFile);
           const snapshots: PrdSourceFile[] = [];
           for (const file of files) {
-            snapshots.push(await savePrdSourceFileSnapshot(workspaceRoot, workflow.requirementId, file));
+            snapshots.push(await savePrdSourceFileSnapshot(root, workflow.requirementId, file));
           }
           const sources = new Set([...workflow.sources, ...snapshots.map((file) => file.path)]);
           workflow = await repository.save({
@@ -362,6 +542,7 @@ export function createRouter(workspaceRoot: string) {
             prdSourceFiles: [...(workflow.prdSourceFiles || []), ...snapshots],
             sources: [...sources]
           });
+          await reportRequirementWorkspaceState(requestContext, workflow).catch(() => undefined);
           send(response, 200, { data: workflow });
         } finally {
           await lock.release();
@@ -373,15 +554,18 @@ export function createRouter(workspaceRoot: string) {
       if (request.method === 'DELETE' && prdFileDeleteMatch) {
         const requirementId = prdFileDeleteMatch[1];
         const fileId = decodeURIComponent(prdFileDeleteMatch[2]);
-        const lock = new WorkflowLock(workspaceRoot, requirementId);
+        const { root, repository } = await resolveWorkflowStore(requestContext, true);
+        const lock = new WorkflowLock(root, requirementId);
         await lock.acquire();
         try {
-          let workflow = await repository.load(requirementId);
+          let workflow = (await loadMergedWorkflow(requestContext, requirementId, true)).workflow;
           if (!workflow) {
             send(response, 404, { message: '需求不存在' });
             return;
           }
-          workflow = await repository.save(await deletePrdSourceFileSnapshot(workspaceRoot, workflow, fileId));
+          await assertWritableWorkflow(requestContext, workflow);
+          workflow = await repository.save(await deletePrdSourceFileSnapshot(root, workflow, fileId));
+          await reportRequirementWorkspaceState(requestContext, workflow).catch(() => undefined);
           send(response, 200, { data: workflow });
         } finally {
           await lock.release();
@@ -397,33 +581,27 @@ export function createRouter(workspaceRoot: string) {
           send(response, 400, { message: '请至少选择一个技术方案补充材料' });
           return;
         }
-        const lock = new WorkflowLock(workspaceRoot, requirementId);
+        const { root, repository } = await resolveWorkflowStore(requestContext, true);
+        const lock = new WorkflowLock(root, requirementId);
         await lock.acquire();
         try {
-          let workflow = await repository.load(requirementId);
+          let workflow = (await loadMergedWorkflow(requestContext, requirementId, true)).workflow;
           if (!workflow) {
             send(response, 404, { message: '需求不存在' });
             return;
           }
+          await assertWritableWorkflow(requestContext, workflow);
           files.forEach(assertAllowedPrdSourceFile);
           const snapshots: TechDesignSourceFile[] = [];
           for (const file of files) {
-            snapshots.push(await saveTechDesignSourceFileSnapshot(workspaceRoot, workflow.requirementId, file));
+            snapshots.push(await saveTechDesignSourceFileSnapshot(root, workflow.requirementId, file));
           }
           const nextWorkflow = {
             ...workflow,
             techDesignSourceFiles: [...(workflow.techDesignSourceFiles || []), ...snapshots]
           };
-          workflow = await repository.save({
-            ...nextWorkflow,
-            artifacts: await scanRequirementArtifacts(
-              workspaceRoot,
-              nextWorkflow.requirementId,
-              nextWorkflow.branchName,
-              nextWorkflow.stages.IMPLEMENTATION.changeName,
-              nextWorkflow.requirementType
-            )
-          });
+          workflow = await saveWithArtifacts(root, repository, nextWorkflow);
+          await reportRequirementWorkspaceState(requestContext, workflow).catch(() => undefined);
           send(response, 200, { data: workflow });
         } finally {
           await lock.release();
@@ -435,25 +613,19 @@ export function createRouter(workspaceRoot: string) {
       if (request.method === 'DELETE' && techDesignFileDeleteMatch) {
         const requirementId = techDesignFileDeleteMatch[1];
         const fileId = decodeURIComponent(techDesignFileDeleteMatch[2]);
-        const lock = new WorkflowLock(workspaceRoot, requirementId);
+        const { root, repository } = await resolveWorkflowStore(requestContext, true);
+        const lock = new WorkflowLock(root, requirementId);
         await lock.acquire();
         try {
-          let workflow = await repository.load(requirementId);
+          let workflow = (await loadMergedWorkflow(requestContext, requirementId, true)).workflow;
           if (!workflow) {
             send(response, 404, { message: '需求不存在' });
             return;
           }
-          const nextWorkflow = await deleteTechDesignSourceFileSnapshot(workspaceRoot, workflow, fileId);
-          workflow = await repository.save({
-            ...nextWorkflow,
-            artifacts: await scanRequirementArtifacts(
-              workspaceRoot,
-              nextWorkflow.requirementId,
-              nextWorkflow.branchName,
-              nextWorkflow.stages.IMPLEMENTATION.changeName,
-              nextWorkflow.requirementType
-            )
-          });
+          await assertWritableWorkflow(requestContext, workflow);
+          const nextWorkflow = await deleteTechDesignSourceFileSnapshot(root, workflow, fileId);
+          workflow = await saveWithArtifacts(root, repository, nextWorkflow);
+          await reportRequirementWorkspaceState(requestContext, workflow).catch(() => undefined);
           send(response, 200, { data: workflow });
         } finally {
           await lock.release();
@@ -465,25 +637,19 @@ export function createRouter(workspaceRoot: string) {
       if (request.method === 'DELETE' && techDesignQuestionDeleteMatch) {
         const requirementId = techDesignQuestionDeleteMatch[1];
         const input = await parseBody<DeleteTechDesignQuestionInput>(request);
-        const lock = new WorkflowLock(workspaceRoot, requirementId);
+        const { root, repository } = await resolveWorkflowStore(requestContext, true);
+        const lock = new WorkflowLock(root, requirementId);
         await lock.acquire();
         try {
-          let workflow = await repository.load(requirementId);
+          let workflow = (await loadMergedWorkflow(requestContext, requirementId, true)).workflow;
           if (!workflow) {
             send(response, 404, { message: '需求不存在' });
             return;
           }
-          const nextWorkflow = await deleteTechDesignQuestionRecord(workspaceRoot, workflow, input);
-          workflow = await repository.save({
-            ...nextWorkflow,
-            artifacts: await scanRequirementArtifacts(
-              workspaceRoot,
-              nextWorkflow.requirementId,
-              nextWorkflow.branchName,
-              nextWorkflow.stages.IMPLEMENTATION.changeName,
-              nextWorkflow.requirementType
-            )
-          });
+          await assertWritableWorkflow(requestContext, workflow);
+          const nextWorkflow = await deleteTechDesignQuestionRecord(root, workflow, input);
+          workflow = await saveWithArtifacts(root, repository, nextWorkflow);
+          await reportRequirementWorkspaceState(requestContext, workflow).catch(() => undefined);
           send(response, 200, { data: workflow });
         } finally {
           await lock.release();
@@ -499,14 +665,16 @@ export function createRouter(workspaceRoot: string) {
           send(response, 400, { message: '手动复制执行方式请使用命令预览接口' });
           return;
         }
-        const lock = new WorkflowLock(workspaceRoot, requirementId);
+        const { root, repository } = await resolveWorkflowStore(requestContext, true);
+        const lock = new WorkflowLock(root, requirementId);
         await lock.acquire();
         try {
-          let workflow = await repository.load(requirementId);
+          let workflow = (await loadMergedWorkflow(requestContext, requirementId, true)).workflow;
           if (!workflow) {
             send(response, 404, { message: '需求不存在' });
             return;
           }
+          await assertWritableWorkflow(requestContext, workflow);
           if (action.actionType === 'PRD_ANALYZE') {
             const params = action.params || {};
             const sources = Array.isArray(params.sources)
@@ -541,7 +709,8 @@ export function createRouter(workspaceRoot: string) {
               }
             };
           }
-          const run = await executeAction(workspaceRoot, workflow, action, async (updatedRun) => {
+          const projectPaths = workflow.projects?.length ? await loadCurrentProjectPaths(requestContext, true) : [];
+          const run = await executeAction(root, workflow, action, async (updatedRun) => {
             const latest = await repository.load(requirementId);
             if (!latest) {
               return;
@@ -553,12 +722,12 @@ export function createRouter(workspaceRoot: string) {
               latest.runs.unshift(updatedRun);
             }
             await repository.save(latest);
-          });
+          }, { projectPaths });
           
           const stage = run.stage || stageForAction(action.actionType);
           if (stage) {
             await appendStageCommandLog(
-              workspaceRoot,
+              root,
               requirementId,
               stage,
               run.commandText || action.actionType,
@@ -575,7 +744,7 @@ export function createRouter(workspaceRoot: string) {
           workflow = applyImplementationRun(workflow, run);
           if (action.actionType === 'REFRESH_ARTIFACTS') {
             workflow.artifacts = await scanRequirementArtifacts(
-              workspaceRoot,
+              root,
               workflow.requirementId,
               workflow.branchName,
               workflow.stages.IMPLEMENTATION.changeName,
@@ -585,7 +754,7 @@ export function createRouter(workspaceRoot: string) {
           // PRD分析、技术方案生成等可能产生产物的操作，执行完成后自动刷新产物索引
           if (['PRD_ANALYZE', 'DESIGN_GENERATE', 'DESIGN_QUESTION', 'OPENSPEC_NEW_CHANGE', 'OPENSPEC_ARCHIVE'].includes(action.actionType)) {
             workflow.artifacts = await scanRequirementArtifacts(
-              workspaceRoot,
+              root,
               workflow.requirementId,
               workflow.branchName,
               workflow.stages.IMPLEMENTATION.changeName,
@@ -593,10 +762,11 @@ export function createRouter(workspaceRoot: string) {
             );
           }
           if (action.actionType === 'RETURN_TO_IMPLEMENTATION') {
-            const issues = await refreshCodeReviewIssues(workspaceRoot, workflow);
+            const issues = await refreshCodeReviewIssues(root, workflow);
             workflow = returnToImplementation(workflow, issues);
           }
           workflow = await repository.save(workflow);
+          await reportRequirementWorkspaceState(requestContext, workflow).catch(() => undefined);
           send(response, 200, { data: { run, workflow } });
         } finally {
           await lock.release();
@@ -608,12 +778,13 @@ export function createRouter(workspaceRoot: string) {
       if (request.method === 'POST' && actionCommandMatch) {
         const requirementId = actionCommandMatch[1];
         const action = await parseBody<ActionInput>(request);
-        let workflow = await repository.load(requirementId);
+        const { root, workflow: loadedWorkflow } = await loadMergedWorkflow(requestContext, requirementId, true);
+        let workflow = loadedWorkflow;
         if (!workflow) {
           send(response, 404, { message: '需求不存在' });
           return;
         }
-        validateActionInput(workspaceRoot, action);
+        validateActionInput(root, action);
         const params = action.params || {};
         if (action.actionType === 'DESIGN_GENERATE') {
           workflow = {
@@ -642,9 +813,9 @@ export function createRouter(workspaceRoot: string) {
       const runMatch = match(pathname, /^\/api\/ai-delivery\/runs\/([^/]+)\/events$/);
       if (request.method === 'GET' && runMatch) {
         const requirementId = url.searchParams.get('requirementId') || '';
-        const workflow = await repository.load(requirementId);
+        const { root, workflow } = await loadMergedWorkflow(requestContext, requirementId);
         const run = workflow?.runs.find((item) => item.id === runMatch[1]);
-        send(response, 200, { data: await readRunEventsWithTranscript(workspaceRoot, requirementId, runMatch[1], run?.terminalTranscriptPath) });
+        send(response, 200, { data: await readRunEventsWithTranscript(root, requirementId, runMatch[1], run?.terminalTranscriptPath) });
         return;
       }
 
@@ -658,10 +829,11 @@ export function createRouter(workspaceRoot: string) {
           'Access-Control-Allow-Origin': '*'
         });
         const tailOnly = url.searchParams.get('tail') === '1';
-        let sent = tailOnly ? (await readRunEvents(workspaceRoot, requirementId, runStreamMatch[1])).length : 0;
+        const { root, repository } = await resolveWorkflowStore(requestContext);
+        let sent = tailOnly ? (await readRunEvents(root, requirementId, runStreamMatch[1])).length : 0;
         const initialWorkflow = await repository.load(requirementId);
         const initialRun = initialWorkflow?.runs.find((item) => item.id === runStreamMatch[1]);
-        let transcriptOffset = tailOnly ? await readTerminalTranscriptSize(workspaceRoot, initialRun?.terminalTranscriptPath) : 0;
+        let transcriptOffset = tailOnly ? await readTerminalTranscriptSize(root, initialRun?.terminalTranscriptPath) : 0;
         let interval: NodeJS.Timeout | undefined;
         let closed = false;
         const push = async () => {
@@ -670,16 +842,16 @@ export function createRouter(workspaceRoot: string) {
           }
           let workflow = await repository.load(requirementId);
           if (workflow) {
-            const refreshed = await refreshTerminalRunStatuses(workspaceRoot, workflow);
+            const refreshed = await refreshTerminalRunStatuses(root, workflow);
             workflow = refreshed.changed ? await repository.save(refreshed.workflow) : refreshed.workflow;
           }
           const run = workflow?.runs.find((item) => item.id === runStreamMatch[1]);
-          const events = await readRunEvents(workspaceRoot, requirementId, runStreamMatch[1]);
+          const events = await readRunEvents(root, requirementId, runStreamMatch[1]);
           for (const event of events.slice(sent)) {
             response.write(`data: ${JSON.stringify(event)}\n\n`);
           }
           sent = events.length;
-          const transcript = await readTerminalTranscriptChunk(workspaceRoot, run?.terminalTranscriptPath, transcriptOffset);
+          const transcript = await readTerminalTranscriptChunk(root, run?.terminalTranscriptPath, transcriptOffset);
           transcriptOffset = transcript.nextOffset;
           if (transcript.event) {
             response.write(`data: ${JSON.stringify(transcript.event)}\n\n`);
@@ -708,7 +880,8 @@ export function createRouter(workspaceRoot: string) {
       const cancelMatch = match(pathname, /^\/api\/ai-delivery\/runs\/([^/]+)\/cancel$/);
       if (request.method === 'POST' && cancelMatch) {
         const body = await parseBody<{ requirementId: string }>(request);
-        const cancelled = await cancelAgentRun(workspaceRoot, body.requirementId, cancelMatch[1]);
+        const { root, repository } = await resolveWorkflowStore(requestContext);
+        const cancelled = await cancelAgentRun(root, body.requirementId, cancelMatch[1]);
         const workflow = await repository.load(body.requirementId);
         if (workflow) {
           const run = workflow.runs.find((item) => item.id === cancelMatch[1]);
@@ -728,7 +901,7 @@ export function createRouter(workspaceRoot: string) {
           send(response, 400, { message: '缺少 path 参数' });
           return;
         }
-        send(response, 200, { data: await readArtifact(workspaceRoot, filePath) });
+        send(response, 200, { data: await readArtifact(await resolveArtifactRoot(requestContext, true), filePath) });
         return;
       }
 
@@ -743,10 +916,11 @@ export function createRouter(workspaceRoot: string) {
         try {
           const fs = await import('node:fs/promises');
           const pathModule = await import('node:path');
-          const absolutePath = pathModule.resolve(workspaceRoot, filePath);
+          const artifactRoot = await resolveArtifactRoot(requestContext, true);
+          const absolutePath = pathModule.resolve(artifactRoot, filePath);
           
           // 安全检查：确保文件在工作区内
-          if (!absolutePath.startsWith(workspaceRoot)) {
+          if (!absolutePath.startsWith(artifactRoot)) {
             response.writeHead(403, { 'Content-Type': 'application/json' });
             response.end(JSON.stringify({ message: '不允许访问工作区外的文件' }));
             return;
@@ -792,23 +966,37 @@ export function createRouter(workspaceRoot: string) {
 
       if (request.method === 'POST' && pathname === '/api/ai-delivery/artifacts') {
         const body = await parseBody<{ path: string; content: string; expectedHash?: string }>(request);
-        send(response, 200, { data: await saveArtifact(workspaceRoot, body.path, body.content, body.expectedHash) });
+        const requirementId = requirementIdFromArtifactPath(body.path);
+        let workflowForPath: RequirementWorkflow | undefined;
+        if (requirementId) {
+          workflowForPath = (await loadMergedWorkflow(requestContext, requirementId, true)).workflow || undefined;
+          if (workflowForPath) {
+            await assertWritableWorkflow(requestContext, workflowForPath);
+          }
+        }
+        const result = await saveArtifact(await resolveArtifactRoot(requestContext, true), body.path, body.content, body.expectedHash);
+        if (workflowForPath) {
+          await reportRequirementWorkspaceState(requestContext, workflowForPath).catch(() => undefined);
+        }
+        send(response, 200, { data: result });
         return;
       }
 
       if (request.method === 'POST' && pathname === '/api/ai-delivery/reviews') {
         const input = await parseBody<ReviewInput>(request);
-        const lock = new WorkflowLock(workspaceRoot, input.requirementId);
+        const { root, repository } = await resolveWorkflowStore(requestContext, true);
+        const lock = new WorkflowLock(root, input.requirementId);
         await lock.acquire();
         try {
-          let workflow = await repository.load(input.requirementId);
+          let workflow = (await loadMergedWorkflow(requestContext, input.requirementId, true)).workflow;
           if (!workflow) {
             send(response, 404, { message: '需求不存在' });
             return;
           }
-          workflow = await applyReview(workspaceRoot, workflow, input);
+          await assertWritableWorkflow(requestContext, workflow);
+          workflow = await applyReview(root, workflow, input);
           if (input.stage === 'CODE_REVIEW') {
-            workflow.issues = await refreshCodeReviewIssues(workspaceRoot, workflow);
+            workflow.issues = await refreshCodeReviewIssues(root, workflow);
           }
           workflow = await repository.save(workflow);
           send(response, 200, { data: workflow });
@@ -820,8 +1008,13 @@ export function createRouter(workspaceRoot: string) {
 
       send(response, 404, { message: '接口不存在' });
     } catch (error: any) {
-      const status = error.code === 'ARTIFACT_CONFLICT' ? 409 : 500;
-      send(response, status, { message: error.message || '服务异常', data: error.currentHash ? { currentHash: error.currentHash } : undefined });
+      const conflictCodes = new Set(['ARTIFACT_CONFLICT', 'B70075', 'REQUIREMENT_ARTIFACTS_NOT_SYNCED']);
+      const status = conflictCodes.has(error.code) ? 409 : 500;
+      send(response, status, {
+        message: error.message || '服务异常',
+        code: error.code,
+        data: error.data ?? (error.currentHash ? { currentHash: error.currentHash } : undefined)
+      });
     }
   };
 }

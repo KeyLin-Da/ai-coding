@@ -2,7 +2,10 @@
   <aside class="workspace-band artifact-sidebar">
     <div class="toolbar">
       <strong>产物</strong>
-      <el-button :icon="Refresh" size="small" @click="$emit('refresh')">刷新</el-button>
+      <div class="sidebar-actions">
+        <el-button :icon="Upload" size="small" @click="$emit('public-sync')">公开同步</el-button>
+        <el-button :icon="Refresh" size="small" @click="$emit('refresh')">刷新</el-button>
+      </div>
     </div>
     <div class="sidebar-section">
       <el-empty v-if="!artifactGroups.length" description="暂无文件产物" />
@@ -43,7 +46,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import { Document, Refresh } from '@element-plus/icons-vue';
+import { Document, Refresh, Upload } from '@element-plus/icons-vue';
 import type { ArtifactRef, RequirementWorkflow, ReviewIssue } from '@shared/workflow';
 import { stageLabels, workflowStagesForWorkflow, type WorkflowStage } from '@shared/workflow';
 
@@ -56,6 +59,7 @@ const props = defineProps<{
 defineEmits<{
   (event: 'refresh'): void;
   (event: 'select', artifact: ArtifactRef): void;
+  (event: 'public-sync'): void;
 }>();
 
 const artifactGroups = computed(() =>
@@ -93,6 +97,12 @@ function versionText(artifact: ArtifactRef): string {
 .sidebar-section {
   padding: 12px;
   border-bottom: 1px solid #e3e8f2;
+}
+
+.sidebar-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
 }
 
 .artifact-group {

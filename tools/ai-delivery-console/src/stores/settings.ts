@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
-import { apiClient } from '@/api/client';
 import { setApiRuntimeConfig } from '@/api/runtime';
+import { apiClient } from '@/api/client';
 import {
   defaultDesktopLocalConfig,
   detectDesktopOs,
@@ -10,6 +10,16 @@ import {
   type DesktopOsType
 } from '@/services/desktop-local-config';
 import { createDesktopDiagnostics, type DesktopDiagnosticItem } from '@/services/platform-terminal';
+
+/** 向中心服务注册客户端会话，返回服务端分配的 clientSessionId */
+async function registerClientSession(): Promise<string | undefined> {
+  const osType = detectDesktopOs();
+  const result = await apiClient.registerClientSession({
+    osType,
+    capabilities: ['DESKTOP']
+  });
+  return String(result.id);
+}
 
 interface SettingsState {
   projectPaths: string[];
@@ -35,21 +45,32 @@ export const useSettingsStore = defineStore('settings', {
         this.osType = detectDesktopOs();
         this.applyRuntime();
         this.runDiagnostics();
-        if (this.desktopConfig.apiMode === 'remote') {
-          this.projectPaths = Array.from(new Set(this.desktopConfig.workspaceMappings.map((item) => item.localPath).filter(Boolean)));
-        } else {
-          const settings = await apiClient.getSettings();
-          this.projectPaths = settings.projectPaths;
-        }
+        this.projectPaths = Array.from(new Set(this.desktopConfig.workspaceMappings.map((item) => item.localPath).filter(Boolean)));
       } finally {
         this.loading = false;
+      }
+    },
+    /** 用户认证后调用，确保 clientSessionId 已注册到中心服务 */
+    async ensureClientSessionId() {
+      if (this.desktopConfig.clientSessionId) {
+        return;
+      }
+      try {
+        const sessionId = await registerClientSession();
+        if (sessionId) {
+          this.desktopConfig.clientSessionId = sessionId;
+          this.desktopConfig = await saveDesktopLocalConfig(this.desktopConfig);
+          this.applyRuntime();
+          this.runDiagnostics();
+        }
+      } catch (e) {
+        console.warn('[Settings] 注册客户端会话失败:', e);
       }
     },
     async save(projectPaths: string[]) {
       this.loading = true;
       try {
-        const settings = await apiClient.saveSettings(projectPaths);
-        this.projectPaths = settings.projectPaths;
+        this.projectPaths = projectPaths;
       } finally {
         this.loading = false;
       }
@@ -66,9 +87,10 @@ export const useSettingsStore = defineStore('settings', {
     },
     applyRuntime() {
       setApiRuntimeConfig({
-        mode: this.desktopConfig.apiMode,
         centerBaseUrl: this.desktopConfig.centerBaseUrl,
+        runnerBaseUrl: this.desktopConfig.runnerBaseUrl,
         userId: this.desktopConfig.userId,
+        clientSessionId: this.desktopConfig.clientSessionId,
         projectId: this.desktopConfig.projectId
       });
     },

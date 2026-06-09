@@ -2,9 +2,11 @@ package com.opp.aidelivery.center.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.opp.aidelivery.center.mapper.RequirementMapper;
+import com.opp.aidelivery.center.mapper.RequirementProjectMapper;
 import com.opp.aidelivery.center.mapper.WorkflowStageMapper;
 import com.opp.aidelivery.center.model.dto.RequirementCreateRequest;
 import com.opp.aidelivery.center.model.entity.RequirementEntity;
+import com.opp.aidelivery.center.model.entity.RequirementProjectEntity;
 import com.opp.aidelivery.center.model.entity.WorkflowStageEntity;
 import com.opp.aidelivery.center.model.vo.RequirementVO;
 import com.opp.aidelivery.center.model.vo.WorkflowStageVO;
@@ -24,11 +26,26 @@ public class RequirementService {
 
     private final PermissionService permissionService;
     private final RequirementMapper requirementMapper;
+    private final RequirementProjectMapper requirementProjectMapper;
     private final WorkflowStageMapper workflowStageMapper;
 
     @Transactional(rollbackFor = Exception.class)
     public RequirementVO create(Long userId, RequirementCreateRequest request) {
         permissionService.assertProjectMember(userId, request.getProjectId());
+
+        RequirementEntity existing = requirementMapper.selectOne(new LambdaQueryWrapper<RequirementEntity>()
+            .eq(RequirementEntity::getProjectId, request.getProjectId())
+            .eq(RequirementEntity::getRequirementId, request.getRequirementId())
+            .last("LIMIT 1"));
+
+        if (existing != null) {
+            existing.setTitle(request.getTitle());
+            existing.setBranchName(defaultBranchName(request));
+            requirementMapper.updateById(existing);
+            replaceProjects(existing.getId(), request.getProjectNames());
+            return get(userId, request.getProjectId(), request.getRequirementId());
+        }
+
         RequirementEntity requirement = new RequirementEntity();
         requirement.setProjectId(request.getProjectId());
         requirement.setRequirementId(request.getRequirementId());
@@ -40,6 +57,8 @@ public class RequirementService {
         requirement.setVersion(0L);
         requirement.setCreatedBy(userId);
         requirementMapper.insert(requirement);
+
+        saveProjects(requirement.getId(), request.getProjectNames());
 
         for (String stage : STAGES) {
             WorkflowStageEntity entity = new WorkflowStageEntity();
@@ -57,7 +76,7 @@ public class RequirementService {
         List<RequirementEntity> requirements = requirementMapper.selectList(new LambdaQueryWrapper<RequirementEntity>()
             .eq(RequirementEntity::getProjectId, projectId)
             .orderByDesc(RequirementEntity::getUpdatedAt));
-        return requirements.stream().map(this::toVOWithStages).collect(Collectors.toList());
+        return requirements.stream().map(this::toVOWithStagesAndProjects).collect(Collectors.toList());
     }
 
     public RequirementVO get(Long userId, Long projectId, String requirementId) {
@@ -69,7 +88,41 @@ public class RequirementService {
         if (requirement == null) {
             return null;
         }
-        return toVOWithStages(requirement);
+        return toVOWithStagesAndProjects(requirement);
+    }
+
+    private void saveProjects(Long requirementPk, List<String> projectNames) {
+        if (projectNames == null || projectNames.isEmpty()) {
+            return;
+        }
+        for (String name : projectNames) {
+            if (name == null || name.trim().isEmpty()) {
+                continue;
+            }
+            RequirementProjectEntity entity = new RequirementProjectEntity();
+            entity.setRequirementPk(requirementPk);
+            entity.setProjectName(name.trim());
+            requirementProjectMapper.insert(entity);
+        }
+    }
+
+    private void replaceProjects(Long requirementPk, List<String> projectNames) {
+        requirementProjectMapper.delete(new LambdaQueryWrapper<RequirementProjectEntity>()
+            .eq(RequirementProjectEntity::getRequirementPk, requirementPk));
+        saveProjects(requirementPk, projectNames);
+    }
+
+    private List<String> loadProjectNames(Long requirementPk) {
+        List<RequirementProjectEntity> entities = requirementProjectMapper.selectList(
+            new LambdaQueryWrapper<RequirementProjectEntity>()
+                .eq(RequirementProjectEntity::getRequirementPk, requirementPk));
+        return entities.stream().map(RequirementProjectEntity::getProjectName).collect(Collectors.toList());
+    }
+
+    private RequirementVO toVOWithStagesAndProjects(RequirementEntity requirement) {
+        RequirementVO vo = toVOWithStages(requirement);
+        vo.setProjectNames(loadProjectNames(requirement.getId()));
+        return vo;
     }
 
     private RequirementVO toVOWithStages(RequirementEntity requirement) {
