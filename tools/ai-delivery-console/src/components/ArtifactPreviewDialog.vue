@@ -37,6 +37,7 @@ import { CopyDocument, Download } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import type { ArtifactRef } from '@shared/workflow';
 import { apiClient } from '@/api/client';
+import { artifactReadUrl, rewriteMarkdownImageSources } from '@/utils/markdown-assets';
 
 const visible = ref(false);
 const loading = ref(false);
@@ -80,7 +81,7 @@ const extension = computed(() => {
   return dotIndex >= 0 ? path.slice(dotIndex).toLowerCase() : '';
 });
 
-const artifactUrl = computed(() => (artifact.value ? `/api/artifacts/read?path=${encodeURIComponent(artifact.value.path)}` : ''));
+const artifactUrl = computed(() => (artifact.value ? artifactReadUrl(artifact.value.path) : ''));
 const isMarkdown = computed(() => artifact.value?.kind === 'markdown' || ['.md', '.markdown'].includes(extension.value));
 const isHtml = computed(() => artifact.value?.kind === 'html' || extension.value === '.html');
 const isPdf = computed(() => extension.value === '.pdf');
@@ -88,17 +89,7 @@ const isImage = computed(() => ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'
 
 const previewHtml = computed(() => {
   const rendered = md.render(content.value || '');
-  if (!artifact.value?.path) {
-    return rendered;
-  }
-  const basePath = artifact.value.path.substring(0, artifact.value.path.lastIndexOf('/'));
-  return rendered.replace(/<img([^>]*)src="([^"]+)"([^>]*)>/g, (match, before, src, after) => {
-    if (!src.startsWith('http://') && !src.startsWith('https://') && !src.startsWith('data:')) {
-      const fullPath = `${basePath}/${src}`;
-      return `<img${before}src="/api/artifacts/read?path=${encodeURIComponent(fullPath)}"${after}>`;
-    }
-    return match;
-  });
+  return rewriteMarkdownImageSources(rendered, artifact.value?.path);
 });
 
 const formattedContent = computed(() => {

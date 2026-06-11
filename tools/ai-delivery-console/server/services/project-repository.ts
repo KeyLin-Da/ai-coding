@@ -40,6 +40,17 @@ export interface GitCommandOptions {
   privateKeyPath?: string;
 }
 
+function projectRepoBlockedError(message: string): Error & { code?: string } {
+  const error = new Error(message) as Error & { code?: string };
+  error.code = 'B70075';
+  return error;
+}
+
+function isUntrackedOverwriteError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error || '');
+  return /untracked working tree files would be overwritten|would be overwritten by merge|would be overwritten by checkout/i.test(message);
+}
+
 function toSshUrl(url: string): string {
   if (url.startsWith('git@')) {
     return url;
@@ -182,20 +193,34 @@ export async function syncProjectRepository(context: LocalRequestContext): Promi
 
   const options = await credentialOptions(context, project);
   const targetBranch = repository.defaultBranch || 'master';
-  const status = (await runGit(repoPath, ['status', '--porcelain', '--untracked-files=all'])).trim();
-  if (status) {
+  const trackedStatus = (await runGit(repoPath, ['status', '--porcelain', '--untracked-files=no'])).trim();
+  if (trackedStatus) {
     const state = await inspectProjectRepository(context);
-    throw new Error(state.syncStatus === 'BEHIND_REMOTE'
-      ? '项目产物仓存在本地未提交变更且落后远端，请先公开同步或清理本地变更'
-      : '项目产物仓存在本地未提交变更，请先公开同步或清理后再同步Git仓');
+    throw projectRepoBlockedError(state.syncStatus === 'BEHIND_REMOTE'
+      ? '项目产物仓存在已跟踪文件的本地修改且落后远端，请先公开同步或清理本地变更'
+      : '项目产物仓存在已跟踪文件的本地修改，请先公开同步或清理后再同步Git仓');
   }
 
   await runGit(repoPath, ['fetch', 'origin', targetBranch], options);
   const currentBranch = (await runGit(repoPath, ['branch', '--show-current'])).trim();
   if (currentBranch !== targetBranch) {
-    await runGit(repoPath, ['checkout', targetBranch], options);
+    try {
+      await runGit(repoPath, ['checkout', targetBranch], options);
+    } catch (error) {
+      if (isUntrackedOverwriteError(error)) {
+        throw projectRepoBlockedError('项目产物仓存在会被远端覆盖的未跟踪文件，请先公开同步或清理后再同步Git仓');
+      }
+      throw error;
+    }
   }
-  await runGit(repoPath, ['pull', '--ff-only', 'origin', targetBranch], options);
+  try {
+    await runGit(repoPath, ['pull', '--ff-only', 'origin', targetBranch], options);
+  } catch (error) {
+    if (isUntrackedOverwriteError(error)) {
+      throw projectRepoBlockedError('项目产物仓存在会被远端覆盖的未跟踪文件，请先公开同步或清理后再同步Git仓');
+    }
+    throw error;
+  }
   return inspectProjectRepository(context);
 }
 

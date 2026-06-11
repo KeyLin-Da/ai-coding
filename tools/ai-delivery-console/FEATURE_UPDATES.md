@@ -25,7 +25,7 @@
 
 ### 目录结构
 ```
-docs/{requirementId}/workflow/logs/
+<deliveryWorkspaceRoot>/.ai-delivery/runtime/{project}/requirements/{requirementId}/logs/
 ├── prd/
 │   └── command.log          # PRD 阶段的命令日志
 ├── tech-design/

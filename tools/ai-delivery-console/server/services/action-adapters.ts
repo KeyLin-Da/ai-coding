@@ -1,3 +1,4 @@
+import fs from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import type { ActionInput, ExecutionMode, RunEvent, RunRecord, RunStatus } from '../../shared/workflow';
 import { implementationStepForAction, stageForAction } from '../../shared/workflow';
@@ -51,6 +52,39 @@ function prdDocumentPath(workflow: RequirementWorkflow, params: Record<string, u
   }
   const artifactPath = workflow.artifacts.find((artifact) => artifact.stage === 'PRD' && artifact.exists && artifact.kind !== 'directory')?.path;
   return artifactPath || workflow.stages.PRD.artifactPath || `docs/${workflow.requirementId}/prd/analysis.md`;
+}
+
+function defaultPrdAnalysisPath(workflow: RequirementWorkflow): string {
+  return `docs/${normalizeRequirementId(workflow.requirementId)}/prd/analysis.md`;
+}
+
+function validationError(message: string): Error {
+  const error = new Error(message) as Error & { code?: string };
+  error.code = 'VALIDATION_ERROR';
+  return error;
+}
+
+export async function assertPrdClarificationReady(workspaceRoot: string, workflow: RequirementWorkflow, action: ActionInput): Promise<void> {
+  if (action.actionType !== 'PRD_CLARIFY') {
+    return;
+  }
+  if (workflow.requirementType === 'DEFECT') {
+    throw validationError('缺陷类型不支持 PRD 澄清');
+  }
+  const description = normalizePrdClarification(typeof action.params?.description === 'string' ? action.params.description : '');
+  if (!description) {
+    throw validationError('请输入 PRD 澄清描述');
+  }
+  const documentPath = defaultPrdAnalysisPath(workflow);
+  const absolutePath = assertInsideWorkspace(workspaceRoot, documentPath);
+  try {
+    await fs.access(absolutePath);
+  } catch (error: any) {
+    if (error.code === 'ENOENT') {
+      throw validationError('请先生成 PRD 文档，再发起 PRD 澄清');
+    }
+    throw error;
+  }
 }
 
 function openSpecPrdDocumentPath(workflow: RequirementWorkflow, params: Record<string, unknown>): string {
@@ -208,6 +242,8 @@ function buildSkillCommand(workflow: RequirementWorkflow, action: ActionInput): 
   switch (action.actionType) {
     case 'PRD_ANALYZE':
       return `/coding-prd-analyzer id=${requirementId}${prdClarification ? ` c=${prdClarification}` : ''}${sources ? ` ${sources}` : ''}`;
+    case 'PRD_CLARIFY':
+      return `/coding-prd-analyzer id=${requirementId} c=${description || '<clarification>'}`;
     case 'DESIGN_GENERATE':
       return `/coding-design d=${designInputParam(workflow, params)} r=${requirementId}${projects ? ` p=${projects}` : ''}${clarification ? ` c=${clarification}` : ''}`;
     case 'DESIGN_QUESTION':
@@ -259,7 +295,18 @@ export function buildActionCommand(workflow: RequirementWorkflow, action: Action
 }
 
 function isAgentAction(actionType: ActionInput['actionType']): boolean {
-  return ['PRD_ANALYZE', 'DESIGN_GENERATE', 'DESIGN_QUESTION', 'OPENSPEC_FF', 'OPENSPEC_APPLY', 'OPENSPEC_VERIFY', 'OPENSPEC_ARCHIVE', 'JUNIT_GENERATE', 'CODE_REVIEW'].includes(actionType);
+  return [
+    'PRD_ANALYZE',
+    'PRD_CLARIFY',
+    'DESIGN_GENERATE',
+    'DESIGN_QUESTION',
+    'OPENSPEC_FF',
+    'OPENSPEC_APPLY',
+    'OPENSPEC_VERIFY',
+    'OPENSPEC_ARCHIVE',
+    'JUNIT_GENERATE',
+    'CODE_REVIEW'
+  ].includes(actionType);
 }
 
 async function ensureStagedReviewHasChanges(
@@ -358,6 +405,7 @@ export function validateActionInput(workspaceRoot: string, action: ActionInput, 
   }
   const allowed = new Set<ActionInput['actionType']>([
     'PRD_ANALYZE',
+    'PRD_CLARIFY',
     'DESIGN_GENERATE',
     'DESIGN_QUESTION',
     'OPENSPEC_STATUS',
@@ -395,6 +443,7 @@ export async function executeAction(
         }
       : action;
   validateActionInput(workspaceRoot, normalizedAction);
+  await assertPrdClarificationReady(workspaceRoot, workflow, normalizedAction);
   const runId = createRunId();
   const params = normalizedAction.params || {};
   const startedAt = new Date().toISOString();

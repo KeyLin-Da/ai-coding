@@ -7,7 +7,8 @@ import { useWorkflowStore } from '@/stores/workflow';
 vi.mock('element-plus', () => ({
   ElMessage: {
     info: vi.fn(),
-    warning: vi.fn()
+    warning: vi.fn(),
+    success: vi.fn()
   }
 }));
 
@@ -82,5 +83,82 @@ describe('workflow realtime hints', () => {
     });
 
     expect(ElMessage.warning).not.toHaveBeenCalledWith('林达键 正在编辑当前需求');
+  });
+
+  it('项目仓拉取通知仍提示用户手动同步', () => {
+    const store = useWorkflowStore();
+
+    store.applyRealtimeHint({
+      projectId: 1,
+      eventId: 13,
+      eventType: 'project.repo.pull-required',
+      aggregateType: 'PROJECT_REPO',
+      aggregateId: 5,
+      payloadJson: '{}'
+    });
+
+    expect(ElMessage.warning).toHaveBeenCalledWith('项目产物仓有新提交，请点击右上角“同步 Git 仓”后继续操作');
+  });
+
+  it('项目仓状态事件不触发需求详情和列表刷新', async () => {
+    const store = useWorkflowStore();
+    store.requirements = [workflow()];
+    store.current = workflow();
+    const loadRequirement = vi.spyOn(store, 'loadRequirement').mockImplementation(async () => undefined);
+    const loadRequirements = vi.spyOn(store, 'loadRequirements').mockImplementation(async () => undefined);
+
+    await store.handleRealtimeDomainEvent({
+      projectId: 1,
+      eventId: 14,
+      eventType: 'project.repo.state-changed',
+      aggregateType: 'PROJECT_REPO',
+      aggregateId: 5,
+      payloadJson: '{"syncStatus":"DIRTY"}'
+    });
+
+    expect(loadRequirement).not.toHaveBeenCalled();
+    expect(loadRequirements).not.toHaveBeenCalled();
+    expect(ElMessage.info).not.toHaveBeenCalledWith('项目产物仓状态：DIRTY');
+  });
+
+  it('需求工作区状态事件不触发需求详情和列表刷新', async () => {
+    const store = useWorkflowStore();
+    store.requirements = [workflow()];
+    store.current = workflow();
+    const loadRequirement = vi.spyOn(store, 'loadRequirement').mockImplementation(async () => undefined);
+    const loadRequirements = vi.spyOn(store, 'loadRequirements').mockImplementation(async () => undefined);
+
+    await store.handleRealtimeDomainEvent({
+      projectId: 1,
+      eventId: 15,
+      eventType: 'requirement.workspace-state.updated',
+      aggregateType: 'REQUIREMENT',
+      aggregateId: 100,
+      payloadJson: '{"requirementPk":100,"status":"DIRTY","userDisplayName":"林达键"}'
+    });
+
+    expect(loadRequirement).not.toHaveBeenCalled();
+    expect(loadRequirements).not.toHaveBeenCalled();
+  });
+
+  it('Git 同步完成事件仍会刷新当前需求和列表', async () => {
+    const store = useWorkflowStore();
+    store.requirements = [workflow()];
+    store.current = workflow();
+    const loadRequirement = vi.spyOn(store, 'loadRequirement').mockImplementation(async () => undefined);
+    const loadRequirements = vi.spyOn(store, 'loadRequirements').mockImplementation(async () => undefined);
+
+    await store.handleRealtimeDomainEvent({
+      projectId: 1,
+      eventId: 16,
+      eventType: 'artifact.git-sync.completed',
+      aggregateType: 'ARTIFACT_SYNC',
+      aggregateId: 50,
+      payloadJson: '{"requirementPk":100,"commitSha":"abcdef1"}'
+    });
+
+    expect(loadRequirement).toHaveBeenCalledWith('172014');
+    expect(loadRequirements).toHaveBeenCalledTimes(1);
+    expect(ElMessage.success).toHaveBeenCalledWith('产物已推送：abcdef1');
   });
 });

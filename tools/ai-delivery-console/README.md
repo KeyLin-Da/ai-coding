@@ -296,23 +296,21 @@ curl -X POST "http://127.0.0.1:8718/api/ai-delivery/migration/import" \
 所有产物遵循统一的目录结构，便于自动化索引和检索：
 
 - **PRD**：`docs/{需求号}/prd/analysis.md`
-- **PRD 来源文件快照**：`docs/{需求号}/prd/file/**`
+- **PRD 来源文件快照**：`docs/{需求号}/prd/files/**`
 - **技术方案**：`docs/{需求号}/technical-design/design_review.md`
 - **OpenSpec**：`openspec/changes/req-{需求号}`
 - **单元测试报告**：`docs/{需求号}/junit/**`
 - **代码评审**：`docs/code_review/code_review_{分支名}/summary.md`
-- **工作流元数据**：`docs/{需求号}/workflow/state.json`
-- **运行日志**：`docs/{需求号}/workflow/runs/{runId}.jsonl`
-- **阶段命令日志**：`docs/{需求号}/workflow/logs/{stage}/command.log`
+- **Runner 私有运行态**：`<deliveryWorkspaceRoot>/.ai-delivery/runtime/**`
 
-PRD 阶段的「澄清描述」会保存到 workflow 的 `prdClarification` 字段，并在调用 `coding-prd-analyzer` 时作为 `/coding-prd-analyzer` 的 `c` 参数传递；未填写时不会使用需求标题兜底。本地上传的 PDF、图片、Markdown 会快照到 `docs/{需求号}/prd/file/`，并作为 PRD 来源路径传入技能调用，可在页面删除。
+PRD 阶段的「澄清描述」会保存到 workflow 的 `prdClarification` 字段，并在调用 `coding-prd-analyzer` 时作为 `/coding-prd-analyzer` 的 `c` 参数传递；未填写时不会使用需求标题兜底。本地上传的 PDF、图片、Markdown 会快照到 `docs/{需求号}/prd/files/`，并作为 PRD 来源路径传入技能调用，可在页面删除。`state.json`、锁、Prompt、脚本、run log、terminal transcript 和阶段命令日志属于 Runner 私有运行态，不进入项目 Git 仓。
 
 ### 新增：流程独立命令行日志
 
-从 v0.1.0 开始，每个工作流阶段维护独立的命令执行日志文件，便于追踪和审计：
+从 v0.1.0 开始，每个工作流阶段维护独立的命令执行日志文件，便于追踪和审计。日志保存到用户本机 Runner runtime，不纳入项目 Git 同步：
 
 ```
-docs/{需求号}/workflow/logs/
+<deliveryWorkspaceRoot>/.ai-delivery/runtime/{project}/requirements/{需求号}/logs/
 ├── prd/command.log          # PRD 阶段的命令日志
 ├── tech-design/command.log  # 技术方案阶段的命令日志
 ├── implementation/command.log  # 实施阶段的命令日志
@@ -331,8 +329,11 @@ docs/{需求号}/workflow/logs/
 ### 默认 Codex 命令
 
 ```bash
-CODEX_COMMAND='codex exec -C {workspaceRoot} -'
+CODEX_COMMAND='codex exec --sandbox workspace-write -C {workspaceRoot} {projectParentAddDirArgs} -'
+CODEX_INTERACTIVE_COMMAND='codex --sandbox workspace-write -C {workspaceRoot} {projectParentAddDirArgs} --no-alt-screen {prompt}'
 ```
+
+`workspaceRoot` 是项目 AI 产物仓；`projectParentAddDirArgs` 会把关联工程父目录展开为 `--add-dir <工程父目录>`。Codex 需要以 `workspace-write` 或更高权限运行，`--add-dir` 才会成为额外可写根。
 
 ### 注册自定义 Agent
 
@@ -353,8 +354,8 @@ CODEX_COMMAND='codex exec -C {workspaceRoot} -'
 
 ### 工作流程
 
-1. Runner 会把技能动作包装成 `docs/{需求号}/workflow/prompts/{runId}.md`
-2. 将 stdout/stderr 写入 `docs/{需求号}/workflow/runs/{runId}.jsonl`
+1. Runner 会把技能动作包装成 runtime 下的 `prompts/{runId}.md`
+2. 将 stdout/stderr 写入 runtime 下的 `runs/{runId}.jsonl`
 3. 本地模式通过 SSE 实时展示终端输出，远程中心模式通过 WebSocket run event 追加日志
 4. 用户可以复制生成的命令文本交给 Agent 执行；执行完成后在页面点击「刷新产物」重新索引文件。
 
@@ -362,11 +363,11 @@ CODEX_COMMAND='codex exec -C {workspaceRoot} -'
 
 对于需要真实 TTY 交互、确认权限或使用 Agent 原生界面的动作，可以在页面执行方式中选择「本地终端」。Runner 会：
 
-1. 生成 Prompt Envelope：`docs/{需求号}/workflow/prompts/{runId}.md`
-2. 生成可执行脚本：`docs/{需求号}/workflow/scripts/{runId}.command`
+1. 生成 Prompt Envelope：runtime 下的 `prompts/{runId}.md`
+2. 生成可执行脚本：runtime 下的 `scripts/{runId}.command`
 3. 使用 `open -a Terminal {scriptFile}` 打开 macOS Terminal
-4. 将终端 transcript 写入 `docs/{需求号}/workflow/runs/{runId}.terminal.log`
-5. 将退出状态写入 `docs/{需求号}/workflow/runs/{runId}.terminal-status.json`
+4. 将终端 transcript 写入 runtime 下的 `runs/{runId}.terminal.log`
+5. 将退出状态写入 runtime 下的 `runs/{runId}.terminal-status.json`
 
 页面再次加载需求或需求列表时会读取状态文件，把 `TERMINAL_OPENED` 同步为成功或失败。脚本由 Runner 根据已注册 Agent Provider 生成，页面不能传入任意命令。
 

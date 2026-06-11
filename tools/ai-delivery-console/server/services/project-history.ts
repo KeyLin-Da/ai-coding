@@ -2,18 +2,18 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { WorkflowProject } from '../../shared/workflow';
 import { canonicalProjectPath } from './project-resolver';
+import { readConsoleStateFile, writeConsoleStateFile } from './console-state';
 
 interface ProjectHistoryFile {
   projects: Array<WorkflowProject & { lastUsedAt?: string }>;
 }
 
-function historyPath(workspaceRoot: string): string {
-  return path.join(workspaceRoot, 'docs', '.ai-delivery-console', 'project-history.json');
-}
-
 async function readSavedProjectHistory(workspaceRoot: string): Promise<WorkflowProject[]> {
   try {
-    const content = await fs.readFile(historyPath(workspaceRoot), 'utf8');
+    const content = await readConsoleStateFile(workspaceRoot, 'project-history.json');
+    if (!content.trim()) {
+      return [];
+    }
     const parsed = JSON.parse(content) as ProjectHistoryFile;
     return (parsed.projects || []).map((project) => ({
       name: project.name || path.basename(project.path),
@@ -100,7 +100,5 @@ export async function saveProjectHistory(workspaceRoot: string, projects: Workfl
   for (const project of projects) {
     merged.set(project.path, { ...project, lastUsedAt: now });
   }
-  const filePath = historyPath(workspaceRoot);
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, `${JSON.stringify({ projects: [...merged.values()] }, null, 2)}\n`, 'utf8');
+  await writeConsoleStateFile(workspaceRoot, 'project-history.json', `${JSON.stringify({ projects: [...merged.values()] }, null, 2)}\n`);
 }

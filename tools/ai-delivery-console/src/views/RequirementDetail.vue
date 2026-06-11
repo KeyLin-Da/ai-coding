@@ -86,7 +86,11 @@
                   </div>
                 </div>
               </div>
-              <el-button type="primary" :icon="primaryActionIcon(Operation)" @click="runPrd">{{ actionButtonText('生成 PRD') }}</el-button>
+              <div class="action-line">
+                <el-button type="primary" :icon="primaryActionIcon(Operation)" @click="runPrd">{{ actionButtonText('生成 PRD') }}</el-button>
+                <el-button :disabled="!canClarifyPrd" :icon="ChatLineSquare" @click="openPrdClarificationDialog">澄清 PRD</el-button>
+                <span v-if="requiresPrdApproval && !canClarifyPrd" class="muted">请先生成 PRD 文档后再澄清。</span>
+              </div>
               <MarkdownEditor title="PRD 文档" :artifact-path="prdEditorPath" @saved="reload" />
             </div>
 
@@ -343,6 +347,28 @@
 
     <ReviewDialog ref="reviewDialog" @submit="submitReview" @synced="handleArtifactGitSynced" />
     <ArtifactGitSyncDialog ref="artifactGitSyncDialog" @synced="handleArtifactGitSynced" />
+    <el-dialog v-model="prdClarificationDialogVisible" title="澄清 PRD" width="640px" destroy-on-close class="prd-clarification-dialog">
+      <section class="prd-clarification-panel">
+        <div class="prd-clarification-document">
+          <strong>当前 PRD 文档</strong>
+          <span>{{ prdClarificationDocumentPath || '未生成' }}</span>
+        </div>
+        <el-alert type="info" show-icon title="将基于现有 PRD 文档更新 analysis.md，并在文末追加澄清历史。" />
+        <el-input
+          v-model="prdClarificationDraft"
+          class="prd-clarification-input"
+          type="textarea"
+          :rows="5"
+          maxlength="5000"
+          show-word-limit
+          placeholder="输入本次澄清描述，例如范围边界、异常场景、排除项或已确认业务约束"
+        />
+      </section>
+      <template #footer>
+        <el-button @click="prdClarificationDialogVisible = false">取消</el-button>
+        <el-button type="primary" :icon="ChatLineSquare" @click="submitPrdClarification">{{ actionButtonText('提交澄清') }}</el-button>
+      </template>
+    </el-dialog>
     <DesignQuestionDialog
       ref="designQuestionDialog"
       :loading="techDesignQuestionLoading"
@@ -421,6 +447,8 @@ const techDesignFileInput = ref<HTMLInputElement>();
 const selectedArtifactPath = ref('');
 const sourceText = ref('');
 const prdClarification = ref('');
+const prdClarificationDialogVisible = ref(false);
+const prdClarificationDraft = ref('');
 const changeName = ref('');
 const branchName = ref('');
 const codeReviewMode = ref<'commit' | 'staged'>('commit');
@@ -431,6 +459,10 @@ const techDesignQuestionLoading = ref(false);
 const techDesignQuestionRecords = ref<TechDesignQuestionRecord[]>([]);
 const openSpecSummary = ref<OpenSpecSummary>();
 const selectedOpenSpecDocPath = ref('');
+let openSpecSummaryRequestKey = '';
+let openSpecSummaryInFlight: Promise<void> | undefined;
+let workspaceStatesRequestKey = '';
+let workspaceStatesInFlight: Promise<void> | undefined;
 const openSpecPreviewVersion = ref(0);
 const activeImplementationStep = ref<ImplementationStep>('START_CHANGE');
 const gitChanges = ref<GitChangeSummary>();
@@ -529,6 +561,13 @@ const prdEditorPath = computed(() => {
   }
   return stageArtifactPath('PRD') || workflow.value.stages.PRD.artifactPath || `docs/${workflow.value.requirementId}/prd/analysis.md`;
 });
+const prdClarificationDocumentPath = computed(() => {
+  if (!workflow.value || !requiresPrdApproval.value) {
+    return '';
+  }
+  return workflow.value.artifacts.find((artifact) => artifact.stage === 'PRD' && artifact.exists && artifact.kind !== 'directory')?.path || '';
+});
+const canClarifyPrd = computed(() => Boolean(requiresPrdApproval.value && prdClarificationDocumentPath.value));
 const prdDesignSourcePath = computed(() => {
   if (!workflow.value) {
     return '';
@@ -650,11 +689,13 @@ function officialTechnicalDesignArtifactPath() {
   return '';
 }
 
-async function reload() {
+async function reload(options: { preferCurrent?: boolean } = {}) {
   if (typeof route.params.requirementId === 'string') {
-    await store.loadRequirement(route.params.requirementId);
-    await loadWorkspaceStates();
-    await loadOpenSpecSummary();
+    const requirementId = route.params.requirementId;
+    const alreadyLoaded = workflow.value?.requirementId === requirementId;
+    if (!options.preferCurrent || !alreadyLoaded) {
+      await store.loadRequirement(requirementId);
+    }
     store.streamWorkflowEvents();
   }
 }
@@ -664,23 +705,52 @@ async function loadWorkspaceStates() {
     workspaceStates.value = [];
     return;
   }
-  try {
-    workspaceStates.value = await apiClient.listRequirementWorkspaceStates(workflow.value.id);
-  } catch {
-    workspaceStates.value = [];
+  const workflowId = workflow.value.id;
+  const key = String(workflowId);
+  if (workspaceStatesInFlight && workspaceStatesRequestKey === key) {
+    await workspaceStatesInFlight;
+    return;
   }
+  workspaceStatesRequestKey = key;
+  workspaceStatesInFlight = (async () => {
+    try {
+      workspaceStates.value = await apiClient.listRequirementWorkspaceStates(workflowId);
+    } catch {
+      workspaceStates.value = [];
+    } finally {
+      if (workspaceStatesRequestKey === key) {
+        workspaceStatesInFlight = undefined;
+      }
+    }
+  })();
+  await workspaceStatesInFlight;
 }
 
 async function loadOpenSpecSummary() {
   if (!workflow.value) {
     return;
   }
-  const summary = await apiClient.getOpenSpecSummary(workflow.value.requirementId, changeName.value || `req-${workflow.value.requirementId}`);
-  openSpecSummary.value = summary;
-  const selectedStillExists = openSpecDocuments.value.some((doc) => doc.path === selectedOpenSpecDocPath.value && doc.exists);
-  if (!selectedStillExists) {
-    selectedOpenSpecDocPath.value = openSpecDocuments.value.find((doc) => doc.exists)?.path || '';
+  const requirementId = workflow.value.requirementId;
+  const currentChangeName = changeName.value || `req-${requirementId}`;
+  const key = `${requirementId}:${currentChangeName}`;
+  if (openSpecSummaryInFlight && openSpecSummaryRequestKey === key) {
+    await openSpecSummaryInFlight;
+    return;
   }
+  openSpecSummaryRequestKey = key;
+  openSpecSummaryInFlight = (async () => {
+    const summary = await apiClient.getOpenSpecSummary(requirementId, currentChangeName);
+    openSpecSummary.value = summary;
+    const selectedStillExists = openSpecDocuments.value.some((doc) => doc.path === selectedOpenSpecDocPath.value && doc.exists);
+    if (!selectedStillExists) {
+      selectedOpenSpecDocPath.value = openSpecDocuments.value.find((doc) => doc.exists)?.path || '';
+    }
+  })().finally(() => {
+    if (openSpecSummaryRequestKey === key) {
+      openSpecSummaryInFlight = undefined;
+    }
+  });
+  await openSpecSummaryInFlight;
 }
 
 function previewArtifact(artifact: ArtifactRef) {
@@ -744,6 +814,54 @@ async function runPrd() {
       description: prdClarification.value,
       sources: [...new Set([...textSources, ...fileSources])]
     }
+  });
+}
+
+function openPrdClarificationDialog() {
+  if (!requiresPrdApproval.value) {
+    ElMessage.warning('缺陷类型不需要 PRD 澄清');
+    return;
+  }
+  if (!canClarifyPrd.value) {
+    ElMessage.warning('请先生成 PRD 文档');
+    return;
+  }
+  prdClarificationDraft.value = '';
+  prdClarificationDialogVisible.value = true;
+}
+
+async function submitPrdClarification() {
+  if (!workflow.value) {
+    return;
+  }
+  const description = prdClarificationDraft.value.trim();
+  if (!description) {
+    ElMessage.warning('请输入 PRD 澄清描述');
+    return;
+  }
+  if (!canClarifyPrd.value) {
+    ElMessage.warning('请先生成 PRD 文档');
+    return;
+  }
+  if (workflow.value.stages.PRD.status === 'APPROVED') {
+    try {
+      await ElMessageBox.confirm('澄清会更新 PRD 文档，并将 PRD 回到待审核状态；下游产物会保留供你判断是否复用。是否继续？', '确认澄清 PRD', {
+        type: 'warning'
+      });
+    } catch {
+      return;
+    }
+  }
+  await runOrCopyAction({
+    actionType: 'PRD_CLARIFY',
+    params: {
+      ...agentActionParams(),
+      description
+    }
+  }, async () => {
+    prdClarificationDialogVisible.value = false;
+    prdClarificationDraft.value = '';
+    await reload();
   });
 }
 
@@ -921,7 +1039,7 @@ async function ensureDeliveryReady(actionLabel: string, options: { allowDirty?: 
         ElMessage.warning('项目产物仓状态异常，请先在个人中心处理后再继续');
         return false;
       }
-      if (repoState.syncStatus === 'DIRTY' && !options.allowDirty) {
+      if (repoState.syncStatus === 'DIRTY' && options.allowDirty === false) {
         ElMessage.warning('项目产物仓存在未同步变更，请先公开同步或清理后再继续流程动作');
         return false;
       }
@@ -960,6 +1078,8 @@ async function runOrCopyAction(action: ActionInput, afterRun?: () => Promise<voi
       await openRunLog(result.run.id);
     }
     await afterRun?.();
+  } catch (error: any) {
+    ElMessage.error(error.message || '流程动作执行失败');
   } finally {
     actionRunning.value = false;
   }
@@ -1282,7 +1402,6 @@ watch(
       activeImplementationStep.value = findFirstPendingImplementationStep(value.implementationSteps);
     }
     void loadWorkspaceStates();
-    void loadTechDesignQuestionRecords();
   },
   { immediate: true }
 );
@@ -1303,7 +1422,7 @@ watch(
 
 onMounted(async () => {
   await store.loadAgents();
-  await reload();
+  await reload({ preferCurrent: true });
 });
 
 onUnmounted(() => {
@@ -1818,6 +1937,26 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.prd-clarification-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.prd-clarification-document {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #e3e8f2;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.prd-clarification-document span {
+  color: #64748b;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 760px) {

@@ -15,6 +15,7 @@ import {
   terminalCommandLine
 } from '../../server/services/agent-providers';
 import { readRunEvents } from '../../server/services/run-log';
+import { resolveWorkspaceOrRuntimePath } from '../../server/services/runtime-paths';
 
 function workflow(): RequirementWorkflow {
   const now = new Date().toISOString();
@@ -53,8 +54,17 @@ describe('agent-providers', () => {
     expect(providers.map((provider) => provider.id)).toEqual(expect.arrayContaining(['codex']));
     const codex = providers.find((provider) => provider.id === 'codex');
     expect(codex?.inputMode).toBe('STDIN');
-    expect(codex?.command).toEqual(['codex', 'exec', '-C', '{workspaceRoot}', '{projectParentAddDirArgs}', '-']);
-    expect(codex?.interactiveCommand).toEqual(['codex', '-C', '{workspaceRoot}', '{projectParentAddDirArgs}', '--no-alt-screen', '{prompt}']);
+    expect(codex?.command).toEqual(['codex', 'exec', '--sandbox', 'workspace-write', '-C', '{workspaceRoot}', '{projectParentAddDirArgs}', '-']);
+    expect(codex?.interactiveCommand).toEqual([
+      'codex',
+      '--sandbox',
+      'workspace-write',
+      '-C',
+      '{workspaceRoot}',
+      '{projectParentAddDirArgs}',
+      '--no-alt-screen',
+      '{prompt}'
+    ]);
     expect(codex?.supportsInteractive).toBe(true);
     const codebuddy = providers.find((provider) => provider.id === 'codebuddy');
     expect(codebuddy?.inputMode).toBe('STDIN');
@@ -88,7 +98,7 @@ describe('agent-providers', () => {
     await fs.mkdir(path.join(root, '.codex', 'skills', 'coding-prd-analyzer'), { recursive: true });
     await fs.writeFile(path.join(root, '.codex', 'skills', 'coding-prd-analyzer', 'SKILL.md'), 'skill');
     const promptPath = await createPromptEnvelope(root, workflow(), runRecord('run-1'), '/coding-prd-analyzer id=172014');
-    const content = await fs.readFile(path.join(root, promptPath), 'utf8');
+    const content = await fs.readFile(resolveWorkspaceOrRuntimePath(root, promptPath), 'utf8');
     expect(content).toContain('/coding-prd-analyzer id=172014');
     expect(content).toContain('.codex/skills/coding-prd-analyzer/SKILL.md');
   });
@@ -173,8 +183,8 @@ describe('agent-providers', () => {
       id: 'codex',
       name: 'Codex',
       inputMode: 'STDIN',
-      command: ['codex', 'exec', '-C', '{workspaceRoot}', '{projectParentAddDirArgs}', '-'],
-      interactiveCommand: ['codex', '-C', '{workspaceRoot}', '{projectParentAddDirArgs}', '--no-alt-screen', '{prompt}'],
+      command: ['codex', 'exec', '--sandbox', 'workspace-write', '-C', '{workspaceRoot}', '{projectParentAddDirArgs}', '-'],
+      interactiveCommand: ['codex', '--sandbox', 'workspace-write', '-C', '{workspaceRoot}', '{projectParentAddDirArgs}', '--no-alt-screen', '{prompt}'],
       available: true,
       supportsStreaming: true,
       supportsInteractive: true
@@ -187,7 +197,7 @@ describe('agent-providers', () => {
 
     const terminal = await createTerminalRunScript(root, workflow(), run, provider, '/coding-prd-analyzer id=172014', [projectParent]);
 
-    expect(terminal.commandLine).toContain(`'-C' '${root}' '--add-dir' '${projectParent}'`);
+    expect(terminal.commandLine).toContain(`'--sandbox' 'workspace-write' '-C' '${root}' '--add-dir' '${projectParent}'`);
     expect(terminal.commandLine).toContain('"$(cat "$PROMPT_FILE")"');
   });
 
@@ -198,8 +208,8 @@ describe('agent-providers', () => {
       id: 'codex',
       name: 'Codex',
       inputMode: 'STDIN',
-      command: ['codex', 'exec', '-C', '{workspaceRoot}', '{projectParentAddDirArgs}', '-'],
-      interactiveCommand: ['codex', '-C', '{workspaceRoot}', '{projectParentAddDirArgs}', '--no-alt-screen', '{prompt}'],
+      command: ['codex', 'exec', '--sandbox', 'workspace-write', '-C', '{workspaceRoot}', '{projectParentAddDirArgs}', '-'],
+      interactiveCommand: ['codex', '--sandbox', 'workspace-write', '-C', '{workspaceRoot}', '{projectParentAddDirArgs}', '--no-alt-screen', '{prompt}'],
       available: true,
       supportsStreaming: true,
       supportsInteractive: true
@@ -212,7 +222,7 @@ describe('agent-providers', () => {
 
     const terminal = await createTerminalRunScript(root, workflow(), run, provider, '/coding-prd-analyzer id=172014', [projectParent]);
 
-    expect(terminal.commandLine).toContain(`'-C' '${root}' '--add-dir' '${projectParent}' '--no-alt-screen'`);
+    expect(terminal.commandLine).toContain(`'--sandbox' 'workspace-write' '-C' '${root}' '--add-dir' '${projectParent}' '--no-alt-screen'`);
     expect(terminal.commandLine).toContain('AI Delivery Agent Task');
   });
 
@@ -232,11 +242,11 @@ describe('agent-providers', () => {
     };
 
     const terminal = await createTerminalRunScript(root, workflow(), run, provider, '/coding-prd-analyzer id=172014');
-    const script = await fs.readFile(path.join(root, terminal.scriptPath), 'utf8');
+    const script = await fs.readFile(resolveWorkspaceOrRuntimePath(root, terminal.scriptPath), 'utf8');
 
-    expect(terminal.scriptPath).toBe('docs/172014/workflow/scripts/run-terminal-script.command');
-    expect(terminal.transcriptPath).toBe('docs/172014/workflow/runs/run-terminal-script.terminal.log');
-    expect(terminal.statusPath).toBe('docs/172014/workflow/runs/run-terminal-script.terminal-status.json');
+    expect(terminal.scriptPath).toBe('.ai-delivery-runtime/requirements/172014/scripts/run-terminal-script.command');
+    expect(terminal.transcriptPath).toBe('.ai-delivery-runtime/requirements/172014/runs/run-terminal-script.terminal.log');
+    expect(terminal.statusPath).toBe('.ai-delivery-runtime/requirements/172014/runs/run-terminal-script.terminal-status.json');
     expect(script).toContain('AI Delivery');
     expect(script).toContain('/coding-prd-analyzer id=172014');
     expect(script).toContain('terminal-status.json');
@@ -260,7 +270,7 @@ describe('agent-providers', () => {
     };
 
     const terminal = await createTerminalRunScript(root, workflow(), run, provider, '/coding-prd-analyzer id=172014');
-    const script = await fs.readFile(path.join(root, terminal.scriptPath), 'utf8');
+    const script = await fs.readFile(resolveWorkspaceOrRuntimePath(root, terminal.scriptPath), 'utf8');
 
     expect(terminal.commandLine).toContain("'interactive-agent'");
     expect(terminal.commandLine).not.toContain('background-agent');
@@ -304,13 +314,13 @@ describe('agent-providers', () => {
       ...runRecord('run-terminal-finished'),
       status: 'TERMINAL_OPENED',
       executionMode: 'TERMINAL',
-      terminalStatusPath: 'docs/172014/workflow/runs/run-terminal-finished.terminal-status.json',
-      terminalTranscriptPath: 'docs/172014/workflow/runs/run-terminal-finished.terminal.log'
+      terminalStatusPath: '.ai-delivery-runtime/requirements/172014/runs/run-terminal-finished.terminal-status.json',
+      terminalTranscriptPath: '.ai-delivery-runtime/requirements/172014/runs/run-terminal-finished.terminal.log'
     };
     item.runs.push(run);
-    await fs.mkdir(path.join(root, 'docs', '172014', 'workflow', 'runs'), { recursive: true });
+    await fs.mkdir(path.dirname(resolveWorkspaceOrRuntimePath(root, run.terminalStatusPath)), { recursive: true });
     await fs.writeFile(
-      path.join(root, run.terminalStatusPath),
+      resolveWorkspaceOrRuntimePath(root, run.terminalStatusPath),
       JSON.stringify({
         status: 'SUCCEEDED',
         exitCode: 0,
@@ -334,13 +344,13 @@ describe('agent-providers', () => {
       ...runRecord('run-interactive-finished'),
       status: 'TERMINAL_OPENED',
       executionMode: 'INTERACTIVE_TERMINAL',
-      terminalStatusPath: 'docs/172014/workflow/runs/run-interactive-finished.terminal-status.json',
-      terminalTranscriptPath: 'docs/172014/workflow/runs/run-interactive-finished.terminal.log'
+      terminalStatusPath: '.ai-delivery-runtime/requirements/172014/runs/run-interactive-finished.terminal-status.json',
+      terminalTranscriptPath: '.ai-delivery-runtime/requirements/172014/runs/run-interactive-finished.terminal.log'
     };
     item.runs.push(run);
-    await fs.mkdir(path.join(root, 'docs', '172014', 'workflow', 'runs'), { recursive: true });
+    await fs.mkdir(path.dirname(resolveWorkspaceOrRuntimePath(root, run.terminalStatusPath)), { recursive: true });
     await fs.writeFile(
-      path.join(root, run.terminalStatusPath),
+      resolveWorkspaceOrRuntimePath(root, run.terminalStatusPath),
       JSON.stringify({
         status: 'SUCCEEDED',
         exitCode: 0,

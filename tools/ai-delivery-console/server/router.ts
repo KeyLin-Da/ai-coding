@@ -6,7 +6,7 @@ import { ensureImplementationSteps, isImplementationStep, stageForAction } from 
 import { normalizePrdClarification, WorkflowRepository } from './services/workflow-repository';
 import { scanRequirementArtifacts } from './services/workspace-scanner';
 import { WorkflowLock } from './services/workflow-lock';
-import { buildActionCommand, executeAction, validateActionInput } from './services/action-adapters';
+import { assertPrdClarificationReady, buildActionCommand, executeAction, validateActionInput } from './services/action-adapters';
 import { appendStageCommandLog, readRunEvents, readRunEventsWithTranscript, readTerminalTranscriptChunk, readTerminalTranscriptSize } from './services/run-log';
 import { readArtifact, saveArtifact } from './services/markdown-service';
 import { applyReview, refreshCodeReviewIssues, returnToImplementation } from './services/review-service';
@@ -19,11 +19,11 @@ import { assertProjectPathsConfigured, loadPrivateProjectSettings, loadSettings,
 import { parseLocalRequestContext, type LocalRequestContext } from './services/local-request-context';
 import { generateLocalGitCredential, regenerateLocalGitCredential, type LocalGitCredentialGenerateInput } from './services/local-git-credentials';
 import { cloneProjectRepository, commitAndPushProjectRepository, inspectProjectRepository, resolveProjectRepoPath, syncProjectRepository } from './services/project-repository';
-import { syncCodingSkills } from './services/skill-sync';
+import { bootstrapProjectArtifactWorkspace } from './services/skill-sync';
 import { deleteTechDesignQuestionRecord, type DeleteTechDesignQuestionInput } from './services/tech-design-questions';
 import { buildBootstrapImportPlan, importBootstrapPlan, type BootstrapImportConfig } from './services/bootstrap-importer';
-import { listCenterRequirementWorkflows, loadCenterRequirementWorkflow, mergeRequirementWorkflow } from './services/requirement-workflow-view';
-import { assertRequirementWorkspaceWritable, reportRequirementWorkspaceState, requirementNotMaterializedMessage } from './services/requirement-workspace-state';
+import { listCenterRequirementWorkflows, loadCachedCenterRequirementWorkflow, loadCenterRequirementWorkflow, mergeRequirementWorkflow } from './services/requirement-workflow-view';
+import { assertRequirementWorkspaceWritable, reportRequirementWorkspaceState, scheduleRequirementWorkspaceStateReport } from './services/requirement-workspace-state';
 import {
   assertAllowedPrdSourceFile,
   deletePrdSourceFileSnapshot,
@@ -109,6 +109,30 @@ function applyImplementationRun(workflow: RequirementWorkflow, run: RunRecord): 
   };
 }
 
+export function applyPrdClarificationRun(workflow: RequirementWorkflow, run: RunRecord): RequirementWorkflow {
+  if (run.actionType !== 'PRD_CLARIFY' || !['SUCCEEDED', 'COMPLETED'].includes(run.status)) {
+    return workflow;
+  }
+  const artifactPath =
+    workflow.artifacts.find((artifact) => artifact.stage === 'PRD' && artifact.exists && artifact.kind !== 'directory')?.path ||
+    workflow.stages.PRD.artifactPath ||
+    `docs/${workflow.requirementId}/prd/analysis.md`;
+  return {
+    ...workflow,
+    currentStage: 'PRD',
+    status: 'IN_PROGRESS',
+    stages: {
+      ...workflow.stages,
+      PRD: {
+        ...workflow.stages.PRD,
+        status: 'READY_FOR_REVIEW',
+        artifactPath,
+        runId: run.id
+      }
+    }
+  };
+}
+
 async function parseMultipartFiles(request: IncomingMessage): Promise<UploadedPrdSourceFile[]> {
   const contentType = request.headers['content-type'] || '';
   const boundary = String(contentType).match(/boundary=(?:"([^"]+)"|([^;]+))/)?.[1] || String(contentType).match(/boundary=(?:"([^"]+)"|([^;]+))/)?.[2];
@@ -177,6 +201,7 @@ function match(pathname: string, pattern: RegExp): RegExpMatchArray | null {
 
 export function createRouter(workspaceRoot: string) {
   const fallbackRepository = new WorkflowRepository(workspaceRoot);
+  const artifactRefreshJobs = new Map<string, Promise<void>>();
 
   async function loadCurrentProjectPaths(context: LocalRequestContext, required = false): Promise<string[]> {
     const settings = await loadPrivateProjectSettings(context);
@@ -238,6 +263,42 @@ export function createRouter(workspaceRoot: string) {
     });
   }
 
+  function scheduleArtifactIndexRefresh(
+    root: string,
+    repository: WorkflowRepository,
+    workflow: RequirementWorkflow
+  ): void {
+    const key = `${root}:${workflow.requirementId}`;
+    if (artifactRefreshJobs.has(key)) {
+      return;
+    }
+
+    const job = (async () => {
+      const artifacts = await scanRequirementArtifacts(
+        root,
+        workflow.requirementId,
+        workflow.branchName,
+        workflow.stages.IMPLEMENTATION.changeName,
+        workflow.requirementType
+      );
+      const latestWorkflow = await repository.load(workflow.requirementId);
+      await repository.save({
+        ...(latestWorkflow || workflow),
+        artifacts
+      });
+    })()
+      .catch((error) => {
+        console.warn('[requirement-detail] 后台刷新产物索引失败:', error instanceof Error ? error.message : error);
+      })
+      .finally(() => {
+        if (artifactRefreshJobs.get(key) === job) {
+          artifactRefreshJobs.delete(key);
+        }
+      });
+
+    artifactRefreshJobs.set(key, job);
+  }
+
   async function assertWritableWorkflow(context: LocalRequestContext, workflow: RequirementWorkflow): Promise<void> {
     await assertRequirementWorkspaceWritable(context, workflow);
   }
@@ -293,8 +354,10 @@ export function createRouter(workspaceRoot: string) {
 
       const projectRepositoryCloneMatch = match(pathname, /^\/api\/ai-delivery\/projects\/([^/]+)\/repository\/clone$/);
       if (request.method === 'POST' && projectRepositoryCloneMatch) {
-        const state = await cloneProjectRepository({ ...requestContext, projectId: projectRepositoryCloneMatch[1] });
-        await syncCodingSkills(workspaceRoot, state.localRepoPath);
+        const projectContext = { ...requestContext, projectId: projectRepositoryCloneMatch[1] };
+        let state = await cloneProjectRepository(projectContext);
+        await bootstrapProjectArtifactWorkspace(workspaceRoot, state.localRepoPath);
+        state = await inspectProjectRepository(projectContext).catch(() => state);
         send(response, 200, { data: state });
         return;
       }
@@ -309,8 +372,10 @@ export function createRouter(workspaceRoot: string) {
 
       const projectRepositorySyncMatch = match(pathname, /^\/api\/ai-delivery\/projects\/([^/]+)\/repository\/sync$/);
       if (request.method === 'POST' && projectRepositorySyncMatch) {
-        const state = await syncProjectRepository({ ...requestContext, projectId: projectRepositorySyncMatch[1] });
-        await syncCodingSkills(workspaceRoot, state.localRepoPath);
+        const projectContext = { ...requestContext, projectId: projectRepositorySyncMatch[1] };
+        let state = await syncProjectRepository(projectContext);
+        await bootstrapProjectArtifactWorkspace(workspaceRoot, state.localRepoPath);
+        state = await inspectProjectRepository(projectContext).catch(() => state);
         send(response, 200, { data: state });
         return;
       }
@@ -399,27 +464,22 @@ export function createRouter(workspaceRoot: string) {
       if (request.method === 'GET' && requirementMatch) {
         const store = await resolveWorkflowStore(requestContext);
         const localWorkflow = await store.repository.load(requirementMatch[1]);
-        const centerWorkflow = await loadCenterRequirementWorkflow(requestContext, requirementMatch[1]).catch(() => null);
-        if (centerWorkflow && !localWorkflow && store.root !== workspaceRoot) {
-          const repoState = await inspectProjectRepository(requestContext).catch(() => undefined);
-          const message = repoState?.syncStatus === 'NOT_CLONED'
-            ? '项目产物仓尚未 clone，请先点击右上角“同步Git仓”初始化本地仓库'
-            : repoState?.syncStatus === 'BEHIND_REMOTE'
-              ? '本地项目产物仓落后远端，请先点击右上角“同步Git仓”拉取最新提交'
-              : requirementNotMaterializedMessage(centerWorkflow.requirementId);
-          send(response, 409, { message, code: 'REQUIREMENT_ARTIFACTS_NOT_SYNCED' });
-          return;
-        }
+        const centerWorkflow = localWorkflow
+          ? await loadCachedCenterRequirementWorkflow(requestContext, requirementMatch[1], { timeoutMs: 800 }).catch(() => undefined)
+          : await loadCenterRequirementWorkflow(requestContext, requirementMatch[1]).catch(() => null);
         let workflow = centerWorkflow ? mergeRequirementWorkflow(centerWorkflow, localWorkflow) : localWorkflow;
         if (!workflow) {
           send(response, 404, { message: '需求不存在' });
           return;
         }
-        await reportRequirementWorkspaceState(requestContext, workflow).catch(() => undefined);
         const refreshed = await refreshTerminalRunStatuses(store.root, workflow);
         workflow = refreshed.workflow;
-        workflow = await saveWithArtifacts(store.root, store.repository, workflow);
+        if (refreshed.changed) {
+          workflow = await store.repository.save(workflow);
+        }
         send(response, 200, { data: workflow });
+        scheduleArtifactIndexRefresh(store.root, store.repository, workflow);
+        scheduleRequirementWorkspaceStateReport(requestContext, workflow);
         return;
       }
 
@@ -686,6 +746,14 @@ export function createRouter(workspaceRoot: string) {
               prdClarification: normalizePrdClarification(typeof params.description === 'string' ? params.description : workflow.prdClarification)
             };
           }
+          if (action.actionType === 'PRD_CLARIFY') {
+            await assertPrdClarificationReady(root, workflow, action);
+            const params = action.params || {};
+            workflow = {
+              ...workflow,
+              prdClarification: normalizePrdClarification(typeof params.description === 'string' ? params.description : '')
+            };
+          }
           if (action.actionType === 'DESIGN_GENERATE') {
             const params = action.params || {};
             const documentPath = designDocumentPath(workflow, params);
@@ -752,7 +820,7 @@ export function createRouter(workspaceRoot: string) {
             );
           }
           // PRD分析、技术方案生成等可能产生产物的操作，执行完成后自动刷新产物索引
-          if (['PRD_ANALYZE', 'DESIGN_GENERATE', 'DESIGN_QUESTION', 'OPENSPEC_NEW_CHANGE', 'OPENSPEC_ARCHIVE'].includes(action.actionType)) {
+          if (['PRD_ANALYZE', 'PRD_CLARIFY', 'DESIGN_GENERATE', 'DESIGN_QUESTION', 'OPENSPEC_NEW_CHANGE', 'OPENSPEC_ARCHIVE'].includes(action.actionType)) {
             workflow.artifacts = await scanRequirementArtifacts(
               root,
               workflow.requirementId,
@@ -761,6 +829,7 @@ export function createRouter(workspaceRoot: string) {
               workflow.requirementType
             );
           }
+          workflow = applyPrdClarificationRun(workflow, run);
           if (action.actionType === 'RETURN_TO_IMPLEMENTATION') {
             const issues = await refreshCodeReviewIssues(root, workflow);
             workflow = returnToImplementation(workflow, issues);
@@ -786,6 +855,7 @@ export function createRouter(workspaceRoot: string) {
         }
         validateActionInput(root, action);
         const params = action.params || {};
+        await assertPrdClarificationReady(root, workflow, action);
         if (action.actionType === 'DESIGN_GENERATE') {
           workflow = {
             ...workflow,
@@ -1008,8 +1078,8 @@ export function createRouter(workspaceRoot: string) {
 
       send(response, 404, { message: '接口不存在' });
     } catch (error: any) {
-      const conflictCodes = new Set(['ARTIFACT_CONFLICT', 'B70075', 'REQUIREMENT_ARTIFACTS_NOT_SYNCED']);
-      const status = conflictCodes.has(error.code) ? 409 : 500;
+      const conflictCodes = new Set(['ARTIFACT_CONFLICT', 'B70075']);
+      const status = conflictCodes.has(error.code) ? 409 : error.code === 'VALIDATION_ERROR' ? 400 : 500;
       send(response, status, {
         message: error.message || '服务异常',
         code: error.code,

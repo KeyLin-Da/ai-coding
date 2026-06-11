@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { syncCodingSkills } from '../../server/services/skill-sync';
+import { bootstrapProjectArtifactWorkspace, syncCodingSkills } from '../../server/services/skill-sync';
 
 describe('skill-sync', () => {
   let tempDir: string;
@@ -111,6 +111,60 @@ describe('skill-sync', () => {
       ]);
       await expect(fs.access(path.join(projectRepo, '.codex', 'skills', 'coding-review', 'SKILL.md'))).resolves.toBeUndefined();
       await expect(fs.access(path.join(projectRepo, 'skills'))).rejects.toThrow();
+    } finally {
+      await fs.rm(projectRepo, { recursive: true, force: true });
+    }
+  });
+
+  it('初始化项目仓时补齐 openspec 与 Agent 目录且 coding skill 使用源 skills 最新内容', async () => {
+    await fs.mkdir(path.join(skillsDir, 'coding-review'), { recursive: true });
+    await fs.writeFile(path.join(skillsDir, 'coding-review', 'SKILL.md'), '# latest coding-review');
+
+    await fs.mkdir(path.join(tempDir, 'openspec', 'specs', 'delivery'), { recursive: true });
+    await fs.writeFile(path.join(tempDir, 'openspec', 'config.yaml'), 'rules: {}\n');
+    await fs.writeFile(path.join(tempDir, 'openspec', 'specs', 'delivery', 'spec.md'), '# delivery spec');
+    await fs.mkdir(path.join(tempDir, 'openspec', 'changes', 'source-history'), { recursive: true });
+    await fs.writeFile(path.join(tempDir, 'openspec', 'changes', 'source-history', 'proposal.md'), '# old change');
+
+    await fs.mkdir(path.join(tempDir, '.codex', 'skills', 'openspec-apply-change'), { recursive: true });
+    await fs.writeFile(path.join(tempDir, '.codex', 'skills', 'openspec-apply-change', 'SKILL.md'), '# openspec apply');
+    await fs.mkdir(path.join(tempDir, '.codex', 'skills', 'coding-review'), { recursive: true });
+    await fs.writeFile(path.join(tempDir, '.codex', 'skills', 'coding-review', 'SKILL.md'), '# stale coding-review');
+    await fs.mkdir(path.join(tempDir, '.codebuddy', 'commands', 'opsx'), { recursive: true });
+    await fs.writeFile(path.join(tempDir, '.codebuddy', 'commands', 'opsx', 'apply.md'), '# apply command');
+    await fs.mkdir(path.join(tempDir, '.qoder', 'commands', 'opsx'), { recursive: true });
+    await fs.writeFile(path.join(tempDir, '.qoder', 'commands', 'opsx', 'apply.md'), '# qoder apply command');
+    await fs.writeFile(path.join(tempDir, '.qoder', 'settings.local.json'), '{"local":true}\n');
+    await fs.mkdir(path.join(tempDir, '.qwen', 'commands'), { recursive: true });
+    await fs.writeFile(path.join(tempDir, '.qwen', 'commands', 'opsx-apply.toml'), 'name = "apply"\n');
+    await fs.writeFile(path.join(tempDir, '.qwen', 'settings.json.orig'), '{"backup":true}\n');
+    await fs.mkdir(path.join(tempDir, '.qwen', 'skills', 'openspec-apply-change'), { recursive: true });
+    await fs.writeFile(path.join(tempDir, '.qwen', 'skills', 'openspec-apply-change', 'SKILL.md'), '# qwen openspec apply');
+
+    const projectRepo = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-project-bootstrap-'));
+    try {
+      const result = await bootstrapProjectArtifactWorkspace(tempDir, projectRepo);
+
+      expect(result.openSpecInitialized).toBe(true);
+      expect(result.agentDirsInitialized).toEqual([
+        path.join(projectRepo, '.codex'),
+        path.join(projectRepo, '.codebuddy'),
+        path.join(projectRepo, '.qoder'),
+        path.join(projectRepo, '.qwen')
+      ]);
+      expect(result.codingSkills.synced).toBe(1);
+      await expect(fs.access(path.join(projectRepo, 'openspec', 'config.yaml'))).resolves.toBeUndefined();
+      await expect(fs.access(path.join(projectRepo, 'openspec', 'specs', 'delivery', 'spec.md'))).resolves.toBeUndefined();
+      await expect(fs.access(path.join(projectRepo, 'openspec', 'changes'))).resolves.toBeUndefined();
+      await expect(fs.access(path.join(projectRepo, 'openspec', 'changes', 'source-history'))).rejects.toThrow();
+      await expect(fs.access(path.join(projectRepo, '.codex', 'skills', 'openspec-apply-change', 'SKILL.md'))).resolves.toBeUndefined();
+      await expect(fs.access(path.join(projectRepo, '.codebuddy', 'commands', 'opsx', 'apply.md'))).resolves.toBeUndefined();
+      await expect(fs.access(path.join(projectRepo, '.qoder', 'commands', 'opsx', 'apply.md'))).resolves.toBeUndefined();
+      await expect(fs.access(path.join(projectRepo, '.qwen', 'commands', 'opsx-apply.toml'))).resolves.toBeUndefined();
+      await expect(fs.access(path.join(projectRepo, '.qoder', 'settings.local.json'))).rejects.toThrow();
+      await expect(fs.access(path.join(projectRepo, '.qwen', 'settings.json.orig'))).rejects.toThrow();
+      await expect(fs.access(path.join(projectRepo, 'skills'))).rejects.toThrow();
+      await expect(fs.readFile(path.join(projectRepo, '.codex', 'skills', 'coding-review', 'SKILL.md'), 'utf8')).resolves.toBe('# latest coding-review');
     } finally {
       await fs.rm(projectRepo, { recursive: true, force: true });
     }

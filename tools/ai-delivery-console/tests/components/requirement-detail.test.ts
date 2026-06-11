@@ -25,6 +25,7 @@ vi.mock('@/api/client', () => ({
     runAction: vi.fn(),
     getGitChanges: vi.fn(),
     getRunEvents: vi.fn(),
+    openRunEventStream: vi.fn(),
     previewActionCommand: vi.fn(),
     readArtifact: vi.fn(),
     deleteTechDesignQuestion: vi.fn(),
@@ -311,6 +312,22 @@ function designQuestionSubmitButton(wrapper: ReturnType<typeof mount>) {
   return button;
 }
 
+function prdClarificationButton(wrapper: ReturnType<typeof mount>) {
+  const button = wrapper.findAll('button').find((item) => item.text().includes('澄清 PRD'));
+  if (!button) {
+    throw new Error('未找到澄清 PRD 按钮');
+  }
+  return button;
+}
+
+function prdWorkflow(artifacts: ArtifactRef[], status: RequirementWorkflow['stages']['PRD']['status'] = 'DRAFT'): RequirementWorkflow {
+  const current = workflow(artifacts);
+  current.currentStage = 'PRD';
+  current.status = 'DRAFT';
+  current.stages.PRD.status = status;
+  return current;
+}
+
 async function openDesignQuestionDialog(wrapper: ReturnType<typeof mount>) {
   await designQuestionEntryButton(wrapper).trigger('click');
   await flushPromises();
@@ -353,6 +370,7 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
       localRepoPath: '/tmp/ai-delivery/project',
       syncStatus: 'READY'
     });
+    vi.mocked(apiClient.openRunEventStream).mockImplementation((requirementId: string, runId: string) => new MockEventSource(`runner:${requirementId}:${runId}`) as unknown as EventSource);
     vi.stubGlobal('EventSource', MockEventSource);
     Object.defineProperty(navigator, 'clipboard', {
       value: {
@@ -370,7 +388,60 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     expect(wrapper.text()).not.toContain('需要先通过 PRD 审核');
     expect(wrapper.text()).not.toContain('PRD 文档');
     expect(wrapper.text()).not.toContain('生成 PRD');
+    expect(wrapper.text()).not.toContain('澄清 PRD');
     expect(designButton(wrapper).attributes('disabled')).toBeUndefined();
+  });
+
+  it('未生成 PRD 时禁用澄清入口并提示先生成文档', async () => {
+    const wrapper = await mountDetail(prdWorkflow([]));
+
+    expect(prdClarificationButton(wrapper).attributes('disabled')).toBeDefined();
+    expect(wrapper.text()).toContain('请先生成 PRD 文档后再澄清');
+  });
+
+  it('已有 PRD 时通过弹窗提交 PRD 澄清且不携带 sources', async () => {
+    const current = prdWorkflow([artifact('PRD', 'docs/172014/prd/analysis.md')]);
+    const wrapper = await mountDetail(current);
+
+    await prdClarificationButton(wrapper).trigger('click');
+    await flushPromises();
+    expect(wrapper.text()).toContain('docs/172014/prd/analysis.md');
+
+    await wrapper.find('.prd-clarification-input').setValue('补充异常场景');
+    const submitButton = wrapper.findAll('button').find((item) => item.text().includes('提交澄清'));
+    await submitButton?.trigger('click');
+    await flushPromises();
+
+    expect(ElMessageBox.confirm).not.toHaveBeenCalled();
+    expect(apiClient.runAction).toHaveBeenCalledWith('172014', {
+      actionType: 'PRD_CLARIFY',
+      params: {
+        agentId: 'codex',
+        executionMode: 'BACKGROUND',
+        description: '补充异常场景'
+      }
+    });
+    expect(vi.mocked(apiClient.runAction).mock.calls[0][1].params).not.toHaveProperty('sources');
+  });
+
+  it('已审核 PRD 提交澄清前需要确认重新审核', async () => {
+    const current = prdWorkflow([artifact('PRD', 'docs/172014/prd/analysis.md')], 'APPROVED');
+    const wrapper = await mountDetail(current);
+
+    await prdClarificationButton(wrapper).trigger('click');
+    await flushPromises();
+    await wrapper.find('.prd-clarification-input').setValue('补充范围边界');
+    const submitButton = wrapper.findAll('button').find((item) => item.text().includes('提交澄清'));
+    await submitButton?.trigger('click');
+    await flushPromises();
+
+    expect(ElMessageBox.confirm).toHaveBeenCalledWith(expect.stringContaining('回到待审核状态'), '确认澄清 PRD', expect.any(Object));
+    expect(apiClient.runAction).toHaveBeenCalledWith(
+      '172014',
+      expect.objectContaining({
+        actionType: 'PRD_CLARIFY'
+      })
+    );
   });
 
   it('技术方案输入区集中展示补充材料、补充说明和生成动作', async () => {
@@ -405,6 +476,28 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
       })
     );
     expect(ElMessage.warning).not.toHaveBeenCalledWith('请先通过 PRD 审核');
+  });
+
+  it('当前用户项目仓 DIRTY 时仍允许继续执行自己的工作流动作', async () => {
+    vi.mocked(apiClient.getProjectRepositoryStatus).mockResolvedValue({
+      projectId: 10,
+      clientSessionId: 20,
+      localRepoPath: '/tmp/ai-delivery/project',
+      syncStatus: 'DIRTY'
+    });
+    const current = defectWorkflow([]);
+    const wrapper = await mountDetail(current);
+
+    await designButton(wrapper).trigger('click');
+    await flushPromises();
+
+    expect(apiClient.runAction).toHaveBeenCalledWith(
+      '172014',
+      expect.objectContaining({
+        actionType: 'DESIGN_GENERATE'
+      })
+    );
+    expect(ElMessage.warning).not.toHaveBeenCalledWith('项目产物仓存在未同步变更，请先公开同步或清理后再继续流程动作');
   });
 
   it('技术方案编辑器在仅有补充材料时指向正式设计文档默认路径', async () => {

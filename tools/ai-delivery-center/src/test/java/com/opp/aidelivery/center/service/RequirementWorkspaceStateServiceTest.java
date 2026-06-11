@@ -1,5 +1,6 @@
 package com.opp.aidelivery.center.service;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
@@ -70,6 +71,17 @@ class RequirementWorkspaceStateServiceTest {
             .isEqualTo(AiDeliveryErrorCode.PROJECT_REPOSITORY_DIRTY);
     }
 
+    @Test
+    void assertWritableAllowsCurrentUserDirtyRequirementWorkspace() {
+        when(requirementMapper.selectById(100L)).thenReturn(requirement());
+        when(clientSessionService.loadOwnedSession(1L, 11L)).thenReturn(new ClientSessionEntity());
+        when(stateMapper.selectList(any()))
+            .thenReturn(Collections.emptyList())
+            .thenReturn(Collections.singletonList(dirtyState(1L, 11L)));
+
+        assertThat(service.assertWritable(1L, 100L, 11L)).isEmpty();
+    }
+
     private RequirementEntity requirement() {
         RequirementEntity requirement = new RequirementEntity();
         requirement.setId(100L);
@@ -79,12 +91,16 @@ class RequirementWorkspaceStateServiceTest {
     }
 
     private RequirementWorkspaceStateEntity dirtyState() {
+        return dirtyState(2L, 22L);
+    }
+
+    private RequirementWorkspaceStateEntity dirtyState(Long userId, Long clientSessionId) {
         RequirementWorkspaceStateEntity state = new RequirementWorkspaceStateEntity();
         state.setId(30L);
         state.setProjectId(10L);
         state.setRequirementPk(100L);
-        state.setUserId(2L);
-        state.setClientSessionId(22L);
+        state.setUserId(userId);
+        state.setClientSessionId(clientSessionId);
         state.setStatus("DIRTY");
         state.setDirtyFileCount(2);
         state.setDirtyPathsSample("[\"docs/172014/prd/analysis.md\"]");

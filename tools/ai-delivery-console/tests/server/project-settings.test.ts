@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { assertProjectPathsConfigured, loadPrivateProjectSettings, loadSettings, saveSettings, validateSettings } from '../../server/services/project-settings';
+import { getConsoleStateDir } from '../../server/services/runtime-paths';
 
 describe('project-settings', () => {
   let tempDir: string;
@@ -25,6 +26,20 @@ describe('project-settings', () => {
     await saveSettings(tempDir, input);
     const loaded = await loadSettings(tempDir);
     expect(loaded).toEqual(input);
+    await expect(fs.stat(path.join(tempDir, 'docs', '.ai-delivery-console', 'settings.json'))).rejects.toThrow();
+    await expect(fs.stat(path.join(getConsoleStateDir(tempDir), 'settings.json'))).resolves.toBeTruthy();
+  });
+
+  it('读取旧 docs 配置后迁移到工作区 .ai-delivery', async () => {
+    const legacyPath = path.join(tempDir, 'docs', '.ai-delivery-console', 'settings.json');
+    await fs.mkdir(path.dirname(legacyPath), { recursive: true });
+    await fs.writeFile(legacyPath, JSON.stringify({ projectPaths: ['/Users/dev/projects'] }), 'utf8');
+
+    const loaded = await loadSettings(tempDir);
+
+    expect(loaded).toEqual({ projectPaths: ['/Users/dev/projects'] });
+    await expect(fs.stat(legacyPath)).rejects.toThrow();
+    await expect(fs.stat(path.join(getConsoleStateDir(tempDir), 'settings.json'))).resolves.toBeTruthy();
   });
 
   it('validateSettings 校验绝对路径', async () => {

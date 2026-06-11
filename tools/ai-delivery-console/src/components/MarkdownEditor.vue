@@ -62,6 +62,7 @@ import MarkdownIt from 'markdown-it';
 import { DocumentChecked, Download, FullScreen, Minus, View } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { apiClient } from '@/api/client';
+import { rewriteMarkdownImageSources } from '@/utils/markdown-assets';
 import mermaid from 'mermaid';
 
 const props = defineProps<{
@@ -109,22 +110,7 @@ const saving = ref(false);
 
 const previewHtml = computed(() => {
   const rendered = md.render(content.value || '');
-  // 处理图片路径，将相对路径转换为 API 访问路径
-  if (props.artifactPath) {
-    const basePath = props.artifactPath.substring(0, props.artifactPath.lastIndexOf('/'));
-    return rendered.replace(
-      /<img([^>]*)src="([^"]+)"([^>]*)>/g,
-      (match, before, src, after) => {
-        // 如果是相对路径，转换为 API 路径
-        if (!src.startsWith('http://') && !src.startsWith('https://') && !src.startsWith('data:')) {
-          const fullPath = `${basePath}/${src}`;
-          return `<img${before}src="/api/artifacts/read?path=${encodeURIComponent(fullPath)}"${after}>`;
-        }
-        return match;
-      }
-    );
-  }
-  return rendered;
+  return rewriteMarkdownImageSources(rendered, props.artifactPath);
 });
 
 // 在 DOM 更新后渲染 mermaid 图表

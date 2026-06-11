@@ -3,18 +3,20 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { appendRunEvent, readRunEventsWithTranscript, readTerminalTranscriptChunk } from '../../server/services/run-log';
+import { getRunRuntimeDir, toRuntimePathRef } from '../../server/services/runtime-paths';
 
 describe('run-log', () => {
   it('读取运行事件时追加终端 transcript 合成事件', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-run-log-'));
-    const transcriptPath = 'docs/172014/workflow/runs/run-terminal.terminal.log';
+    const absoluteTranscriptPath = path.join(getRunRuntimeDir(root, '172014'), 'run-terminal.terminal.log');
+    const transcriptPath = toRuntimePathRef(root, absoluteTranscriptPath);
     await appendRunEvent(root, '172014', 'run-terminal', {
       type: 'START',
       level: 'INFO',
       message: '准备在本地终端启动 Agent'
     });
-    await fs.mkdir(path.dirname(path.join(root, transcriptPath)), { recursive: true });
-    await fs.writeFile(path.join(root, transcriptPath), '[AI Delivery] 开始本地终端执行\nCodeBuddy 输出\n', 'utf8');
+    await fs.mkdir(path.dirname(absoluteTranscriptPath), { recursive: true });
+    await fs.writeFile(absoluteTranscriptPath, '[AI Delivery] 开始本地终端执行\nCodeBuddy 输出\n', 'utf8');
 
     const events = await readRunEventsWithTranscript(root, '172014', 'run-terminal', transcriptPath);
 
@@ -24,12 +26,13 @@ describe('run-log', () => {
 
   it('按 offset 读取终端 transcript 增量', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-run-log-'));
-    const transcriptPath = 'docs/172014/workflow/runs/run-terminal.terminal.log';
-    await fs.mkdir(path.dirname(path.join(root, transcriptPath)), { recursive: true });
-    await fs.writeFile(path.join(root, transcriptPath), '第一段输出\n', 'utf8');
+    const absoluteTranscriptPath = path.join(getRunRuntimeDir(root, '172014'), 'run-terminal.terminal.log');
+    const transcriptPath = toRuntimePathRef(root, absoluteTranscriptPath);
+    await fs.mkdir(path.dirname(absoluteTranscriptPath), { recursive: true });
+    await fs.writeFile(absoluteTranscriptPath, '第一段输出\n', 'utf8');
 
     const first = await readTerminalTranscriptChunk(root, transcriptPath, 0);
-    await fs.appendFile(path.join(root, transcriptPath), '第二段输出\n', 'utf8');
+    await fs.appendFile(absoluteTranscriptPath, '第二段输出\n', 'utf8');
     const second = await readTerminalTranscriptChunk(root, transcriptPath, first.nextOffset);
 
     expect(first.event?.text).toContain('第一段输出');

@@ -84,7 +84,6 @@ export interface BootstrapImportResult {
 }
 
 const MANIFEST_PATH = path.join('.ai-delivery', 'import-manifest.json');
-const CONTROLLED_RUN_FILE_EXTENSIONS = new Set(['.jsonl', '.json', '.log', '.txt']);
 
 export async function buildBootstrapImportPlan(workspaceRoot: string): Promise<BootstrapImportPlan> {
   const normalizedRoot = path.resolve(workspaceRoot);
@@ -104,7 +103,6 @@ export async function buildBootstrapImportPlan(workspaceRoot: string): Promise<B
       workflow?.requirementType || 'REQUIREMENT'
     );
     const artifacts = await buildArtifacts(normalizedRoot, requirementId, scanned, skippedArtifacts, conflicts);
-    artifacts.push(...(await scanRunLogArtifacts(normalizedRoot, requirementId, skippedArtifacts, conflicts)));
     requirements.push({
       requirementId,
       title: workflow?.title || `需求 ${requirementId}`,
@@ -434,7 +432,7 @@ function isBootstrapGitSyncPath(requirement: BootstrapImportRequirement, logical
   const requirementId = normalizeRequirementId(requirement.requirementId);
   const changeName = requirement.stages.IMPLEMENTATION.changeName || `req-${requirementId}`;
   return (
-    normalized.startsWith(`docs/${requirementId}/`) ||
+    (normalized.startsWith(`docs/${requirementId}/`) && !normalized.startsWith(`docs/${requirementId}/workflow/`)) ||
     normalized.startsWith('docs/code_review/') ||
     normalized.startsWith(`openspec/changes/${changeName}/`) ||
     normalized.startsWith('openspec/specs/')
@@ -613,27 +611,6 @@ async function buildArtifacts(
   return artifacts;
 }
 
-async function scanRunLogArtifacts(workspaceRoot: string, requirementId: string, skippedArtifacts: string[], conflicts: string[]): Promise<BootstrapImportArtifact[]> {
-  const root = path.join(workspaceRoot, 'docs', requirementId, 'workflow', 'runs');
-  const files = await listFiles(root, 3);
-  const artifacts: BootstrapImportArtifact[] = [];
-  for (const file of files) {
-    const ext = path.extname(file).toLowerCase();
-    const relative = path.relative(workspaceRoot, file);
-    if (!CONTROLLED_RUN_FILE_EXTENSIONS.has(ext)) {
-      conflicts.push(`跳过非运行日志文件: ${relative}`);
-      continue;
-    }
-    const artifact = await artifactFromPath(workspaceRoot, requirementId, 'IMPLEMENTATION', path.basename(file), relative, artifactKindForPath(relative));
-    if (artifact) {
-      artifacts.push(artifact);
-    } else {
-      skippedArtifacts.push(relative);
-    }
-  }
-  return artifacts;
-}
-
 async function artifactFromPath(
   workspaceRoot: string,
   requirementId: string,
@@ -709,7 +686,7 @@ function isControlledArtifactPath(relativePath: string): boolean {
     return false;
   }
   return (
-    normalized.startsWith('docs/') ||
+    (normalized.startsWith('docs/') && !normalized.includes('/workflow/')) ||
     normalized.startsWith('openspec/changes/') ||
     normalized.startsWith('openspec/archive/')
   );
@@ -724,14 +701,6 @@ function contentTypeForPath(filePath: string): string {
   if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
   if (ext === '.pdf') return 'application/pdf';
   return 'text/plain';
-}
-
-function artifactKindForPath(filePath: string): ArtifactRef['kind'] {
-  const ext = path.extname(filePath).toLowerCase();
-  if (ext === '.html') return 'html';
-  if (ext === '.md' || ext === '.markdown') return 'markdown';
-  if (ext === '.json' || ext === '.jsonl') return 'json';
-  return 'text';
 }
 
 function artifactKind(artifact: BootstrapImportArtifact): string {

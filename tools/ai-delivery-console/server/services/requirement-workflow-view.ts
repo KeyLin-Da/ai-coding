@@ -4,6 +4,22 @@ import { deriveCurrentStage } from '../../shared/stage-rules';
 import type { LocalRequestContext } from './local-request-context';
 import { centerRequest } from './center-client';
 
+const CENTER_REQUIREMENT_CACHE_TTL_MS = 5_000;
+
+interface CenterRequirementCacheEntry {
+  expiresAt: number;
+  value?: RequirementWorkflow | null;
+  inFlight?: Promise<RequirementWorkflow | null>;
+}
+
+export interface CachedCenterRequirementOptions {
+  cacheTtlMs?: number;
+  timeoutMs?: number;
+  now?: () => number;
+}
+
+const centerRequirementCache = new Map<string, CenterRequirementCacheEntry>();
+
 interface CenterWorkflowStagePayload {
   stage: WorkflowStage | 'DONE';
   status: WorkflowStatus;
@@ -147,4 +163,80 @@ export async function loadCenterRequirementWorkflow(context: LocalRequestContext
     }
     throw error;
   }
+}
+
+export async function loadCachedCenterRequirementWorkflow(
+  context: LocalRequestContext,
+  requirementId: string,
+  options: CachedCenterRequirementOptions = {}
+): Promise<RequirementWorkflow | null | undefined> {
+  const now = options.now?.() ?? Date.now();
+  const cacheTtlMs = options.cacheTtlMs ?? CENTER_REQUIREMENT_CACHE_TTL_MS;
+  const key = centerRequirementCacheKey(context, requirementId);
+  const cached = centerRequirementCache.get(key);
+  if (cached && cached.value !== undefined && cached.expiresAt > now) {
+    return cached.value;
+  }
+
+  let inFlight = cached?.inFlight;
+  if (!inFlight) {
+    inFlight = loadCenterRequirementWorkflow(context, requirementId)
+      .then((value) => {
+        centerRequirementCache.set(key, {
+          value,
+          expiresAt: (options.now?.() ?? Date.now()) + cacheTtlMs
+        });
+        return value;
+      })
+      .catch((error) => {
+        if (!cached?.value) {
+          centerRequirementCache.delete(key);
+        }
+        throw error;
+      })
+      .finally(() => {
+        const latest = centerRequirementCache.get(key);
+        if (latest?.inFlight === inFlight) {
+          if (latest.value !== undefined) {
+            centerRequirementCache.set(key, {
+              value: latest.value,
+              expiresAt: latest.expiresAt
+            });
+          } else {
+            centerRequirementCache.delete(key);
+          }
+        }
+      });
+    centerRequirementCache.set(key, {
+      value: cached?.value,
+      expiresAt: cached?.expiresAt || 0,
+      inFlight
+    });
+  }
+
+  if (options.timeoutMs == null) {
+    return inFlight;
+  }
+
+  const timeout = Symbol('center-requirement-timeout');
+  const result = await Promise.race([
+    inFlight,
+    new Promise<typeof timeout>((resolve) => {
+      setTimeout(() => resolve(timeout), options.timeoutMs);
+    })
+  ]);
+  return result === timeout ? cached?.value : result;
+}
+
+export function clearCenterRequirementWorkflowCache(): void {
+  centerRequirementCache.clear();
+}
+
+function centerRequirementCacheKey(context: LocalRequestContext, requirementId: string): string {
+  return [
+    context.centerBaseUrl || '',
+    context.userId || '',
+    context.projectId || '',
+    requirementId
+  ].join(':');
 }

@@ -20,6 +20,21 @@ export interface RequirementWorkspaceState {
   expireAt?: string;
 }
 
+interface ScheduledWorkspaceStateReport {
+  lastStartedAt: number;
+  inFlight?: Promise<void>;
+}
+
+export interface ScheduleRequirementWorkspaceStateReportOptions {
+  now?: () => number;
+  throttleMs?: number;
+  reporter?: typeof reportRequirementWorkspaceState;
+  logger?: Pick<Console, 'warn'>;
+}
+
+const DEFAULT_ASYNC_REPORT_THROTTLE_MS = 15_000;
+const scheduledWorkspaceStateReports = new Map<string, ScheduledWorkspaceStateReport>();
+
 function parsePorcelainPaths(output: string): string[] {
   return output
     .split('\n')
@@ -93,6 +108,48 @@ export async function reportRequirementWorkspaceState(
   );
 }
 
+function workspaceStateReportKey(context: LocalRequestContext, workflow: RequirementWorkflow): string {
+  return [context.projectId || 'project', context.clientSessionId || 'session', workflow.id || workflow.requirementId].join(':');
+}
+
+export function scheduleRequirementWorkspaceStateReport(
+  context: LocalRequestContext,
+  workflow: RequirementWorkflow,
+  options: ScheduleRequirementWorkspaceStateReportOptions = {}
+): boolean {
+  if (!workflow.id || !context.clientSessionId) {
+    return false;
+  }
+  const now = options.now?.() ?? Date.now();
+  const throttleMs = options.throttleMs ?? DEFAULT_ASYNC_REPORT_THROTTLE_MS;
+  const key = workspaceStateReportKey(context, workflow);
+  const scheduled = scheduledWorkspaceStateReports.get(key);
+  if (scheduled?.inFlight) {
+    return false;
+  }
+  if (scheduled && now - scheduled.lastStartedAt < throttleMs) {
+    return false;
+  }
+
+  const reporter = options.reporter || reportRequirementWorkspaceState;
+  const logger = options.logger || console;
+  let inFlight: Promise<void>;
+  inFlight = Promise.resolve()
+    .then(() => reporter(context, workflow))
+    .catch((error: Error) => {
+      logger.warn?.('[ai-delivery] 异步上报需求工作区状态失败:', error.message || error);
+    })
+    .then(() => undefined)
+    .finally(() => {
+      const latest = scheduledWorkspaceStateReports.get(key);
+      if (latest?.inFlight === inFlight) {
+        scheduledWorkspaceStateReports.set(key, { lastStartedAt: latest.lastStartedAt });
+      }
+    });
+  scheduledWorkspaceStateReports.set(key, { lastStartedAt: now, inFlight });
+  return true;
+}
+
 export async function listRequirementWorkspaceStates(
   context: LocalRequestContext,
   workflow: RequirementWorkflow
@@ -120,8 +177,4 @@ export async function assertRequirementWorkspaceWritable(
       })
     }
   );
-}
-
-export function requirementNotMaterializedMessage(requirementId: string): string {
-  return `需求 ${requirementId} 的本地产物目录尚未同步到Git仓。请先点击右上角“同步Git仓”；如果同步后仍无法进入，说明作者还未公开同步该需求产物。`;
 }

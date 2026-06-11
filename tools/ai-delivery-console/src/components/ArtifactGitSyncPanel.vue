@@ -109,6 +109,7 @@ const props = withDefaults(
     emptyDescription?: string;
   }>(),
   {
+    plan: undefined,
     diffHint: '仅预览并同步当前勾选的受控产物文件。',
     emptyDescription: '暂无可同步文件'
   }

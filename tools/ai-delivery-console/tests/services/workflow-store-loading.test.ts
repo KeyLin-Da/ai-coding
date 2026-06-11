@@ -1,0 +1,85 @@
+import { createPinia, setActivePinia } from 'pinia';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createEmptyStages, type RequirementWorkflow } from '../../shared/workflow';
+import { useWorkflowStore } from '@/stores/workflow';
+import { apiClient } from '@/api/client';
+
+vi.mock('@/api/client', () => ({
+  apiClient: {
+    listRequirements: vi.fn(),
+    getRequirement: vi.fn()
+  }
+}));
+
+vi.mock('element-plus', () => ({
+  ElMessage: {
+    info: vi.fn(),
+    warning: vi.fn(),
+    success: vi.fn()
+  }
+}));
+
+function workflow(id: string, lastEventId?: string | number): RequirementWorkflow {
+  return {
+    id,
+    requirementId: id,
+    title: `需求 ${id}`,
+    requirementType: 'REQUIREMENT',
+    sources: [],
+    currentStage: 'TECH_DESIGN',
+    status: 'IN_PROGRESS',
+    createdAt: '2026-06-09T00:00:00.000Z',
+    updatedAt: '2026-06-09T00:00:00.000Z',
+    stages: createEmptyStages(),
+    artifacts: [],
+    runs: [],
+    reviews: [],
+    issues: [],
+    lastEventId
+  };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((innerResolve) => {
+    resolve = innerResolve;
+  });
+  return { promise, resolve };
+}
+
+describe('workflow store loading', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+  });
+
+  it('同一个需求详情请求进行中时复用同一个 Promise 并记录 lastEventId', async () => {
+    const pending = deferred<RequirementWorkflow>();
+    vi.mocked(apiClient.getRequirement).mockReturnValue(pending.promise);
+    const store = useWorkflowStore();
+
+    const first = store.loadRequirement('172014');
+    const second = store.loadRequirement('172014');
+    pending.resolve(workflow('172014', 42));
+    await Promise.all([first, second]);
+
+    expect(apiClient.getRequirement).toHaveBeenCalledTimes(1);
+    expect(store.current?.title).toBe('需求 172014');
+    expect(store.lastEventId).toBe(42);
+  });
+
+  it('需求列表请求进行中时复用同一个 Promise 并取最大的 lastEventId', async () => {
+    const pending = deferred<RequirementWorkflow[]>();
+    vi.mocked(apiClient.listRequirements).mockReturnValue(pending.promise);
+    const store = useWorkflowStore();
+
+    const first = store.loadRequirements();
+    const second = store.loadRequirements();
+    pending.resolve([workflow('172014', 7), workflow('172015', 12)]);
+    await Promise.all([first, second]);
+
+    expect(apiClient.listRequirements).toHaveBeenCalledTimes(1);
+    expect(store.requirements).toHaveLength(2);
+    expect(store.lastEventId).toBe(12);
+  });
+});

@@ -6,6 +6,7 @@ import { deriveCurrentStage } from '../../shared/stage-rules';
 import { normalizeRequirementId } from './workspace';
 import { saveProjectHistory } from './project-history';
 import { normalizeWorkflowProjects } from './project-resolver';
+import { getWorkflowRuntimeDir, getWorkflowRuntimeStatePath, listRuntimeRequirementIds } from './runtime-paths';
 
 export function normalizePrdClarification(value?: string): string | undefined {
   const withoutControls = Array.from(String(value || ''))
@@ -39,23 +40,31 @@ export class WorkflowRepository {
   constructor(private readonly workspaceRoot: string) {}
 
   getWorkflowDir(requirementId: string): string {
-    return path.join(this.workspaceRoot, 'docs', normalizeRequirementId(requirementId), 'workflow');
+    return getWorkflowRuntimeDir(this.workspaceRoot, requirementId);
   }
 
   getStatePath(requirementId: string): string {
-    return path.join(this.getWorkflowDir(requirementId), 'state.json');
+    return getWorkflowRuntimeStatePath(this.workspaceRoot, requirementId);
+  }
+
+  getLegacyStatePath(requirementId: string): string {
+    return path.join(this.workspaceRoot, 'docs', normalizeRequirementId(requirementId), 'workflow', 'state.json');
   }
 
   async load(requirementId: string): Promise<RequirementWorkflow | null> {
-    try {
-      const content = await fs.readFile(this.getStatePath(requirementId), 'utf8');
-      return withWorkflowDefaults(JSON.parse(content) as RequirementWorkflow);
-    } catch (error: any) {
-      if (error.code === 'ENOENT') {
-        return null;
+    for (const statePath of [this.getStatePath(requirementId), this.getLegacyStatePath(requirementId)]) {
+      const content = await fs.readFile(statePath, 'utf8').catch((error: any) => {
+        if (error.code === 'ENOENT') {
+          return '';
+        }
+        throw error;
+      });
+      if (!content) {
+        continue;
       }
-      throw error;
+      return withWorkflowDefaults(JSON.parse(content) as RequirementWorkflow);
     }
+    return null;
   }
 
   async save(workflow: RequirementWorkflow): Promise<RequirementWorkflow> {
@@ -149,15 +158,18 @@ export class WorkflowRepository {
     const docsDir = path.join(this.workspaceRoot, 'docs');
     try {
       const entries = await fs.readdir(docsDir, { withFileTypes: true });
+      const requirementIds = new Set([
+        ...(await listRuntimeRequirementIds(this.workspaceRoot)),
+        ...entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name)
+      ]);
       const workflows = await Promise.all(
-        entries
-          .filter((entry) => entry.isDirectory())
-          .map((entry) => this.load(entry.name))
+        [...requirementIds].map((requirementId) => this.load(requirementId))
       );
       return workflows.filter(Boolean).sort((a, b) => String(b?.updatedAt).localeCompare(String(a?.updatedAt))) as RequirementWorkflow[];
     } catch (error: any) {
       if (error.code === 'ENOENT') {
-        return [];
+        const workflows = await Promise.all((await listRuntimeRequirementIds(this.workspaceRoot)).map((requirementId) => this.load(requirementId)));
+        return workflows.filter(Boolean).sort((a, b) => String(b?.updatedAt).localeCompare(String(a?.updatedAt))) as RequirementWorkflow[];
       }
       throw error;
     }

@@ -7,7 +7,7 @@ vi.mock('@/api/client', () => ({
   apiClient: {
     readArtifact: vi.fn().mockResolvedValue({
       artifact: { hash: 'hash' },
-      content: '# PRD\n\n产物内容'
+      content: '# PRD\n\n产物内容\n\n![排行榜主页面](files/screenshots/ranking_main_20260610.png)'
     })
   }
 }));
@@ -51,6 +51,9 @@ describe('ArtifactPreviewDialog', () => {
     expect(wrapper.text()).toContain('docs/172014/prd/analysis.md');
     expect(wrapper.html()).toContain('<h1>PRD</h1>');
     expect(wrapper.text()).toContain('产物内容');
+    expect(wrapper.find('.artifact-markdown img').attributes('src')).toBe(
+      'http://127.0.0.1:8718/api/artifacts/read?path=docs%2F172014%2Fprd%2Ffiles%2Fscreenshots%2Franking_main_20260610.png'
+    );
     expect(wrapper.text()).toContain('v2');
     expect(wrapper.text()).toContain('4 个版本');
     expect(wrapper.text()).toContain('run 900');

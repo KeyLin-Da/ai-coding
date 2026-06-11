@@ -79,4 +79,80 @@ describe('apiClient Runner docs endpoints', () => {
       })
     );
   });
+
+  it('流程动作提交到本地 Runner 执行', async () => {
+    const current = workflow();
+    const fetchMock = vi.fn().mockImplementation(() =>
+      okResponse({
+        run: {
+          id: 'run-1',
+          requirementId: current.requirementId,
+          actionType: 'DESIGN_GENERATE',
+          status: 'RUNNING',
+          startedAt: new Date().toISOString(),
+          params: {}
+        },
+        workflow: current
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiClient.runAction('172014', { actionType: 'DESIGN_GENERATE' });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:8718/api/ai-delivery/requirements/172014/actions',
+      expect.objectContaining({
+        method: 'POST'
+      })
+    );
+  });
+
+  it('命令预览提交到本地 Runner', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => okResponse({ commandText: '/coding-design r=172014 d=test' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiClient.previewActionCommand('172014', { actionType: 'DESIGN_GENERATE' });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:8718/api/ai-delivery/requirements/172014/actions/command',
+      expect.objectContaining({
+        method: 'POST'
+      })
+    );
+  });
+
+  it('运行日志从本地 Runner 读取', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      okResponse([
+        {
+          time: '2026-06-10T01:22:46.000Z',
+          type: 'INFO',
+          level: 'INFO',
+          message: '开始执行'
+        }
+      ])
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiClient.getRunEvents('172014', 'run-20260610012246-5eef8c');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:8718/api/ai-delivery/runs/run-20260610012246-5eef8c/events?requirementId=172014',
+      expect.any(Object)
+    );
+  });
+
+  it('取消运行提交到本地 Runner', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => okResponse({ cancelled: true }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiClient.cancelRun('172014', 'run-20260610012246-5eef8c');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:8718/api/ai-delivery/runs/run-20260610012246-5eef8c/cancel',
+      expect.objectContaining({
+        method: 'POST'
+      })
+    );
+  });
 });

@@ -70,10 +70,25 @@ function controlledPrefixes(workflow: RequirementWorkflow): string[] {
     'docs/code_review/',
     `openspec/changes/${changeName}/`,
     'openspec/specs/',
+    '.codex/commands/',
     '.codex/skills/',
+    '.codebuddy/commands/',
     '.codebuddy/skills/',
+    '.qoder/commands/',
     '.qoder/skills/',
+    '.qwen/commands/',
     '.qwen/skills/'
+  ];
+}
+
+function excludedPrefixes(workflow: RequirementWorkflow): string[] {
+  const requirementId = workflow.requirementId.replace(/[^a-zA-Z0-9_.-]/g, '_');
+  return [`docs/${requirementId}/workflow/`];
+}
+
+function controlledExactPaths(): string[] {
+  return [
+    'openspec/config.yaml'
   ];
 }
 
@@ -82,7 +97,9 @@ export function assertControlledArtifactPath(workflow: RequirementWorkflow, file
   if (!normalized || normalized.startsWith('/') || normalized.includes('../') || normalized.includes('//')) {
     throw new Error(`同步文件路径不合法: ${filePath}`);
   }
-  if (!controlledPrefixes(workflow).some((prefix) => normalized.startsWith(prefix))) {
+  const isExcluded = excludedPrefixes(workflow).some((prefix) => normalized.startsWith(prefix));
+  const isControlled = !isExcluded && (controlledExactPaths().includes(normalized) || controlledPrefixes(workflow).some((prefix) => normalized.startsWith(prefix)));
+  if (!isControlled) {
     throw new Error(`同步文件不在受控产物路径内: ${filePath}`);
   }
   return normalized;

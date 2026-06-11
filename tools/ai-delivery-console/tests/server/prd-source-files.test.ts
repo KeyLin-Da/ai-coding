@@ -15,7 +15,7 @@ async function tmpWorkspace() {
 }
 
 describe('prd-source-files', () => {
-  it('将 PRD 来源文件快照到 workflow/file 目录', async () => {
+  it('将 PRD 来源文件快照到 prd/files 目录', async () => {
     const workspace = await tmpWorkspace();
     const snapshot = await savePrdSourceFileSnapshot(workspace, '172014', {
       filename: '低保真.md',
@@ -24,7 +24,7 @@ describe('prd-source-files', () => {
     });
 
     expect(snapshot.name).toBe('低保真.md');
-    expect(snapshot.path).toContain('docs/172014/workflow/file/');
+    expect(snapshot.path).toContain('docs/172014/prd/files/');
     expect(snapshot.path.endsWith('.md')).toBe(true);
     await expect(fs.stat(path.join(workspace, snapshot.path))).resolves.toBeTruthy();
   });

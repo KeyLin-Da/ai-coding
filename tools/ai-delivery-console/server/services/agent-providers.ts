@@ -4,8 +4,9 @@ import { execSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child
 import type { AgentProvider, RequirementWorkflow, RunRecord, RunStatus } from '../../shared/workflow';
 import { serverConfig } from '../config';
 import { appendRunEvent } from './run-log';
-import { assertInsideWorkspace, normalizeRequirementId, toRelativePath } from './workspace';
+import { normalizeRequirementId } from './workspace';
 import { normalizeProjectBasePaths, resolveWorkflowProjects } from './project-resolver';
+import { getPromptRuntimeDir, getRunRuntimeDir, getScriptRuntimeDir, resolveWorkspaceOrRuntimePath, toRuntimePathRef } from './runtime-paths';
 
 const activeProcesses = new Map<string, ChildProcessWithoutNullStreams>();
 const cancelledRunIds = new Set<string>();
@@ -132,7 +133,7 @@ function projectParentAddDirArgs(projectPaths: string[] = []): string[] {
 
 export async function createPromptEnvelope(workspaceRoot: string, workflow: RequirementWorkflow, run: RunRecord, commandText: string, projectPaths?: string[]): Promise<string> {
   const requirementId = normalizeRequirementId(workflow.requirementId);
-  const promptDir = path.join(workspaceRoot, 'docs', requirementId, 'workflow', 'prompts');
+  const promptDir = getPromptRuntimeDir(workspaceRoot, requirementId);
   await fs.mkdir(promptDir, { recursive: true });
   const promptPath = path.join(promptDir, `${run.id}.md`);
   const skillName = commandText.trim().split(/\s+/)[0]?.replace(/^\//, '') || 'unknown';
@@ -177,7 +178,7 @@ ${commandText}
 6. 如果缺少必要输入或权限，停止并说明最小补充信息。
 `;
   await fs.writeFile(promptPath, content, 'utf8');
-  return path.relative(workspaceRoot, promptPath);
+  return toRuntimePathRef(workspaceRoot, promptPath);
 }
 
 function renderCommand(command: string[], context: CommandContext): string[] {
@@ -245,10 +246,10 @@ export async function createTerminalRunScript(
   projectPaths?: string[]
 ): Promise<TerminalRunScript> {
   const promptPath = await createPromptEnvelope(workspaceRoot, workflow, run, commandText, projectPaths);
-  const absolutePromptPath = assertInsideWorkspace(workspaceRoot, promptPath);
+  const absolutePromptPath = resolveWorkspaceOrRuntimePath(workspaceRoot, promptPath);
   const requirementId = normalizeRequirementId(workflow.requirementId);
-  const scriptDir = path.join(workspaceRoot, 'docs', requirementId, 'workflow', 'scripts');
-  const runDir = path.join(workspaceRoot, 'docs', requirementId, 'workflow', 'runs');
+  const scriptDir = getScriptRuntimeDir(workspaceRoot, requirementId);
+  const runDir = getRunRuntimeDir(workspaceRoot, requirementId);
   await fs.mkdir(scriptDir, { recursive: true });
   await fs.mkdir(runDir, { recursive: true });
 
@@ -274,8 +275,8 @@ export async function createTerminalRunScript(
     projectParentAddDirArgs: projectParentAddDirArgs(projectPaths)
   });
   const commandLine = interactiveMode ? interactiveTerminalCommandLine(rendered) : terminalCommandLine(provider, rendered);
-  const transcriptPath = toRelativePath(workspaceRoot, absoluteTranscriptPath);
-  const statusPath = toRelativePath(workspaceRoot, absoluteStatusPath);
+  const transcriptPath = toRuntimePathRef(workspaceRoot, absoluteTranscriptPath);
+  const statusPath = toRuntimePathRef(workspaceRoot, absoluteStatusPath);
   const executionModeLabel = terminalExecutionModeLabel(run);
 
   const script = `#!/bin/zsh
@@ -376,7 +377,7 @@ exit $pipestatus[1]
 
   return {
     promptPath,
-    scriptPath: toRelativePath(workspaceRoot, absoluteScriptPath),
+    scriptPath: toRuntimePathRef(workspaceRoot, absoluteScriptPath),
     statusPath,
     transcriptPath,
     commandLine
@@ -421,7 +422,7 @@ export async function refreshTerminalRunStatuses(
     if (!isTerminalExecutionMode(run) || !run.terminalStatusPath || finalStatuses.has(run.status)) {
       continue;
     }
-    const absoluteStatusPath = assertInsideWorkspace(workspaceRoot, run.terminalStatusPath);
+    const absoluteStatusPath = resolveWorkspaceOrRuntimePath(workspaceRoot, run.terminalStatusPath);
     const raw = await fs.readFile(absoluteStatusPath, 'utf8').catch(() => '');
     if (!raw.trim()) {
       continue;
@@ -488,7 +489,7 @@ export async function startAgentProcess(
   }
 
   const promptPath = await createPromptEnvelope(workspaceRoot, workflow, run, commandText, projectPaths);
-  const absolutePromptPath = assertInsideWorkspace(workspaceRoot, promptPath);
+  const absolutePromptPath = resolveWorkspaceOrRuntimePath(workspaceRoot, promptPath);
   run.promptPath = promptPath;
   run.commandText = commandText;
 
@@ -677,7 +678,7 @@ export async function startAgentInTerminal(
   });
 
   try {
-    await launchTerminalScript(workspaceRoot, assertInsideWorkspace(workspaceRoot, terminal.scriptPath));
+    await launchTerminalScript(workspaceRoot, resolveWorkspaceOrRuntimePath(workspaceRoot, terminal.scriptPath));
     run.status = 'TERMINAL_OPENED';
     await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
       type: 'INFO',

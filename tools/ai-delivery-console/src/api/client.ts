@@ -55,18 +55,6 @@ interface CenterRequirementVO {
   projectNames?: string[];
 }
 
-interface CenterRunEventVO {
-  id?: number;
-  runId: number;
-  seq: number;
-  level: RunEvent['level'];
-  type: 'stdout' | 'stderr' | 'exit' | 'cancelled';
-  message: string;
-  textObjectId?: number;
-  payloadJson?: string;
-  createdAt?: string;
-}
-
 export interface CenterWsTicketVO {
   ticket: string;
   wsUrl: string;
@@ -308,28 +296,6 @@ function centerRequirementToWorkflow(item: CenterRequirementVO): RequirementWork
   };
 }
 
-function centerRunEventToRunEvent(item: CenterRunEventVO): RunEvent {
-  const typeMap: Record<CenterRunEventVO['type'], RunEvent['type']> = {
-    stdout: 'STDOUT',
-    stderr: 'STDERR',
-    exit: 'EXIT',
-    cancelled: 'CANCELLED'
-  };
-  return {
-    time: item.createdAt || new Date().toISOString(),
-    type: typeMap[item.type] || 'INFO',
-    level: item.level,
-    message: item.message,
-    text: item.message,
-    data: item.textObjectId
-      ? {
-          textObjectId: item.textObjectId,
-          payloadJson: item.payloadJson
-        }
-      : item.payloadJson
-  };
-}
-
 export interface ClientSessionVO {
   id: number;
   userId: number;
@@ -528,9 +494,6 @@ export const apiClient = {
         return item;
       })
       .catch((error) => {
-        if ((error as Error & { code?: string }).code === 'REQUIREMENT_ARTIFACTS_NOT_SYNCED') {
-          throw error;
-        }
         const cached = loadWorkflowItemCache(requirementId);
         if (cached) {
           return cached;
@@ -583,13 +546,13 @@ export const apiClient = {
     });
   },
   runAction(requirementId: string, input: ActionInput) {
-    return request<{ run: RunRecord; workflow: RequirementWorkflow }>('/api/ai-delivery/requirements/' + encodeURIComponent(requirementId) + '/actions', {
+    return runnerRequest<{ run: RunRecord; workflow: RequirementWorkflow }>('/api/ai-delivery/requirements/' + encodeURIComponent(requirementId) + '/actions', {
       method: 'POST',
       body: JSON.stringify(input)
     });
   },
   previewActionCommand(requirementId: string, input: ActionInput) {
-    return request<{ commandText: string }>('/api/ai-delivery/requirements/' + encodeURIComponent(requirementId) + '/actions/command', {
+    return runnerRequest<{ commandText: string }>('/api/ai-delivery/requirements/' + encodeURIComponent(requirementId) + '/actions/command', {
       method: 'POST',
       body: JSON.stringify(input)
     });
@@ -615,16 +578,33 @@ export const apiClient = {
     });
   },
   getRunEvents(requirementId: string, runId: string) {
-    void requirementId;
-    return request<CenterRunEventVO[]>(`/api/ai-delivery/runs/${encodeURIComponent(runId)}/events?afterSeq=0`).then((items) =>
-      items.map(centerRunEventToRunEvent)
-    );
+    return runnerRequest<RunEvent[]>(`/api/ai-delivery/runs/${encodeURIComponent(runId)}/events?requirementId=${encodeURIComponent(requirementId)}`);
   },
   cancelRun(requirementId: string, runId: string) {
-    return request<{ cancelled: boolean }>(`/api/ai-delivery/runs/${encodeURIComponent(runId)}/cancel`, {
+    return runnerRequest<{ cancelled: boolean }>(`/api/ai-delivery/runs/${encodeURIComponent(runId)}/cancel`, {
       method: 'POST',
       body: JSON.stringify({ requirementId })
     });
+  },
+  openRunEventStream(requirementId: string, runId: string) {
+    const runtime = getApiRuntimeConfig();
+    const params = new URLSearchParams({
+      requirementId,
+      tail: '1'
+    });
+    if (runtime.projectId) {
+      params.set('projectId', runtime.projectId);
+    }
+    if (runtime.clientSessionId) {
+      params.set('clientSessionId', runtime.clientSessionId);
+    }
+    if (runtime.userId) {
+      params.set('userId', runtime.userId);
+    }
+    if (runtime.centerBaseUrl) {
+      params.set('centerBaseUrl', runtime.centerBaseUrl);
+    }
+    return new EventSource(resolveRunnerApiUrl(`/api/ai-delivery/runs/${encodeURIComponent(runId)}/stream?${params.toString()}`));
   },
   createWsTicket(clientSessionId?: string | number) {
     const runtime = getApiRuntimeConfig();

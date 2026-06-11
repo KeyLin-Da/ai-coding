@@ -116,7 +116,6 @@ export function isShareableControlledArtifact(workflow: RequirementWorkflow, rel
   const prefixes = [
     `docs/${requirementId}/prd/`,
     `docs/${requirementId}/technical-design/`,
-    `docs/${requirementId}/workflow/runs/`,
     `docs/${requirementId}/reports/`,
     `docs/${requirementId}/junit/`,
     `docs/${requirementId}/code-review/`,
@@ -126,7 +125,7 @@ export function isShareableControlledArtifact(workflow: RequirementWorkflow, rel
   if (!prefixes.some((prefix) => normalized.startsWith(prefix))) {
     return false;
   }
-  if (normalized.includes('/workflow/prompts/') || normalized.includes('/workflow/scripts/')) {
+  if (normalized.includes('/workflow/')) {
     return false;
   }
   return /\.(md|markdown|html|json|txt|log)$/i.test(normalized);

@@ -11,8 +11,9 @@ export const serverConfig = {
   agentProvidersJson: process.env.AGENT_PROVIDERS_JSON,
   defaultAgentId: process.env.DEFAULT_AGENT_ID || 'manual',
   agentTimeout: Number(process.env.AGENT_TIMEOUT || 600000),
-  codexCommand: process.env.CODEX_COMMAND || 'codex exec -C {workspaceRoot} {projectParentAddDirArgs} -',
-  codexInteractiveCommand: process.env.CODEX_INTERACTIVE_COMMAND || 'codex -C {workspaceRoot} {projectParentAddDirArgs} --no-alt-screen {prompt}',
+  codexCommand: process.env.CODEX_COMMAND || 'codex exec --sandbox workspace-write -C {workspaceRoot} {projectParentAddDirArgs} -',
+  codexInteractiveCommand:
+    process.env.CODEX_INTERACTIVE_COMMAND || 'codex --sandbox workspace-write -C {workspaceRoot} {projectParentAddDirArgs} --no-alt-screen {prompt}',
   codebuddyCommand:
     process.env.CODEBUDDY_COMMAND ||
     'codebuddy --add-dir {workspaceRoot} {projectParentAddDirArgs} --allowedTools "Bash,Read,Write" --permission-mode bypassPermissions -p -',

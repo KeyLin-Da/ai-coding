@@ -41,12 +41,15 @@ function workflow(): RequirementWorkflow {
 }
 
 describe('artifact-git-sync', () => {
-  it('允许当前需求、OpenSpec 和 Agent skill 受控路径', () => {
+  it('允许当前需求、OpenSpec、Agent skill 和 Agent command 受控路径', () => {
     const current = workflow();
 
     expect(assertControlledArtifactPath(current, 'docs/172014/prd/analysis.md')).toBe('docs/172014/prd/analysis.md');
+    expect(assertControlledArtifactPath(current, 'openspec/config.yaml')).toBe('openspec/config.yaml');
     expect(assertControlledArtifactPath(current, 'openspec/changes/req-172014/proposal.md')).toBe('openspec/changes/req-172014/proposal.md');
     expect(assertControlledArtifactPath(current, '.codex/skills/coding-design/SKILL.md')).toBe('.codex/skills/coding-design/SKILL.md');
+    expect(assertControlledArtifactPath(current, '.qwen/commands/opsx-apply.toml')).toBe('.qwen/commands/opsx-apply.toml');
+    expect(() => assertControlledArtifactPath(current, 'docs/172014/workflow/runs/run-1.jsonl')).toThrow('不在受控产物路径内');
   });
 
   it('拒绝绝对路径、目录逃逸和其他需求路径', () => {
@@ -55,6 +58,7 @@ describe('artifact-git-sync', () => {
     expect(() => assertControlledArtifactPath(current, '/tmp/secret')).toThrow('不合法');
     expect(() => assertControlledArtifactPath(current, '../docs/172014/prd/analysis.md')).toThrow('不合法');
     expect(() => assertControlledArtifactPath(current, 'docs/999999/prd/analysis.md')).toThrow('不在受控产物路径内');
+    expect(() => assertControlledArtifactPath(current, '.qoder/settings.local.json')).toThrow('不在受控产物路径内');
   });
 
   it('基于本地项目仓生成计划并确认 push', async () => {
@@ -313,8 +317,129 @@ describe('artifact-git-sync', () => {
       await fs.rm(tempDir, { recursive: true, force: true });
     }
   });
+
+  it('同步项目仓时未跟踪文件不阻断拉取远端更新', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-repo-untracked-sync-'));
+    const sourceRepo = path.join(tempDir, 'source');
+    const remoteRepo = path.join(tempDir, 'remote.git');
+    const deliveryRoot = path.join(tempDir, 'delivery');
+    await fs.mkdir(path.join(sourceRepo, 'docs'), { recursive: true });
+    await fs.writeFile(path.join(sourceRepo, 'docs', 'README.md'), 'init\n', 'utf8');
+    await git(sourceRepo, ['init']);
+    await git(sourceRepo, ['config', 'user.email', 'test@example.com']);
+    await git(sourceRepo, ['config', 'user.name', 'Test']);
+    await git(sourceRepo, ['add', '.']);
+    await git(sourceRepo, ['commit', '-m', 'init']);
+    await git(sourceRepo, ['branch', '-M', 'master']);
+    await git(tempDir, ['clone', '--bare', sourceRepo, remoteRepo]);
+    await git(sourceRepo, ['remote', 'add', 'origin', remoteRepo]);
+    await fs.mkdir(path.join(deliveryRoot, '.ai-delivery', 'keys'), { recursive: true });
+    await fs.writeFile(path.join(deliveryRoot, '.ai-delivery', 'keys', 'fp'), 'not-used-for-local-remote', 'utf8');
+
+    const fetchImpl = projectRepoFetchImpl(deliveryRoot, remoteRepo);
+    const context = {
+      centerBaseUrl: 'http://center.local',
+      userId: '1',
+      clientSessionId: '9',
+      projectId: '1',
+      fetchImpl
+    } as any;
+
+    try {
+      await cloneProjectRepository(context);
+      const repoPath = path.join(deliveryRoot, 'demo');
+      await fs.mkdir(path.join(repoPath, '.codex', 'skills', 'coding-design'), { recursive: true });
+      await fs.writeFile(path.join(repoPath, '.codex', 'skills', 'coding-design', 'SKILL.md'), '# local bootstrap\n', 'utf8');
+      await fs.writeFile(path.join(sourceRepo, 'docs', 'REMOTE.md'), 'remote update\n', 'utf8');
+      await git(sourceRepo, ['add', 'docs/REMOTE.md']);
+      await git(sourceRepo, ['commit', '-m', 'remote update']);
+      await git(sourceRepo, ['push', 'origin', 'master']);
+
+      const state = await syncProjectRepository(context);
+
+      expect(await fs.readFile(path.join(repoPath, 'docs', 'REMOTE.md'), 'utf8')).toBe('remote update\n');
+      expect(await fs.readFile(path.join(repoPath, '.codex', 'skills', 'coding-design', 'SKILL.md'), 'utf8')).toBe('# local bootstrap\n');
+      expect(state.syncStatus).toBe('DIRTY');
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('同步项目仓时已跟踪文件有本地修改仍阻断', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-repo-tracked-dirty-'));
+    const sourceRepo = path.join(tempDir, 'source');
+    const remoteRepo = path.join(tempDir, 'remote.git');
+    const deliveryRoot = path.join(tempDir, 'delivery');
+    await fs.mkdir(path.join(sourceRepo, 'docs'), { recursive: true });
+    await fs.writeFile(path.join(sourceRepo, 'docs', 'README.md'), 'init\n', 'utf8');
+    await git(sourceRepo, ['init']);
+    await git(sourceRepo, ['config', 'user.email', 'test@example.com']);
+    await git(sourceRepo, ['config', 'user.name', 'Test']);
+    await git(sourceRepo, ['add', '.']);
+    await git(sourceRepo, ['commit', '-m', 'init']);
+    await git(sourceRepo, ['branch', '-M', 'master']);
+    await git(tempDir, ['clone', '--bare', sourceRepo, remoteRepo]);
+    await fs.mkdir(path.join(deliveryRoot, '.ai-delivery', 'keys'), { recursive: true });
+    await fs.writeFile(path.join(deliveryRoot, '.ai-delivery', 'keys', 'fp'), 'not-used-for-local-remote', 'utf8');
+
+    const fetchImpl = projectRepoFetchImpl(deliveryRoot, remoteRepo);
+    const context = {
+      centerBaseUrl: 'http://center.local',
+      userId: '1',
+      clientSessionId: '9',
+      projectId: '1',
+      fetchImpl
+    } as any;
+
+    try {
+      await cloneProjectRepository(context);
+      const repoPath = path.join(deliveryRoot, 'demo');
+      await fs.writeFile(path.join(repoPath, 'docs', 'README.md'), 'local tracked change\n', 'utf8');
+
+      await expect(syncProjectRepository(context)).rejects.toMatchObject({
+        code: 'B70075',
+        message: expect.stringContaining('已跟踪文件的本地修改')
+      });
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
 });
 
 function jsonResponse(data: unknown, status = 200): Response {
   return new Response(JSON.stringify({ success: status < 400, data, message: status < 400 ? undefined : 'not found' }), { status });
+}
+
+function projectRepoFetchImpl(deliveryRoot: string, remoteRepo: string) {
+  return async (url: string | URL | Request, init?: RequestInit) => {
+    const parsed = new URL(String(url));
+    if (parsed.pathname === '/api/ai-delivery/users/me/delivery-workspace') {
+      return jsonResponse({ id: 1, clientSessionId: 9, localPath: deliveryRoot, status: 'ACTIVE' });
+    }
+    if (parsed.pathname === '/api/ai-delivery/users/me/git-credentials') {
+      return jsonResponse([{ id: 1, platform: 'PROJECT_GIT', fingerprint: 'fp', publicKey: 'ssh-ed25519 AAAA', status: 'ACTIVE' }]);
+    }
+    if (parsed.pathname === '/api/ai-delivery/projects/my') {
+      return jsonResponse([
+        {
+          id: 1,
+          name: 'Demo',
+          code: 'demo',
+          repository: {
+            id: 1,
+            projectId: 1,
+            provider: 'PROJECT_GIT',
+            repoUrl: remoteRepo,
+            defaultBranch: 'master',
+            repoCode: 'demo',
+            status: 'ACTIVE'
+          }
+        }
+      ]);
+    }
+    if (parsed.pathname === '/api/ai-delivery/projects/1/repository-state') {
+      return jsonResponse(JSON.parse(String(init?.body || '{}')));
+    }
+    return jsonResponse(null, 404);
+  };
 }

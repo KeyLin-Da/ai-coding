@@ -126,8 +126,8 @@ AI 需求交付控制台将需求交付分为 5 个核心阶段：
 1. **不要同时操作同一需求**
    - 系统有锁机制，但仍建议单人单需求操作
 
-2. **不要手动修改 workflow 目录**
-   - `docs/{需求号}/workflow/` 由系统管理
+2. **不要手动修改 Runner runtime**
+   - `state.json`、锁、Prompt、脚本和运行日志由系统管理
    - 手动修改可能导致状态不一致
 
 3. **不要忘记保存**
@@ -185,7 +185,7 @@ AI 需求交付控制台将需求交付分为 5 个核心阶段：
 | Agent 执行失败 | 检查 `CODEX_COMMAND` 环境变量 |
 | 产物未更新 | 点击「刷新产物」按钮 |
 | Hash 冲突 | 先刷新产物，再编辑保存 |
-| 锁文件残留 | 删除 `docs/{需求号}/workflow/.lock` 文件 |
+| 锁文件残留 | 重启本地 Runner，必要时清理 `<deliveryWorkspaceRoot>/.ai-delivery/runtime/**/requirements/{需求号}/workflow/.lock` |
 
 ---
 

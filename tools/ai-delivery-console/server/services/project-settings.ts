@@ -1,5 +1,5 @@
-import fs from 'node:fs/promises';
 import path from 'node:path';
+import { readConsoleStateFile, writeConsoleStateFile } from './console-state';
 
 export interface ProjectSettings {
   projectPaths: string[];
@@ -18,12 +18,8 @@ interface WorkspaceMappingPayload {
   status?: string;
 }
 
-function settingsFilePath(workspaceRoot: string): string {
-  return path.join(workspaceRoot, 'docs/.ai-delivery-console', 'settings.json');
-}
-
 export async function loadSettings(workspaceRoot: string): Promise<ProjectSettings> {
-  const raw = await fs.readFile(settingsFilePath(workspaceRoot), 'utf8').catch(() => '');
+  const raw = await readConsoleStateFile(workspaceRoot, 'settings.json');
   if (!raw.trim()) {
     return { projectPaths: [] };
   }
@@ -33,9 +29,7 @@ export async function loadSettings(workspaceRoot: string): Promise<ProjectSettin
 
 export async function saveSettings(workspaceRoot: string, settings: ProjectSettings): Promise<ProjectSettings> {
   const normalized = { projectPaths: normalizeProjectPaths(settings.projectPaths) };
-  const filePath = settingsFilePath(workspaceRoot);
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, JSON.stringify(normalized, null, 2), 'utf8');
+  await writeConsoleStateFile(workspaceRoot, 'settings.json', JSON.stringify(normalized, null, 2));
   return normalized;
 }
 

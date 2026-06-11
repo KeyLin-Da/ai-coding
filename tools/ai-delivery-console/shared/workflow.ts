@@ -38,6 +38,7 @@ export type WorkflowImplementationStep = ImplementationStep | LegacyImplementati
 
 export type ActionType =
   | 'PRD_ANALYZE'
+  | 'PRD_CLARIFY'
   | 'DESIGN_GENERATE'
   | 'DESIGN_QUESTION'
   | 'OPENSPEC_STATUS'
@@ -347,6 +348,7 @@ export const statusLabels: Record<WorkflowStatus | RunStatus, string> = {
 
 export const actionTypeLabels: Record<ActionType, string> = {
   PRD_ANALYZE: 'PRD 分析',
+  PRD_CLARIFY: 'PRD 澄清',
   DESIGN_GENERATE: '技术方案生成',
   DESIGN_QUESTION: '技术方案答疑',
   OPENSPEC_STATUS: 'OpenSpec 状态检查',
@@ -439,6 +441,7 @@ export function findFirstPendingImplementationStep(
 
 export const actionStageMap: Partial<Record<ActionType, WorkflowStage>> = {
   PRD_ANALYZE: 'PRD',
+  PRD_CLARIFY: 'PRD',
   DESIGN_GENERATE: 'TECH_DESIGN',
   DESIGN_QUESTION: 'TECH_DESIGN',
   OPENSPEC_STATUS: 'IMPLEMENTATION',

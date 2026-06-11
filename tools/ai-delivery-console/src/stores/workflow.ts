@@ -6,6 +6,9 @@ import { getApiRuntimeConfig } from '@/api/runtime';
 import { RealtimeClient, type RealtimeDomainEvent } from '@/services/realtime-client';
 import { useSettingsStore } from '@/stores/settings';
 
+let requirementsLoadInFlight: Promise<RequirementWorkflow[]> | undefined;
+const requirementLoadInFlight = new Map<string, Promise<RequirementWorkflow>>();
+
 interface WorkflowState {
   requirements: RequirementWorkflow[];
   current?: RequirementWorkflow;
@@ -17,6 +20,7 @@ interface WorkflowState {
   lastEventId: number;
   activeRunId?: string;
   runEventSeqs: Record<string, number>;
+  runEventSource?: EventSource;
 }
 
 export const useWorkflowStore = defineStore('workflow', {
@@ -30,7 +34,8 @@ export const useWorkflowStore = defineStore('workflow', {
     realtimeStatus: 'DISCONNECTED',
     lastEventId: 0,
     activeRunId: undefined,
-    runEventSeqs: {}
+    runEventSeqs: {},
+    runEventSource: undefined
   }),
   actions: {
     async loadAgents() {
@@ -48,10 +53,21 @@ export const useWorkflowStore = defineStore('workflow', {
       }));
     },
     async loadRequirements() {
+      if (requirementsLoadInFlight) {
+        this.requirements = await requirementsLoadInFlight;
+        this.rememberWorkflowEventIds(this.requirements);
+        return;
+      }
       this.loading = true;
+      const promise = apiClient.listRequirements();
+      requirementsLoadInFlight = promise;
       try {
-        this.requirements = await apiClient.listRequirements();
+        this.requirements = await promise;
+        this.rememberWorkflowEventIds(this.requirements);
       } finally {
+        if (requirementsLoadInFlight === promise) {
+          requirementsLoadInFlight = undefined;
+        }
         this.loading = false;
       }
     },
@@ -62,10 +78,23 @@ export const useWorkflowStore = defineStore('workflow', {
       return workflow;
     },
     async loadRequirement(requirementId: string) {
+      const normalizedRequirementId = String(requirementId);
+      const existing = requirementLoadInFlight.get(normalizedRequirementId);
+      if (existing) {
+        this.current = await existing;
+        this.rememberWorkflowEventIds([this.current]);
+        return;
+      }
       this.loading = true;
+      const promise = apiClient.getRequirement(normalizedRequirementId);
+      requirementLoadInFlight.set(normalizedRequirementId, promise);
       try {
-        this.current = await apiClient.getRequirement(requirementId);
+        this.current = await promise;
+        this.rememberWorkflowEventIds([this.current]);
       } finally {
+        if (requirementLoadInFlight.get(normalizedRequirementId) === promise) {
+          requirementLoadInFlight.delete(normalizedRequirementId);
+        }
         this.loading = false;
       }
     },
@@ -101,17 +130,26 @@ export const useWorkflowStore = defineStore('workflow', {
       }
       this.stopRunStream();
       this.activeRunId = runId;
-      const runtime = getApiRuntimeConfig();
-      if (!runtime.projectId || !runtime.userId || !runtime.clientSessionId) {
-        return;
-      }
-      void this.ensureRealtimeClient()
-        .then((client) => client.subscribeRun(runId, this.runEventSeqs[runId] || 0))
-        .catch(() => {
-          this.realtimeStatus = 'ERROR';
-        });
+      const source = apiClient.openRunEventStream(this.current.requirementId, runId);
+      this.runEventSource = source;
+      source.onmessage = (event) => {
+        if (this.activeRunId !== runId) {
+          return;
+        }
+        const runEvent = JSON.parse(event.data) as RunEvent;
+        this.runEvents.push(runEvent);
+        this.runEventSeqs[runId] = this.runEvents.length;
+      };
+      source.onerror = () => {
+        source.close();
+        if (this.runEventSource === source) {
+          this.runEventSource = undefined;
+        }
+      };
     },
     stopRunStream() {
+      this.runEventSource?.close();
+      this.runEventSource = undefined;
       this.activeRunId = undefined;
     },
     streamWorkflowEvents() {
@@ -212,12 +250,17 @@ export const useWorkflowStore = defineStore('workflow', {
       this.lastEventId = Math.max(this.lastEventId, event.eventId || 0);
       this.realtimeClient?.ack(runtime.projectId, this.lastEventId);
       this.applyRealtimeHint(event);
-      if (this.current) {
+      const payload = parseEventPayload(event.payloadJson);
+      const refreshPlan = getRealtimeRefreshPlan(event);
+      if (refreshPlan.current && shouldRefreshCurrentRequirement(payload, this.current)) {
         await this.loadRequirement(this.current.requirementId);
       }
-      await this.loadRequirements();
+      if (refreshPlan.list) {
+        await this.loadRequirements();
+      }
     },
     applyRealtimeHint(event: RealtimeDomainEvent) {
+      const runtime = getApiRuntimeConfig();
       const payload = parseEventPayload(event.payloadJson);
       const requirementPk = payload.requirementPk == null ? undefined : String(payload.requirementPk);
       if (event.eventType === 'artifact.version.created') {
@@ -236,12 +279,6 @@ export const useWorkflowStore = defineStore('workflow', {
           ElMessage.warning('项目产物仓有新提交，请点击右上角“同步 Git 仓”后继续操作');
         }
       }
-      if (event.eventType === 'project.repo.state-changed') {
-        const status = String(payload.syncStatus || '');
-        if (status && status !== 'READY' && status !== 'PUSHED') {
-          ElMessage.info(`项目产物仓状态：${status}`);
-        }
-      }
       if (event.eventType === 'execution.lock.updated' && requirementPk) {
         const status = String(payload.status || '');
         const stage = String(payload.stage || '');
@@ -252,9 +289,40 @@ export const useWorkflowStore = defineStore('workflow', {
           this.current = { ...this.current, jobStatus: label };
         }
       }
+    },
+    rememberWorkflowEventIds(workflows: RequirementWorkflow[]) {
+      const eventIds = workflows
+        .map((workflow) => Number(workflow.lastEventId || 0))
+        .filter((eventId) => Number.isFinite(eventId) && eventId > 0);
+      if (eventIds.length) {
+        this.lastEventId = Math.max(this.lastEventId, ...eventIds);
+      }
     }
   }
 });
+
+interface RealtimeRefreshPlan {
+  current: boolean;
+  list: boolean;
+}
+
+const REALTIME_REFRESH_PLANS: Record<string, RealtimeRefreshPlan> = {
+  'artifact.version.created': { current: true, list: true },
+  'artifact.git-sync.completed': { current: true, list: true },
+  'workflow.stage.reviewed': { current: true, list: true }
+};
+
+function getRealtimeRefreshPlan(event: RealtimeDomainEvent): RealtimeRefreshPlan {
+  return REALTIME_REFRESH_PLANS[event.eventType] || { current: false, list: false };
+}
+
+function shouldRefreshCurrentRequirement(payload: Record<string, unknown>, current?: RequirementWorkflow): current is RequirementWorkflow {
+  if (!current) {
+    return false;
+  }
+  const requirementPk = payload.requirementPk == null ? undefined : String(payload.requirementPk);
+  return !requirementPk || String(current.id) === requirementPk;
+}
 
 function parseEventPayload(payloadJson?: string): Record<string, unknown> {
   if (!payloadJson) {

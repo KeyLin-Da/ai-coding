@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import type { AgentProvider, RequirementWorkflow, RunRecord } from '../../shared/workflow';
 import { createEmptyStages } from '../../shared/workflow';
 import {
+  assertPrdClarificationReady,
   executeAction,
   internalForTests
 } from '../../server/services/action-adapters';
@@ -21,6 +22,7 @@ import {
   terminalCommandLine
 } from '../../server/services/agent-providers';
 import { readRunEvents } from '../../server/services/run-log';
+import { resolveWorkspaceOrRuntimePath } from '../../server/services/runtime-paths';
 
 const exec = promisify(execFile);
 
@@ -60,6 +62,84 @@ function runRecord(id: string): RunRecord {
 }
 
 describe('action-adapters', () => {
+  it('生成 PRD 澄清命令时不携带来源参数', () => {
+    const item = {
+      ...workflow(),
+      sources: ['https://prd.example.com/doc'],
+      prdSourceFiles: [
+        {
+          id: 'source-1',
+          name: '来源.pdf',
+          path: 'docs/172014/prd/files/source-1.pdf',
+          size: 100,
+          uploadedAt: new Date().toISOString()
+        }
+      ]
+    };
+
+    expect(
+      internalForTests.buildSkillCommand(item, {
+        actionType: 'PRD_CLARIFY',
+        params: {
+          description: '补充异常场景'
+        }
+      })
+    ).toBe('/coding-prd-analyzer id=172014 c=补充异常场景');
+  });
+
+  it('PRD 澄清校验要求普通需求、非空描述和已存在 PRD 文档', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-prd-clarify-'));
+    const item = workflow();
+
+    await expect(
+      assertPrdClarificationReady(root, item, {
+        actionType: 'PRD_CLARIFY',
+        params: { description: '补充异常场景' }
+      })
+    ).rejects.toThrow('请先生成 PRD 文档');
+
+    await fs.mkdir(path.join(root, 'docs', '172014', 'prd'), { recursive: true });
+    await fs.writeFile(path.join(root, 'docs', '172014', 'prd', 'analysis.md'), '# PRD');
+
+    await expect(
+      assertPrdClarificationReady(root, item, {
+        actionType: 'PRD_CLARIFY',
+        params: { description: '   ' }
+      })
+    ).rejects.toThrow('请输入 PRD 澄清描述');
+
+    await expect(
+      assertPrdClarificationReady(
+        root,
+        { ...item, requirementType: 'DEFECT' },
+        {
+          actionType: 'PRD_CLARIFY',
+          params: { description: '补充异常场景' }
+        }
+      )
+    ).rejects.toThrow('缺陷类型不支持 PRD 澄清');
+
+    await expect(
+      assertPrdClarificationReady(root, item, {
+        actionType: 'PRD_CLARIFY',
+        params: { description: '补充异常场景' }
+      })
+    ).resolves.toBeUndefined();
+  });
+
+  it('PRD 澄清执行在校验失败时不创建运行记录', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-prd-clarify-run-'));
+    await expect(
+      executeAction(root, workflow(), {
+        actionType: 'PRD_CLARIFY',
+        params: { description: '补充异常场景' }
+      })
+    ).rejects.toThrow('请先生成 PRD 文档');
+
+    const eventsDir = path.join(root, 'docs', '172014', 'workflow', 'runs');
+    await expect(fs.readdir(eventsDir)).rejects.toThrow();
+  });
+
   it('普通需求生成技术方案命令时保留 PRD 文档上下文', () => {
     const item = {
       ...workflow(),
@@ -360,8 +440,17 @@ describe('agent-providers', () => {
     expect(providers.map((provider) => provider.id)).toEqual(expect.arrayContaining(['codex']));
     const codex = providers.find((provider) => provider.id === 'codex');
     expect(codex?.inputMode).toBe('STDIN');
-    expect(codex?.command).toEqual(['codex', 'exec', '-C', '{workspaceRoot}', '{projectParentAddDirArgs}', '-']);
-    expect(codex?.interactiveCommand).toEqual(['codex', '-C', '{workspaceRoot}', '{projectParentAddDirArgs}', '--no-alt-screen', '{prompt}']);
+    expect(codex?.command).toEqual(['codex', 'exec', '--sandbox', 'workspace-write', '-C', '{workspaceRoot}', '{projectParentAddDirArgs}', '-']);
+    expect(codex?.interactiveCommand).toEqual([
+      'codex',
+      '--sandbox',
+      'workspace-write',
+      '-C',
+      '{workspaceRoot}',
+      '{projectParentAddDirArgs}',
+      '--no-alt-screen',
+      '{prompt}'
+    ]);
     expect(codex?.supportsInteractive).toBe(true);
   });
 
@@ -370,7 +459,7 @@ describe('agent-providers', () => {
     await fs.mkdir(path.join(root, '.codex', 'skills', 'coding-prd-analyzer'), { recursive: true });
     await fs.writeFile(path.join(root, '.codex', 'skills', 'coding-prd-analyzer', 'SKILL.md'), 'skill');
     const promptPath = await createPromptEnvelope(root, workflow(), runRecord('run-1'), '/coding-prd-analyzer id=172014');
-    const content = await fs.readFile(path.join(root, promptPath), 'utf8');
+    const content = await fs.readFile(resolveWorkspaceOrRuntimePath(root, promptPath), 'utf8');
     expect(content).toContain('/coding-prd-analyzer id=172014');
     expect(content).toContain('.codex/skills/coding-prd-analyzer/SKILL.md');
   });
@@ -385,7 +474,7 @@ describe('agent-providers', () => {
       projects: [{ name: 'opp-api', path: 'opp-api' }]
     };
     const promptPath = await createPromptEnvelope(root, item, runRecord('run-projects'), '/coding-prd-analyzer id=172014', [projectParent]);
-    const content = await fs.readFile(path.join(root, promptPath), 'utf8');
+    const content = await fs.readFile(resolveWorkspaceOrRuntimePath(root, promptPath), 'utf8');
 
     expect(content).toContain(`- 交付工作区: ${root}`);
     expect(content).toContain('## 工程代码目录');
@@ -477,11 +566,11 @@ describe('agent-providers', () => {
     };
 
     const terminal = await createTerminalRunScript(root, workflow(), run, provider, '/coding-prd-analyzer id=172014');
-    const script = await fs.readFile(path.join(root, terminal.scriptPath), 'utf8');
+    const script = await fs.readFile(resolveWorkspaceOrRuntimePath(root, terminal.scriptPath), 'utf8');
 
-    expect(terminal.scriptPath).toBe('docs/172014/workflow/scripts/run-terminal-script.command');
-    expect(terminal.transcriptPath).toBe('docs/172014/workflow/runs/run-terminal-script.terminal.log');
-    expect(terminal.statusPath).toBe('docs/172014/workflow/runs/run-terminal-script.terminal-status.json');
+    expect(terminal.scriptPath).toBe('.ai-delivery-runtime/requirements/172014/scripts/run-terminal-script.command');
+    expect(terminal.transcriptPath).toBe('.ai-delivery-runtime/requirements/172014/runs/run-terminal-script.terminal.log');
+    expect(terminal.statusPath).toBe('.ai-delivery-runtime/requirements/172014/runs/run-terminal-script.terminal-status.json');
     expect(script).toContain('AI Delivery');
     expect(script).toContain('/coding-prd-analyzer id=172014');
     expect(script).toContain('terminal-status.json');
@@ -505,7 +594,7 @@ describe('agent-providers', () => {
     };
 
     const terminal = await createTerminalRunScript(root, workflow(), run, provider, '/coding-prd-analyzer id=172014');
-    const script = await fs.readFile(path.join(root, terminal.scriptPath), 'utf8');
+    const script = await fs.readFile(resolveWorkspaceOrRuntimePath(root, terminal.scriptPath), 'utf8');
 
     expect(terminal.commandLine).toContain("'interactive-agent'");
     expect(terminal.commandLine).not.toContain('background-agent');
@@ -550,13 +639,13 @@ describe('agent-providers', () => {
       ...runRecord('run-terminal-finished'),
       status: 'TERMINAL_OPENED',
       executionMode: 'TERMINAL',
-      terminalStatusPath: 'docs/172014/workflow/runs/run-terminal-finished.terminal-status.json',
-      terminalTranscriptPath: 'docs/172014/workflow/runs/run-terminal-finished.terminal.log'
+      terminalStatusPath: '.ai-delivery-runtime/requirements/172014/runs/run-terminal-finished.terminal-status.json',
+      terminalTranscriptPath: '.ai-delivery-runtime/requirements/172014/runs/run-terminal-finished.terminal.log'
     };
     item.runs.push(run);
-    await fs.mkdir(path.join(root, 'docs', '172014', 'workflow', 'runs'), { recursive: true });
+    await fs.mkdir(path.dirname(resolveWorkspaceOrRuntimePath(root, run.terminalStatusPath)), { recursive: true });
     await fs.writeFile(
-      path.join(root, run.terminalStatusPath),
+      resolveWorkspaceOrRuntimePath(root, run.terminalStatusPath),
       JSON.stringify({
         status: 'SUCCEEDED',
         exitCode: 0,
@@ -580,13 +669,13 @@ describe('agent-providers', () => {
       ...runRecord('run-interactive-finished'),
       status: 'TERMINAL_OPENED',
       executionMode: 'INTERACTIVE_TERMINAL',
-      terminalStatusPath: 'docs/172014/workflow/runs/run-interactive-finished.terminal-status.json',
-      terminalTranscriptPath: 'docs/172014/workflow/runs/run-interactive-finished.terminal.log'
+      terminalStatusPath: '.ai-delivery-runtime/requirements/172014/runs/run-interactive-finished.terminal-status.json',
+      terminalTranscriptPath: '.ai-delivery-runtime/requirements/172014/runs/run-interactive-finished.terminal.log'
     };
     item.runs.push(run);
-    await fs.mkdir(path.join(root, 'docs', '172014', 'workflow', 'runs'), { recursive: true });
+    await fs.mkdir(path.dirname(resolveWorkspaceOrRuntimePath(root, run.terminalStatusPath)), { recursive: true });
     await fs.writeFile(
-      path.join(root, run.terminalStatusPath),
+      resolveWorkspaceOrRuntimePath(root, run.terminalStatusPath),
       JSON.stringify({
         status: 'SUCCEEDED',
         exitCode: 0,

@@ -1,7 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { RunEvent, WorkflowStage } from '../../shared/workflow';
-import { assertInsideWorkspace, createId, normalizeRequirementId } from './workspace';
+import { createId } from './workspace';
+import { getRunRuntimeDir, getStageLogRuntimeDir, resolveWorkspaceOrRuntimePath } from './runtime-paths';
 
 const TERMINAL_TRANSCRIPT_MAX_BYTES = 256 * 1024;
 
@@ -10,7 +11,7 @@ export function createRunId(): string {
 }
 
 export function getRunDir(workspaceRoot: string, requirementId: string): string {
-  return path.join(workspaceRoot, 'docs', normalizeRequirementId(requirementId), 'workflow', 'runs');
+  return getRunRuntimeDir(workspaceRoot, requirementId);
 }
 
 export function getRunPath(workspaceRoot: string, requirementId: string, runId: string): string {
@@ -19,13 +20,7 @@ export function getRunPath(workspaceRoot: string, requirementId: string, runId: 
 
 // 为每个流程阶段获取独立的日志目录
 export function getStageLogDir(workspaceRoot: string, requirementId: string, stage: WorkflowStage): string {
-  const stageMap: Record<WorkflowStage, string> = {
-    PRD: 'prd',
-    TECH_DESIGN: 'tech-design',
-    IMPLEMENTATION: 'implementation',
-    CODE_REVIEW: 'code-review'
-  };
-  return path.join(workspaceRoot, 'docs', normalizeRequirementId(requirementId), 'workflow', 'logs', stageMap[stage]);
+  return getStageLogRuntimeDir(workspaceRoot, requirementId, stage);
 }
 
 // 为每个流程阶段获取独立的日志文件路径
@@ -81,7 +76,7 @@ export async function readTerminalTranscriptSize(workspaceRoot: string, transcri
     return 0;
   }
   try {
-    const stat = await fs.stat(assertInsideWorkspace(workspaceRoot, transcriptPath));
+    const stat = await fs.stat(resolveWorkspaceOrRuntimePath(workspaceRoot, transcriptPath));
     return stat.isFile() ? stat.size : 0;
   } catch (error: any) {
     if (error.code === 'ENOENT') {
@@ -102,7 +97,7 @@ export async function readTerminalTranscriptChunk(
   }
 
   try {
-    const absoluteTranscriptPath = assertInsideWorkspace(workspaceRoot, transcriptPath);
+    const absoluteTranscriptPath = resolveWorkspaceOrRuntimePath(workspaceRoot, transcriptPath);
     const stat = await fs.stat(absoluteTranscriptPath);
     if (!stat.isFile()) {
       return { nextOffset: offset };

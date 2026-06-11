@@ -20,7 +20,7 @@ function bearerToken(request: IncomingMessage): string {
 export function parseLocalRequestContext(request: IncomingMessage, url: URL): LocalRequestContext {
   return {
     accessToken: bearerToken(request),
-    userId: headerValue(request, 'x-user-id'),
+    userId: headerValue(request, 'x-user-id') || url.searchParams.get('userId') || '',
     projectId: headerValue(request, 'x-project-id') || url.searchParams.get('projectId') || '',
     clientSessionId: headerValue(request, 'x-client-session-id') || url.searchParams.get('clientSessionId') || '',
     centerBaseUrl:
