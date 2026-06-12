@@ -21,7 +21,16 @@ vi.mock('@/api/client', () => ({
     listWorkspaceMappings: vi.fn(),
     saveWorkspaceMapping: vi.fn(),
     disableWorkspaceMapping: vi.fn(),
-    registerClientSession: vi.fn()
+    registerClientSession: vi.fn(),
+    getDeliveryWorkspace: vi.fn(),
+    saveDeliveryWorkspace: vi.fn(),
+    listGitCredentials: vi.fn(),
+    generateLocalGitCredential: vi.fn(),
+    regenerateLocalGitCredential: vi.fn(),
+    refreshProjectRepositoryStatus: vi.fn(),
+    cloneProjectRepository: vi.fn(),
+    pushProjectRepository: vi.fn(),
+    updateProjectSkills: vi.fn()
   }
 }));
 
@@ -100,6 +109,22 @@ function stubs() {
     },
     ElEmpty: {
       template: '<div />'
+    },
+    ElDivider: {
+      template: '<hr />'
+    },
+    ElDescriptions: {
+      template: '<dl><slot /></dl>'
+    },
+    ElDescriptionsItem: {
+      props: ['label'],
+      template: '<div><dt>{{ label }}</dt><dd><slot /></dd></div>'
+    },
+    ElIcon: {
+      template: '<span><slot /></span>'
+    },
+    ElSkeleton: {
+      template: '<div />'
     }
   };
 }
@@ -112,6 +137,14 @@ describe('Settings', () => {
     vi.mocked(apiClient.saveSettings).mockResolvedValue({ projectPaths: ['/Users/me/work'] });
     vi.mocked(apiClient.registerClientSession).mockResolvedValue({ id: 11, clientKey: 'test-client' });
     vi.mocked(apiClient.listWorkspaceMappings).mockResolvedValue([]);
+    vi.mocked(apiClient.getDeliveryWorkspace).mockResolvedValue({ id: 1, clientSessionId: 11, localPath: '/Users/me/delivery', status: 'ACTIVE' });
+    vi.mocked(apiClient.listGitCredentials).mockResolvedValue([]);
+    vi.mocked(apiClient.refreshProjectRepositoryStatus).mockResolvedValue({
+      projectId: 2,
+      clientSessionId: 11,
+      localRepoPath: '/Users/me/delivery/ai-delivery',
+      syncStatus: 'READY'
+    });
     vi.mocked(apiClient.saveWorkspaceMapping).mockResolvedValue({
       id: 1,
       projectId: 2,
@@ -180,5 +213,70 @@ describe('Settings', () => {
     await (wrapper.vm as any).addPath();
 
     expect(apiClient.saveWorkspaceMapping).toHaveBeenCalledWith(2, { localPath: '/Users/me/work' });
+  });
+
+  it('在个人中心手动更新当前项目 Skill', async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const { useAuthStore } = await import('@/stores/auth');
+    const { useProjectStore } = await import('@/stores/project');
+    useAuthStore().applySession({
+      token: 'token-1',
+      expireAt: new Date(Date.now() + 86_400_000).toISOString(),
+      user: {
+        id: 7,
+        account: 'key.lin',
+        displayName: 'Key Lin',
+        status: 'ACTIVE'
+      }
+    });
+    const project = useProjectStore();
+    project.current = {
+      id: 2,
+      name: 'AI Delivery',
+      code: 'ai-delivery',
+      status: 'ACTIVE',
+      role: 'OWNER',
+      repository: {
+        id: 10,
+        projectId: 2,
+        provider: 'PROJECT_GIT',
+        repoUrl: 'git@example.com:demo.git',
+        defaultBranch: 'master',
+        repoCode: 'ai-delivery',
+        status: 'ACTIVE'
+      }
+    };
+    vi.mocked(apiClient.updateProjectSkills).mockResolvedValue({
+      bootstrap: {
+        openSpecInitialized: false,
+        agentDirsInitialized: [],
+        codingSkills: {
+          synced: 3,
+          targetDirs: ['.codex/skills']
+        }
+      },
+      state: {
+        projectId: 2,
+        clientSessionId: 11,
+        localRepoPath: '/Users/me/delivery/ai-delivery',
+        syncStatus: 'DIRTY'
+      }
+    });
+
+    const wrapper = mount(Settings, {
+      global: {
+        plugins: [pinia],
+        stubs: stubs()
+      }
+    });
+    await flushPromises();
+
+    await wrapper.findAll('button').find((button) => button.text().includes('更新 Skill'))?.trigger('click');
+    await flushPromises();
+
+    expect(apiClient.updateProjectSkills).toHaveBeenCalledWith(2);
+    const repoState = (wrapper.vm as any).projectRepoState;
+    expect((repoState.value || repoState).syncStatus).toBe('DIRTY');
   });
 });

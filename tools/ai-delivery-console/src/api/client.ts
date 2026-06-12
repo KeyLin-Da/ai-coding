@@ -145,6 +145,20 @@ export interface ProjectRepoStateVO {
   lastCheckedAt?: string;
 }
 
+export interface ProjectArtifactBootstrapResultVO {
+  openSpecInitialized: boolean;
+  agentDirsInitialized: string[];
+  codingSkills: {
+    synced: number;
+    targetDirs: string[];
+  };
+}
+
+export interface ProjectSkillUpdateResultVO {
+  bootstrap: ProjectArtifactBootstrapResultVO;
+  state: ProjectRepoStateVO;
+}
+
 export interface RequirementWorkspaceStateVO {
   id?: number;
   projectId: number;
@@ -422,6 +436,12 @@ export const apiClient = {
   getProjectRepositoryStatus(projectId: string | number) {
     return runnerRequest<ProjectRepoStateVO>(`/api/ai-delivery/projects/${encodeURIComponent(String(projectId))}/repository/status`);
   },
+  refreshProjectRepositoryStatus(projectId: string | number) {
+    return runnerRequest<ProjectRepoStateVO>(`/api/ai-delivery/projects/${encodeURIComponent(String(projectId))}/repository/status/refresh`, {
+      method: 'POST',
+      body: JSON.stringify({})
+    });
+  },
   pushProjectRepository(projectId: string | number, input: { message?: string } = {}) {
     return runnerRequest<ProjectRepoStateVO>(`/api/ai-delivery/projects/${encodeURIComponent(String(projectId))}/repository/push`, {
       method: 'POST',
@@ -430,6 +450,12 @@ export const apiClient = {
   },
   syncProjectRepository(projectId: string | number) {
     return runnerRequest<ProjectRepoStateVO>(`/api/ai-delivery/projects/${encodeURIComponent(String(projectId))}/repository/sync`, {
+      method: 'POST',
+      body: JSON.stringify({})
+    });
+  },
+  updateProjectSkills(projectId: string | number) {
+    return runnerRequest<ProjectSkillUpdateResultVO>(`/api/ai-delivery/projects/${encodeURIComponent(String(projectId))}/skills/update`, {
       method: 'POST',
       body: JSON.stringify({})
     });

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiRuntimeHeaders, getApiRuntimeConfig, setApiRuntimeConfig } from '../../src/api/runtime';
 import { useAuthStore } from '../../src/stores/auth';
 import { useProjectStore } from '../../src/stores/project';
+import { useSettingsStore } from '../../src/stores/settings';
 import { apiClient } from '@/api/client';
 
 vi.mock('@/api/client', () => ({
@@ -84,5 +85,42 @@ describe('onboarding stores', () => {
 
     expect(getApiRuntimeConfig().projectId).toBe('2');
     expect(project.workspaceMappings[0].localPath).toBe('/Users/key.lin/work');
+  });
+
+  it('加载本机设置时不覆盖已选择项目的 projectId', async () => {
+    vi.mocked(apiClient.selectProject).mockResolvedValue({
+      id: 5,
+      name: 'OPP',
+      code: 'opp',
+      status: 'ACTIVE',
+      role: 'OWNER',
+      selected: true
+    });
+    vi.mocked(apiClient.listWorkspaceMappings).mockResolvedValue([]);
+
+    const project = useProjectStore();
+    await project.selectProject({
+      id: 5,
+      name: 'OPP',
+      code: 'opp',
+      status: 'ACTIVE',
+      role: 'OWNER'
+    });
+    expect(getApiRuntimeConfig().projectId).toBe('5');
+
+    window.localStorage.setItem(
+      'ai-delivery.desktop.local-config',
+      JSON.stringify({
+        centerBaseUrl: 'http://127.0.0.1:8728',
+        runnerBaseUrl: 'http://127.0.0.1:8718',
+        userId: '7',
+        clientSessionId: '16',
+        projectId: '1'
+      })
+    );
+
+    await useSettingsStore().load();
+
+    expect(getApiRuntimeConfig().projectId).toBe('5');
   });
 });

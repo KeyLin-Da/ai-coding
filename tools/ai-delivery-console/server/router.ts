@@ -18,7 +18,7 @@ import { readProjectHistory, listProjectsFromConfiguredPaths } from './services/
 import { assertProjectPathsConfigured, loadPrivateProjectSettings, loadSettings, saveSettings, validateSettings } from './services/project-settings';
 import { parseLocalRequestContext, type LocalRequestContext } from './services/local-request-context';
 import { generateLocalGitCredential, regenerateLocalGitCredential, type LocalGitCredentialGenerateInput } from './services/local-git-credentials';
-import { cloneProjectRepository, commitAndPushProjectRepository, inspectProjectRepository, resolveProjectRepoPath, syncProjectRepository } from './services/project-repository';
+import { cloneProjectRepository, commitAndPushProjectRepository, inspectProjectRepository, readProjectRepositoryStatus, resolveProjectRepoPath, syncProjectRepository } from './services/project-repository';
 import { bootstrapProjectArtifactWorkspace } from './services/skill-sync';
 import { deleteTechDesignQuestionRecord, type DeleteTechDesignQuestionInput } from './services/tech-design-questions';
 import { buildBootstrapImportPlan, importBootstrapPlan, type BootstrapImportConfig } from './services/bootstrap-importer';
@@ -355,9 +355,8 @@ export function createRouter(workspaceRoot: string) {
       const projectRepositoryCloneMatch = match(pathname, /^\/api\/ai-delivery\/projects\/([^/]+)\/repository\/clone$/);
       if (request.method === 'POST' && projectRepositoryCloneMatch) {
         const projectContext = { ...requestContext, projectId: projectRepositoryCloneMatch[1] };
-        let state = await cloneProjectRepository(projectContext);
+        const state = await cloneProjectRepository(projectContext);
         await bootstrapProjectArtifactWorkspace(workspaceRoot, state.localRepoPath);
-        state = await inspectProjectRepository(projectContext).catch(() => state);
         send(response, 200, { data: state });
         return;
       }
@@ -373,16 +372,33 @@ export function createRouter(workspaceRoot: string) {
       const projectRepositorySyncMatch = match(pathname, /^\/api\/ai-delivery\/projects\/([^/]+)\/repository\/sync$/);
       if (request.method === 'POST' && projectRepositorySyncMatch) {
         const projectContext = { ...requestContext, projectId: projectRepositorySyncMatch[1] };
-        let state = await syncProjectRepository(projectContext);
-        await bootstrapProjectArtifactWorkspace(workspaceRoot, state.localRepoPath);
-        state = await inspectProjectRepository(projectContext).catch(() => state);
+        const state = await syncProjectRepository(projectContext);
         send(response, 200, { data: state });
+        return;
+      }
+
+      const projectSkillsUpdateMatch = match(pathname, /^\/api\/ai-delivery\/projects\/([^/]+)\/skills\/update$/);
+      if (request.method === 'POST' && projectSkillsUpdateMatch) {
+        const projectContext = { ...requestContext, projectId: projectSkillsUpdateMatch[1] };
+        const beforeState = await readProjectRepositoryStatus(projectContext);
+        if (beforeState.syncStatus === 'NOT_CLONED') {
+          throw new Error('项目产物仓尚未 Clone，请先 Clone 后再更新 Skill');
+        }
+        const bootstrap = await bootstrapProjectArtifactWorkspace(workspaceRoot, beforeState.localRepoPath);
+        const state = await readProjectRepositoryStatus(projectContext);
+        send(response, 200, { data: { bootstrap, state } });
+        return;
+      }
+
+      const projectRepositoryStatusRefreshMatch = match(pathname, /^\/api\/ai-delivery\/projects\/([^/]+)\/repository\/status\/refresh$/);
+      if (request.method === 'POST' && projectRepositoryStatusRefreshMatch) {
+        send(response, 200, { data: await inspectProjectRepository({ ...requestContext, projectId: projectRepositoryStatusRefreshMatch[1] }) });
         return;
       }
 
       const projectRepositoryStatusMatch = match(pathname, /^\/api\/ai-delivery\/projects\/([^/]+)\/repository\/status$/);
       if (request.method === 'GET' && projectRepositoryStatusMatch) {
-        send(response, 200, { data: await inspectProjectRepository({ ...requestContext, projectId: projectRepositoryStatusMatch[1] }) });
+        send(response, 200, { data: await readProjectRepositoryStatus({ ...requestContext, projectId: projectRepositoryStatusMatch[1] }) });
         return;
       }
 

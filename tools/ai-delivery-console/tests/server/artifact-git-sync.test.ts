@@ -1,17 +1,53 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { RequirementWorkflow } from '../../shared/workflow';
+import { createRouter } from '../../server/router';
 import { assertControlledArtifactPath, buildArtifactGitSyncPlan, confirmArtifactGitSync } from '../../server/services/artifact-git-sync';
-import { cloneProjectRepository, readLocalRepoState, syncProjectRepository } from '../../server/services/project-repository';
+import { cloneProjectRepository, inspectProjectRepository, readLocalRepoState, readProjectRepositoryStatus, syncProjectRepository } from '../../server/services/project-repository';
 
 const exec = promisify(execFile);
 
 async function git(cwd: string, args: string[]) {
   await exec('git', args, { cwd });
+}
+
+function routerRequest(method: string, url: string, headers: IncomingMessage['headers'], body = ''): IncomingMessage {
+  const stream = new Readable({
+    read() {
+      this.push(body || null);
+      this.push(null);
+    }
+  }) as IncomingMessage;
+  stream.method = method;
+  stream.url = url;
+  stream.headers = headers;
+  return stream;
+}
+
+function routerResponse(): { response: ServerResponse; done: Promise<{ status: number; body: any }> } {
+  let status = 0;
+  let resolveDone!: (value: { status: number; body: any }) => void;
+  const done = new Promise<{ status: number; body: any }>((resolve) => {
+    resolveDone = resolve;
+  });
+  const response = {
+    writeHead(nextStatus: number) {
+      status = nextStatus;
+    },
+    end(rawBody: string) {
+      resolveDone({
+        status,
+        body: rawBody ? JSON.parse(rawBody) : undefined
+      });
+    }
+  } as unknown as ServerResponse;
+  return { response, done };
 }
 
 function workflow(): RequirementWorkflow {
@@ -41,6 +77,10 @@ function workflow(): RequirementWorkflow {
 }
 
 describe('artifact-git-sync', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('允许当前需求、OpenSpec、Agent skill 和 Agent command 受控路径', () => {
     const current = workflow();
 
@@ -313,6 +353,348 @@ describe('artifact-git-sync', () => {
       expect(state.syncStatus).toBe('READY');
       expect(localState?.headCommit).toMatch(/^[a-f0-9]{40}$/);
       expect(localState?.localRepoPath).toBe(path.join(deliveryRoot, 'demo'));
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('轻量读取项目仓状态时不拉取远端也不回写中心', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-repo-fast-status-'));
+    const sourceRepo = path.join(tempDir, 'source');
+    const remoteRepo = path.join(tempDir, 'remote.git');
+    const deliveryRoot = path.join(tempDir, 'delivery');
+    await fs.mkdir(path.join(sourceRepo, 'docs'), { recursive: true });
+    await fs.writeFile(path.join(sourceRepo, 'docs', 'README.md'), 'init\n', 'utf8');
+    await git(sourceRepo, ['init']);
+    await git(sourceRepo, ['config', 'user.email', 'test@example.com']);
+    await git(sourceRepo, ['config', 'user.name', 'Test']);
+    await git(sourceRepo, ['add', '.']);
+    await git(sourceRepo, ['commit', '-m', 'init']);
+    await git(sourceRepo, ['branch', '-M', 'master']);
+    await git(tempDir, ['clone', '--bare', sourceRepo, remoteRepo]);
+    await git(sourceRepo, ['remote', 'add', 'origin', remoteRepo]);
+    await fs.mkdir(path.join(deliveryRoot, '.ai-delivery', 'keys'), { recursive: true });
+    await fs.writeFile(path.join(deliveryRoot, '.ai-delivery', 'keys', 'fp'), 'not-used-for-local-remote', 'utf8');
+
+    const centerCalls: string[] = [];
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+      const parsed = new URL(String(url));
+      centerCalls.push(`${init?.method || 'GET'} ${parsed.pathname}`);
+      if (parsed.pathname === '/api/ai-delivery/users/me/delivery-workspace') {
+        return jsonResponse({ id: 1, clientSessionId: 9, localPath: deliveryRoot, status: 'ACTIVE' });
+      }
+      if (parsed.pathname === '/api/ai-delivery/users/me/git-credentials') {
+        return jsonResponse([{ id: 1, platform: 'PROJECT_GIT', fingerprint: 'fp', publicKey: 'ssh-ed25519 AAAA', status: 'ACTIVE' }]);
+      }
+      if (parsed.pathname === '/api/ai-delivery/projects/my') {
+        return jsonResponse([
+          {
+            id: 1,
+            name: 'Demo',
+            code: 'demo',
+            repository: {
+              id: 1,
+              projectId: 1,
+              provider: 'PROJECT_GIT',
+              repoUrl: remoteRepo,
+              defaultBranch: 'master',
+              repoCode: 'demo',
+              status: 'ACTIVE'
+            }
+          }
+        ]);
+      }
+      if (parsed.pathname === '/api/ai-delivery/projects/1/repository-state') {
+        return jsonResponse(JSON.parse(String(init?.body || '{}')));
+      }
+      return jsonResponse(null, 404);
+    };
+    const context = {
+      centerBaseUrl: 'http://center.local',
+      userId: '1',
+      clientSessionId: '9',
+      projectId: '1',
+      fetchImpl
+    } as any;
+
+    try {
+      await cloneProjectRepository(context);
+      const repoPath = path.join(deliveryRoot, 'demo');
+      await fs.writeFile(path.join(sourceRepo, 'docs', 'REMOTE.md'), 'remote update\n', 'utf8');
+      await git(sourceRepo, ['add', 'docs/REMOTE.md']);
+      await git(sourceRepo, ['commit', '-m', 'remote update']);
+      await git(sourceRepo, ['push', 'origin', 'master']);
+      centerCalls.length = 0;
+
+      // 场景意图：普通状态读取只看本地引用，不因为远端已有新提交而执行 fetch。
+      const state = await readProjectRepositoryStatus(context);
+
+      expect(state.syncStatus).toBe('READY');
+      expect(await fs.stat(path.join(repoPath, 'docs', 'REMOTE.md')).catch(() => null)).toBeNull();
+      expect(centerCalls).not.toContain('GET /api/ai-delivery/users/me/git-credentials');
+      expect(centerCalls).not.toContain('POST /api/ai-delivery/projects/1/repository-state');
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('轻量读取项目仓状态时能发现本机未提交修改', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-repo-fast-dirty-'));
+    const sourceRepo = path.join(tempDir, 'source');
+    const remoteRepo = path.join(tempDir, 'remote.git');
+    const deliveryRoot = path.join(tempDir, 'delivery');
+    await fs.mkdir(path.join(sourceRepo, 'docs'), { recursive: true });
+    await fs.writeFile(path.join(sourceRepo, 'docs', 'README.md'), 'init\n', 'utf8');
+    await git(sourceRepo, ['init']);
+    await git(sourceRepo, ['config', 'user.email', 'test@example.com']);
+    await git(sourceRepo, ['config', 'user.name', 'Test']);
+    await git(sourceRepo, ['add', '.']);
+    await git(sourceRepo, ['commit', '-m', 'init']);
+    await git(sourceRepo, ['branch', '-M', 'master']);
+    await git(tempDir, ['clone', '--bare', sourceRepo, remoteRepo]);
+    await fs.mkdir(path.join(deliveryRoot, '.ai-delivery', 'keys'), { recursive: true });
+    await fs.writeFile(path.join(deliveryRoot, '.ai-delivery', 'keys', 'fp'), 'not-used-for-local-remote', 'utf8');
+
+    const centerCalls: string[] = [];
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+      const parsed = new URL(String(url));
+      centerCalls.push(`${init?.method || 'GET'} ${parsed.pathname}`);
+      if (parsed.pathname === '/api/ai-delivery/users/me/delivery-workspace') {
+        return jsonResponse({ id: 1, clientSessionId: 9, localPath: deliveryRoot, status: 'ACTIVE' });
+      }
+      if (parsed.pathname === '/api/ai-delivery/users/me/git-credentials') {
+        return jsonResponse([{ id: 1, platform: 'PROJECT_GIT', fingerprint: 'fp', publicKey: 'ssh-ed25519 AAAA', status: 'ACTIVE' }]);
+      }
+      if (parsed.pathname === '/api/ai-delivery/projects/my') {
+        return jsonResponse([
+          {
+            id: 1,
+            name: 'Demo',
+            code: 'demo',
+            repository: {
+              id: 1,
+              projectId: 1,
+              provider: 'PROJECT_GIT',
+              repoUrl: remoteRepo,
+              defaultBranch: 'master',
+              repoCode: 'demo',
+              status: 'ACTIVE'
+            }
+          }
+        ]);
+      }
+      if (parsed.pathname === '/api/ai-delivery/projects/1/repository-state') {
+        return jsonResponse(JSON.parse(String(init?.body || '{}')));
+      }
+      return jsonResponse(null, 404);
+    };
+    const context = {
+      centerBaseUrl: 'http://center.local',
+      userId: '1',
+      clientSessionId: '9',
+      projectId: '1',
+      fetchImpl
+    } as any;
+
+    try {
+      await cloneProjectRepository(context);
+      const repoPath = path.join(deliveryRoot, 'demo');
+      await fs.writeFile(path.join(repoPath, 'docs', 'README.md'), 'init\nlocal edit\n', 'utf8');
+      centerCalls.length = 0;
+
+      // 场景意图：即使不信任缓存，快检也要通过本地 git status 识别当前用户修改。
+      const state = await readProjectRepositoryStatus(context);
+
+      expect(state.syncStatus).toBe('DIRTY');
+      expect(centerCalls).not.toContain('GET /api/ai-delivery/users/me/git-credentials');
+      expect(centerCalls).not.toContain('POST /api/ai-delivery/projects/1/repository-state');
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('强刷新项目仓状态时仍拉取远端并回写中心', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-repo-refresh-status-'));
+    const sourceRepo = path.join(tempDir, 'source');
+    const remoteRepo = path.join(tempDir, 'remote.git');
+    const deliveryRoot = path.join(tempDir, 'delivery');
+    await fs.mkdir(path.join(sourceRepo, 'docs'), { recursive: true });
+    await fs.writeFile(path.join(sourceRepo, 'docs', 'README.md'), 'init\n', 'utf8');
+    await git(sourceRepo, ['init']);
+    await git(sourceRepo, ['config', 'user.email', 'test@example.com']);
+    await git(sourceRepo, ['config', 'user.name', 'Test']);
+    await git(sourceRepo, ['add', '.']);
+    await git(sourceRepo, ['commit', '-m', 'init']);
+    await git(sourceRepo, ['branch', '-M', 'master']);
+    await git(tempDir, ['clone', '--bare', sourceRepo, remoteRepo]);
+    await git(sourceRepo, ['remote', 'add', 'origin', remoteRepo]);
+    await fs.mkdir(path.join(deliveryRoot, '.ai-delivery', 'keys'), { recursive: true });
+    await fs.writeFile(path.join(deliveryRoot, '.ai-delivery', 'keys', 'fp'), 'not-used-for-local-remote', 'utf8');
+
+    const centerCalls: string[] = [];
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+      const parsed = new URL(String(url));
+      centerCalls.push(`${init?.method || 'GET'} ${parsed.pathname}`);
+      if (parsed.pathname === '/api/ai-delivery/users/me/delivery-workspace') {
+        return jsonResponse({ id: 1, clientSessionId: 9, localPath: deliveryRoot, status: 'ACTIVE' });
+      }
+      if (parsed.pathname === '/api/ai-delivery/users/me/git-credentials') {
+        return jsonResponse([{ id: 1, platform: 'PROJECT_GIT', fingerprint: 'fp', publicKey: 'ssh-ed25519 AAAA', status: 'ACTIVE' }]);
+      }
+      if (parsed.pathname === '/api/ai-delivery/projects/my') {
+        return jsonResponse([
+          {
+            id: 1,
+            name: 'Demo',
+            code: 'demo',
+            repository: {
+              id: 1,
+              projectId: 1,
+              provider: 'PROJECT_GIT',
+              repoUrl: remoteRepo,
+              defaultBranch: 'master',
+              repoCode: 'demo',
+              status: 'ACTIVE'
+            }
+          }
+        ]);
+      }
+      if (parsed.pathname === '/api/ai-delivery/projects/1/repository-state') {
+        return jsonResponse(JSON.parse(String(init?.body || '{}')));
+      }
+      return jsonResponse(null, 404);
+    };
+    const context = {
+      centerBaseUrl: 'http://center.local',
+      userId: '1',
+      clientSessionId: '9',
+      projectId: '1',
+      fetchImpl
+    } as any;
+
+    try {
+      await cloneProjectRepository(context);
+      await fs.writeFile(path.join(sourceRepo, 'docs', 'REMOTE.md'), 'remote update\n', 'utf8');
+      await git(sourceRepo, ['add', 'docs/REMOTE.md']);
+      await git(sourceRepo, ['commit', '-m', 'remote update']);
+      await git(sourceRepo, ['push', 'origin', 'master']);
+      centerCalls.length = 0;
+
+      // 场景意图：强刷新保留原有远端一致性校验，并继续上报中心状态。
+      const state = await inspectProjectRepository(context);
+
+      expect(state.syncStatus).toBe('BEHIND_REMOTE');
+      expect(centerCalls).toContain('GET /api/ai-delivery/users/me/git-credentials');
+      expect(centerCalls).toContain('POST /api/ai-delivery/projects/1/repository-state');
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('路由同步项目仓时不更新当前项目 Skill', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-route-sync-no-skill-'));
+    const workspaceRoot = path.join(tempDir, 'workspace');
+    const sourceRepo = path.join(tempDir, 'source');
+    const remoteRepo = path.join(tempDir, 'remote.git');
+    const deliveryRoot = path.join(tempDir, 'delivery');
+    await fs.mkdir(path.join(workspaceRoot, 'skills', 'coding-design'), { recursive: true });
+    await fs.writeFile(path.join(workspaceRoot, 'skills', 'coding-design', 'SKILL.md'), '# source skill\n', 'utf8');
+    await fs.mkdir(path.join(sourceRepo, 'docs'), { recursive: true });
+    await fs.writeFile(path.join(sourceRepo, 'docs', 'README.md'), 'init\n', 'utf8');
+    await git(sourceRepo, ['init']);
+    await git(sourceRepo, ['config', 'user.email', 'test@example.com']);
+    await git(sourceRepo, ['config', 'user.name', 'Test']);
+    await git(sourceRepo, ['add', '.']);
+    await git(sourceRepo, ['commit', '-m', 'init']);
+    await git(sourceRepo, ['branch', '-M', 'master']);
+    await git(tempDir, ['clone', '--bare', sourceRepo, remoteRepo]);
+    await fs.mkdir(path.join(deliveryRoot, '.ai-delivery', 'keys'), { recursive: true });
+    await fs.writeFile(path.join(deliveryRoot, '.ai-delivery', 'keys', 'fp'), 'not-used-for-local-remote', 'utf8');
+
+    const fetchImpl = projectRepoFetchImpl(deliveryRoot, remoteRepo);
+    vi.stubGlobal('fetch', fetchImpl);
+    const context = {
+      centerBaseUrl: 'http://center.local',
+      userId: '1',
+      clientSessionId: '9',
+      projectId: '1',
+      fetchImpl
+    } as any;
+
+    try {
+      await cloneProjectRepository(context);
+      const repoPath = path.join(deliveryRoot, 'demo');
+      const router = createRouter(workspaceRoot);
+      const result = routerResponse();
+      await router(
+        routerRequest('POST', '/api/ai-delivery/projects/1/repository/sync', {
+          'x-user-id': '1',
+          'x-project-id': '1',
+          'x-client-session-id': '9',
+          'x-center-base-url': 'http://center.local'
+        }),
+        result.response
+      );
+      const { status, body } = await result.done;
+
+      expect(status).toBe(200);
+      expect(body.data.syncStatus).toBe('READY');
+      await expect(fs.stat(path.join(repoPath, '.codex', 'skills', 'coding-design', 'SKILL.md'))).rejects.toThrow();
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('路由支持显式更新当前项目 Skill 并刷新仓库状态', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-route-skill-update-'));
+    const workspaceRoot = path.join(tempDir, 'workspace');
+    const sourceRepo = path.join(tempDir, 'source');
+    const remoteRepo = path.join(tempDir, 'remote.git');
+    const deliveryRoot = path.join(tempDir, 'delivery');
+    await fs.mkdir(path.join(workspaceRoot, 'skills', 'coding-design'), { recursive: true });
+    await fs.writeFile(path.join(workspaceRoot, 'skills', 'coding-design', 'SKILL.md'), '# source skill\n', 'utf8');
+    await fs.mkdir(path.join(sourceRepo, 'docs'), { recursive: true });
+    await fs.writeFile(path.join(sourceRepo, 'docs', 'README.md'), 'init\n', 'utf8');
+    await git(sourceRepo, ['init']);
+    await git(sourceRepo, ['config', 'user.email', 'test@example.com']);
+    await git(sourceRepo, ['config', 'user.name', 'Test']);
+    await git(sourceRepo, ['add', '.']);
+    await git(sourceRepo, ['commit', '-m', 'init']);
+    await git(sourceRepo, ['branch', '-M', 'master']);
+    await git(tempDir, ['clone', '--bare', sourceRepo, remoteRepo]);
+    await fs.mkdir(path.join(deliveryRoot, '.ai-delivery', 'keys'), { recursive: true });
+    await fs.writeFile(path.join(deliveryRoot, '.ai-delivery', 'keys', 'fp'), 'not-used-for-local-remote', 'utf8');
+
+    const fetchImpl = projectRepoFetchImpl(deliveryRoot, remoteRepo);
+    vi.stubGlobal('fetch', fetchImpl);
+    const context = {
+      centerBaseUrl: 'http://center.local',
+      userId: '1',
+      clientSessionId: '9',
+      projectId: '1',
+      fetchImpl
+    } as any;
+
+    try {
+      await cloneProjectRepository(context);
+      const repoPath = path.join(deliveryRoot, 'demo');
+      const router = createRouter(workspaceRoot);
+      const result = routerResponse();
+      await router(
+        routerRequest('POST', '/api/ai-delivery/projects/1/skills/update', {
+          'x-user-id': '1',
+          'x-project-id': '1',
+          'x-client-session-id': '9',
+          'x-center-base-url': 'http://center.local'
+        }),
+        result.response
+      );
+      const { status, body } = await result.done;
+
+      expect(status).toBe(200);
+      expect(body.data.bootstrap.codingSkills.synced).toBe(1);
+      expect(body.data.state.syncStatus).toBe('DIRTY');
+      expect(await fs.readFile(path.join(repoPath, '.codex', 'skills', 'coding-design', 'SKILL.md'), 'utf8')).toBe('# source skill\n');
     } finally {
       await fs.rm(tempDir, { recursive: true, force: true });
     }

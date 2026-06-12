@@ -625,17 +625,43 @@ const techDesignQuestionArtifacts = computed(() => {
     )
     .sort((left, right) => left.path.localeCompare(right.path));
 });
+const techDesignQuestionReadPaths = computed(() => {
+  if (!workflow.value) {
+    return [];
+  }
+  const paths = new Set(techDesignQuestionArtifacts.value.map((artifact) => artifact.path));
+  for (const run of workflow.value.runs || []) {
+    if (run.actionType !== 'DESIGN_QUESTION') {
+      continue;
+    }
+    const outputPath = normalizeTechDesignQuestionPath(run.params?.outputPath);
+    if (isTechDesignQuestionPath(outputPath)) {
+      paths.add(outputPath);
+    }
+  }
+  return [...paths].sort((left, right) => left.localeCompare(right));
+});
+const techDesignQuestionContextPaths = computed(() => {
+  const paths = new Set(techDesignQuestionArtifacts.value.map((artifact) => artifact.path));
+  for (const record of techDesignQuestionRecords.value) {
+    const sourcePath = normalizeTechDesignQuestionPath(record.sourcePath);
+    if (isTechDesignQuestionPath(sourcePath)) {
+      paths.add(sourcePath);
+    }
+  }
+  return [...paths].sort((left, right) => left.localeCompare(right));
+});
 const techDesignQuestionContextText = computed(() => {
-  if (!techDesignQuestionArtifacts.value.length) {
+  if (!techDesignQuestionContextPaths.value.length) {
     return '';
   }
-  if (techDesignQuestionArtifacts.value.length === 1) {
-    return techDesignQuestionArtifacts.value[0].path;
+  if (techDesignQuestionContextPaths.value.length === 1) {
+    return techDesignQuestionContextPaths.value[0];
   }
-  return `${techDesignQuestionArtifacts.value.length} 条答疑记录`;
+  return `${techDesignQuestionContextPaths.value.length} 条答疑记录`;
 });
 const techDesignGenerationSourcePaths = computed(() => {
-  const paths = [...techDesignQuestionArtifacts.value.map((artifact) => artifact.path), ...techDesignSourceFiles.value.map((file) => file.path)].filter(
+  const paths = [...techDesignQuestionContextPaths.value, ...techDesignSourceFiles.value.map((file) => file.path)].filter(
     (item): item is string => Boolean(item)
   );
   return [...new Set(paths)];
@@ -669,6 +695,20 @@ function defaultTechnicalDesignDocumentPath(requirementId: string) {
 
 function isTechnicalDesignSourcePath(filePath: string) {
   return filePath.replace(/\\/g, '/').includes('/technical-design/file/');
+}
+
+function normalizeTechDesignQuestionPath(value: unknown) {
+  return typeof value === 'string' ? value.trim().replace(/\\/g, '/') : '';
+}
+
+function isTechDesignQuestionPath(filePath: string) {
+  if (!workflow.value || !filePath) {
+    return false;
+  }
+  const requirementId = workflow.value.requirementId;
+  const legacyPath = `docs/${requirementId}/technical-design/questions.md`;
+  const questionPrefix = `docs/${requirementId}/technical-design/questions/`;
+  return filePath === legacyPath || (filePath.startsWith(questionPrefix) && /\.md$/i.test(filePath));
 }
 
 function officialTechnicalDesignArtifactPath() {
@@ -758,17 +798,21 @@ function previewArtifact(artifact: ArtifactRef) {
 }
 
 async function loadTechDesignQuestionRecords() {
-  const artifacts = techDesignQuestionArtifacts.value;
-  if (!artifacts.length) {
+  const paths = techDesignQuestionReadPaths.value;
+  if (!paths.length) {
     techDesignQuestionRecords.value = [];
     return;
   }
   techDesignQuestionLoading.value = true;
   try {
     const records: TechDesignQuestionRecord[] = [];
-    for (const artifact of artifacts) {
-      const result = await apiClient.readArtifact(artifact.path);
-      records.push(...parseTechDesignQuestionRecords(result.content, artifact.path));
+    for (const path of paths) {
+      try {
+        const result = await apiClient.readArtifact(path);
+        records.push(...parseTechDesignQuestionRecords(result.content, path));
+      } catch (error) {
+        console.warn('读取技术方案答疑记录失败:', path, error);
+      }
     }
     techDesignQuestionRecords.value = records;
   } catch (error) {
@@ -1026,7 +1070,7 @@ async function ensureDeliveryReady(actionLabel: string, options: { allowDirty?: 
       return false;
     }
     if (runtime.projectId) {
-      const repoState = await apiClient.getProjectRepositoryStatus(runtime.projectId);
+      const repoState = await apiClient.refreshProjectRepositoryStatus(runtime.projectId);
       if (repoState.syncStatus === 'NOT_CLONED') {
         ElMessage.warning('项目产物仓尚未 clone，请先在个人中心完成项目仓初始化');
         return false;
@@ -1413,7 +1457,7 @@ watch(activeImplementationStep, (step) => {
 });
 
 watch(
-  () => techDesignQuestionArtifacts.value.map((artifact) => artifact.path).join('|'),
+  () => techDesignQuestionReadPaths.value.join('|'),
   () => {
     void loadTechDesignQuestionRecords();
   },

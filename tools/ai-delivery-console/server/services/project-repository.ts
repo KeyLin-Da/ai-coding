@@ -118,12 +118,12 @@ export async function loadCurrentDeliveryProject(context: LocalRequestContext): 
   return project;
 }
 
-export async function resolveProjectRepoPath(context: LocalRequestContext): Promise<{ project: DeliveryProjectPayload; repoPath: string }> {
+export async function resolveProjectRepoPath(context: LocalRequestContext): Promise<{ project: DeliveryProjectPayload; repoPath: string; root: string }> {
   const root = await requireDeliveryWorkspaceRoot(context);
   const project = await loadCurrentDeliveryProject(context);
   const repoCode = project.repository?.repoCode || project.code;
   const repoPath = assertInsideDeliveryWorkspace(root, path.join(root, repoCode));
-  return { project, repoPath };
+  return { project, repoPath, root };
 }
 
 async function credentialOptions(context: LocalRequestContext, project: DeliveryProjectPayload): Promise<GitCommandOptions> {
@@ -149,7 +149,19 @@ async function postRepoState(
 
 async function localRepoStatePath(context: LocalRequestContext, projectId: string | number): Promise<string> {
   const root = await requireDeliveryWorkspaceRoot(context);
+  return repoStatePath(root, projectId);
+}
+
+function repoStatePath(root: string, projectId: string | number): string {
   return assertInsideDeliveryWorkspace(root, path.join(root, '.ai-delivery', 'projects', String(projectId), 'repo-state.json'));
+}
+
+function requireClientSessionId(context: LocalRequestContext): number {
+  const clientSessionId = Number(context.clientSessionId || 0);
+  if (!clientSessionId) {
+    throw new Error('缺少客户端会话ID');
+  }
+  return clientSessionId;
 }
 
 export async function saveLocalRepoState(context: LocalRequestContext, state: ProjectRepoStatePayload): Promise<void> {
@@ -162,6 +174,69 @@ export async function readLocalRepoState(context: LocalRequestContext, projectId
   const filePath = await localRepoStatePath(context, projectId);
   const content = await fs.readFile(filePath, 'utf8').catch(() => undefined);
   return content ? (JSON.parse(content) as ProjectRepoStatePayload) : undefined;
+}
+
+async function readLocalRepoStateFromRoot(root: string, projectId: string | number): Promise<ProjectRepoStatePayload | undefined> {
+  const content = await fs.readFile(repoStatePath(root, projectId), 'utf8').catch(() => undefined);
+  return content ? (JSON.parse(content) as ProjectRepoStatePayload) : undefined;
+}
+
+export async function readProjectRepositoryStatus(context: LocalRequestContext): Promise<ProjectRepoStatePayload> {
+  const { project, repoPath, root } = await resolveProjectRepoPath(context);
+  const repository = project.repository;
+  if (!repository) {
+    throw new Error('当前项目未配置AI产物Git仓');
+  }
+  const clientSessionId = requireClientSessionId(context);
+  const cached = await readLocalRepoStateFromRoot(root, project.id);
+  const exists = await fs.stat(repoPath).then((stat) => stat.isDirectory()).catch(() => false);
+  if (!exists) {
+    return {
+      projectId: project.id,
+      clientSessionId,
+      localRepoPath: repoPath,
+      syncStatus: 'NOT_CLONED',
+      lastCheckedAt: cached?.lastCheckedAt
+    };
+  }
+
+  const targetBranch = repository.defaultBranch || 'master';
+  let currentBranch = cached?.currentBranch || '';
+  let headCommit = cached?.headCommit || '';
+  let remoteCommit = cached?.remoteCommit || '';
+  let syncStatus: ProjectRepoSyncStatus = 'READY';
+  try {
+    currentBranch = (await runGit(repoPath, ['branch', '--show-current'])).trim();
+    headCommit = (await runGit(repoPath, ['rev-parse', 'HEAD'])).trim();
+    const status = (await runGit(repoPath, ['status', '--porcelain', '--untracked-files=all'])).trim();
+    let behind = 0;
+    try {
+      remoteCommit = (await runGit(repoPath, ['rev-parse', `origin/${targetBranch}`])).trim();
+      const counts = (await runGit(repoPath, ['rev-list', '--left-right', '--count', `HEAD...origin/${targetBranch}`])).trim();
+      const [, behindRaw] = counts.split(/\s+/);
+      behind = Number(behindRaw || 0);
+    } catch {
+      syncStatus = status ? 'DIRTY' : 'FAILED';
+    }
+    if (behind > 0) {
+      syncStatus = 'BEHIND_REMOTE';
+    } else if (status) {
+      syncStatus = 'DIRTY';
+    }
+  } catch {
+    syncStatus = 'FAILED';
+  }
+
+  return {
+    projectId: project.id,
+    clientSessionId,
+    localRepoPath: repoPath,
+    currentBranch,
+    headCommit,
+    remoteCommit,
+    syncStatus,
+    lastCheckedAt: cached?.lastCheckedAt
+  };
 }
 
 export async function cloneProjectRepository(context: LocalRequestContext): Promise<ProjectRepoStatePayload> {
@@ -230,10 +305,7 @@ export async function inspectProjectRepository(context: LocalRequestContext): Pr
   if (!repository) {
     throw new Error('当前项目未配置AI产物Git仓');
   }
-  const clientSessionId = Number(context.clientSessionId || 0);
-  if (!clientSessionId) {
-    throw new Error('缺少客户端会话ID');
-  }
+  const clientSessionId = requireClientSessionId(context);
   const exists = await fs.stat(repoPath).then((stat) => stat.isDirectory()).catch(() => false);
   if (!exists) {
     return postRepoState(context, project.id, {

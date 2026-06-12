@@ -31,7 +31,8 @@ vi.mock('@/api/client', () => ({
     deleteTechDesignQuestion: vi.fn(),
     getDeliveryWorkspace: vi.fn(),
     listGitCredentials: vi.fn(),
-    getProjectRepositoryStatus: vi.fn()
+    getProjectRepositoryStatus: vi.fn(),
+    refreshProjectRepositoryStatus: vi.fn()
   }
 }));
 
@@ -370,6 +371,12 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
       localRepoPath: '/tmp/ai-delivery/project',
       syncStatus: 'READY'
     });
+    vi.mocked(apiClient.refreshProjectRepositoryStatus).mockResolvedValue({
+      projectId: 10,
+      clientSessionId: 20,
+      localRepoPath: '/tmp/ai-delivery/project',
+      syncStatus: 'READY'
+    });
     vi.mocked(apiClient.openRunEventStream).mockImplementation((requirementId: string, runId: string) => new MockEventSource(`runner:${requirementId}:${runId}`) as unknown as EventSource);
     vi.stubGlobal('EventSource', MockEventSource);
     Object.defineProperty(navigator, 'clipboard', {
@@ -479,7 +486,7 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
   });
 
   it('当前用户项目仓 DIRTY 时仍允许继续执行自己的工作流动作', async () => {
-    vi.mocked(apiClient.getProjectRepositoryStatus).mockResolvedValue({
+    vi.mocked(apiClient.refreshProjectRepositoryStatus).mockResolvedValue({
       projectId: 10,
       clientSessionId: 20,
       localRepoPath: '/tmp/ai-delivery/project',
@@ -776,6 +783,64 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     await flushPromises();
 
     expect(apiClient.getRunEvents).toHaveBeenCalledWith('172014', 'run-question-2');
+  });
+
+  it('答疑产物索引滞后时通过运行输出路径读取答案', async () => {
+    const outputPath = 'docs/172014/technical-design/questions/20260612-101549-729-1-2.md';
+    vi.mocked(apiClient.readArtifact).mockResolvedValue({
+      artifact: {},
+      content: `# 技术方案答疑记录
+
+## 2026-06-12 10:21:27 / 172014
+
+**问题：**
+地区筛选列表接口和时间没有联动关系
+
+**回答：**
+地区筛选列表需要按周期读取快照。
+
+**依据：**
+- 技术方案 dimensions 接口
+
+**后续建议：**
+- 补充历史快照来源`
+    });
+    const current = techDesignWorkflow([
+      artifact('PRD', 'docs/172014/prd/analysis.md'),
+      artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md', {
+        id: 'technical-design'
+      })
+    ]);
+    current.runs = [
+      {
+        id: 'run-question-output-path',
+        requirementId: '172014',
+        actionType: 'DESIGN_QUESTION',
+        stage: 'TECH_DESIGN',
+        status: 'SUCCEEDED',
+        startedAt: '2026-06-12T02:15:49.731Z',
+        finishedAt: '2026-06-12T02:22:48.670Z',
+        params: {
+          question: '地区筛选列表接口和时间没有联动关系',
+          outputPath
+        }
+      }
+    ];
+    const wrapper = await mountDetail(current);
+    await flushPromises();
+
+    expect(apiClient.readArtifact).toHaveBeenCalledWith(outputPath);
+    await openDesignQuestionDialog(wrapper);
+
+    expect(wrapper.text()).toContain('已回答');
+    expect(wrapper.text()).not.toContain('待记录');
+
+    const answerButton = wrapper.findAll('button').find((item) => item.text().includes('查看答案'));
+    await answerButton?.trigger('click');
+
+    expect(wrapper.text()).toContain('地区筛选列表需要按周期读取快照。');
+    expect(wrapper.text()).toContain('技术方案 dimensions 接口');
+    expect(wrapper.text()).toContain('补充历史快照来源');
   });
 
   it('技术方案答疑删除前二次确认，确认后删除问题并刷新记录', async () => {

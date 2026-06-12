@@ -8,6 +8,35 @@
           <p v-if="versionText" class="muted version-summary">{{ versionText }}</p>
         </div>
         <div class="preview-header-actions">
+          <div class="preview-zoom-controls" aria-label="预览缩放">
+            <el-button
+              class="zoom-out-button"
+              :disabled="zoomPercent <= minZoomPercent"
+              :icon="Minus"
+              size="small"
+              circle
+              title="缩小预览"
+              @click="zoomOut"
+            />
+            <span class="zoom-percent">{{ zoomPercent }}%</span>
+            <el-button
+              class="zoom-in-button"
+              :disabled="zoomPercent >= maxZoomPercent"
+              :icon="Plus"
+              size="small"
+              circle
+              title="放大预览"
+              @click="zoomIn"
+            />
+            <el-button
+              class="zoom-reset-button"
+              :disabled="zoomPercent === defaultZoomPercent"
+              :icon="Refresh"
+              size="small"
+              title="恢复 100%"
+              @click="resetZoom"
+            />
+          </div>
           <label class="eye-care-toggle" :class="{ active: eyeCareMode }">
             <input v-model="eyeCareMode" type="checkbox" />
             <span>护眼模式</span>
@@ -19,21 +48,23 @@
     </template>
 
     <div v-loading="loading" class="preview-dialog-body" :class="{ 'eye-care': eyeCareMode }">
-      <article v-if="isMarkdown" class="markdown-preview artifact-markdown" v-html="previewHtml"></article>
-      <iframe v-else-if="isHtml || isPdf" class="artifact-frame" :src="artifactUrl" title="产物预览"></iframe>
-      <div v-else-if="isImage" class="artifact-image-wrap">
-        <img :src="artifactUrl" :alt="artifact?.label || '产物图片'" />
+      <div class="preview-zoom-stage" :style="zoomStageStyle">
+        <article v-if="isMarkdown" class="markdown-preview artifact-markdown" v-html="previewHtml"></article>
+        <iframe v-else-if="isHtml || isPdf" class="artifact-frame" :src="artifactUrl" title="产物预览"></iframe>
+        <div v-else-if="isImage" class="artifact-image-wrap">
+          <img :src="artifactUrl" :alt="artifact?.label || '产物图片'" />
+        </div>
+        <pre v-else class="artifact-code"><code>{{ formattedContent }}</code></pre>
       </div>
-      <pre v-else class="artifact-code"><code>{{ formattedContent }}</code></pre>
     </div>
   </el-dialog>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import MarkdownIt from 'markdown-it';
 import mermaid from 'mermaid';
-import { CopyDocument, Download } from '@element-plus/icons-vue';
+import { CopyDocument, Download, Minus, Plus, Refresh } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import type { ArtifactRef } from '@shared/workflow';
 import { apiClient } from '@/api/client';
@@ -44,6 +75,11 @@ const loading = ref(false);
 const artifact = ref<ArtifactRef>();
 const content = ref('');
 const eyeCareStorageKey = 'ai-delivery-preview-eye-care';
+const minZoomPercent = 60;
+const maxZoomPercent = 200;
+const defaultZoomPercent = 100;
+const zoomStepPercent = 10;
+const zoomPercent = ref(defaultZoomPercent);
 
 function readEyeCareMode() {
   try {
@@ -86,6 +122,11 @@ const isMarkdown = computed(() => artifact.value?.kind === 'markdown' || ['.md',
 const isHtml = computed(() => artifact.value?.kind === 'html' || extension.value === '.html');
 const isPdf = computed(() => extension.value === '.pdf');
 const isImage = computed(() => ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'].includes(extension.value));
+const zoomScale = computed(() => zoomPercent.value / 100);
+const zoomStageStyle = computed<Record<string, string>>(() => ({
+  '--preview-zoom-scale': String(zoomScale.value),
+  zoom: String(zoomScale.value)
+}));
 
 const previewHtml = computed(() => {
   const rendered = md.render(content.value || '');
@@ -143,9 +184,58 @@ watch(eyeCareMode, (value) => {
   }
 });
 
+function clampZoom(value: number) {
+  return Math.min(maxZoomPercent, Math.max(minZoomPercent, value));
+}
+
+function setZoom(value: number) {
+  zoomPercent.value = clampZoom(value);
+}
+
+function zoomIn() {
+  setZoom(zoomPercent.value + zoomStepPercent);
+}
+
+function zoomOut() {
+  setZoom(zoomPercent.value - zoomStepPercent);
+}
+
+function resetZoom() {
+  setZoom(defaultZoomPercent);
+}
+
+function handleZoomShortcut(event: KeyboardEvent) {
+  if (!visible.value || (!event.metaKey && !event.ctrlKey)) {
+    return;
+  }
+  if (event.key === '+' || event.key === '=') {
+    event.preventDefault();
+    zoomIn();
+    return;
+  }
+  if (event.key === '-' || event.key === '_') {
+    event.preventDefault();
+    zoomOut();
+    return;
+  }
+  if (event.key === '0') {
+    event.preventDefault();
+    resetZoom();
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', handleZoomShortcut);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleZoomShortcut);
+});
+
 async function open(nextArtifact: ArtifactRef) {
   artifact.value = nextArtifact;
   content.value = '';
+  resetZoom();
   if (!nextArtifact.exists) {
     ElMessage.warning('文件尚未生成');
     return;
@@ -234,6 +324,25 @@ defineExpose({ open });
   gap: 8px;
 }
 
+.preview-zoom-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 6px;
+  border: 1px solid #d8e0ec;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.zoom-percent {
+  min-width: 44px;
+  color: #394b63;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
 .eye-care-toggle {
   display: inline-flex;
   align-items: center;
@@ -274,6 +383,13 @@ defineExpose({ open });
   background: #f4eddd;
 }
 
+.preview-zoom-stage {
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  transform-origin: top left;
+}
+
 .artifact-markdown {
   max-width: 980px;
   min-height: 100%;
@@ -310,6 +426,7 @@ defineExpose({ open });
   display: block;
   width: 100%;
   height: 100%;
+  min-height: calc(100vh - 116px);
   border: 0;
   background: #ffffff;
 }
@@ -364,10 +481,20 @@ defineExpose({ open });
 
   .preview-header-actions {
     width: 100%;
+    flex-wrap: wrap;
   }
 
   .preview-header-actions .el-button {
     flex: 1;
+  }
+
+  .preview-zoom-controls {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .preview-zoom-controls .el-button {
+    flex: 0 0 auto;
   }
 
   .artifact-markdown {

@@ -63,6 +63,7 @@
             </div>
             <div class="toolbar-actions">
               <el-button :icon="Refresh" :disabled="!project.current" @click="checkProjectRepoStatus">检查状态</el-button>
+              <el-button :icon="Refresh" :disabled="!project.current" :loading="updatingSkills" @click="updateProjectSkills">更新 Skill</el-button>
               <el-button type="success" :icon="Upload" :disabled="!project.current || !canPushRepo" :loading="pushingRepo" @click="pushProjectRepo">提交</el-button>
               <el-button type="primary" :disabled="!project.current" :loading="cloningRepo" @click="cloneProjectRepo">Clone</el-button>
             </div>
@@ -236,6 +237,7 @@ const saving = ref(false);
 const savingDeliveryWorkspace = ref(false);
 const generatingCredential = ref(false);
 const cloningRepo = ref(false);
+const updatingSkills = ref(false);
 const pushingRepo = ref(false);
 const subdirectories = ref<Subdirectory[]>([]);
 const loadingDirs = ref(false);
@@ -436,7 +438,7 @@ async function checkProjectRepoStatus() {
     return;
   }
   try {
-    projectRepoState.value = await apiClient.getProjectRepositoryStatus(project.current.id);
+    projectRepoState.value = await apiClient.refreshProjectRepositoryStatus(project.current.id);
   } catch (error: any) {
     projectRepoState.value = undefined;
     ElMessage.error(error.message || '检查项目产物仓失败');
@@ -455,6 +457,31 @@ async function cloneProjectRepo() {
     ElMessage.error(error.message || 'Clone项目产物仓失败');
   } finally {
     cloningRepo.value = false;
+  }
+}
+
+async function updateProjectSkills() {
+  if (!project.current) {
+    return;
+  }
+  if (projectRepoState.value?.syncStatus === 'NOT_CLONED') {
+    ElMessage.warning('请先 Clone 项目产物仓');
+    return;
+  }
+  updatingSkills.value = true;
+  try {
+    const result = await apiClient.updateProjectSkills(project.current.id);
+    projectRepoState.value = result.state;
+    const synced = result.bootstrap.codingSkills.synced;
+    if (result.state.syncStatus === 'DIRTY') {
+      ElMessage.success(`已更新 ${synced} 个 Skill，请提交项目产物仓`);
+    } else {
+      ElMessage.success(`已更新 ${synced} 个 Skill，项目产物仓无新增变更`);
+    }
+  } catch (error: any) {
+    ElMessage.error(error.message || '更新项目 Skill 失败');
+  } finally {
+    updatingSkills.value = false;
   }
 }
 

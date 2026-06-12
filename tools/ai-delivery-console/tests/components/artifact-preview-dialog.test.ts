@@ -79,4 +79,42 @@ describe('ArtifactPreviewDialog', () => {
     expect(wrapper.find('.preview-dialog-body').classes()).toContain('eye-care');
     expect(window.localStorage.getItem('ai-delivery-preview-eye-care')).toBe('1');
   });
+
+  it('支持放大、缩小和重置预览比例', async () => {
+    const wrapper = mount(ArtifactPreviewDialog);
+
+    await (wrapper.vm as any).open({
+      id: 'prd-analysis',
+      stage: 'PRD',
+      label: 'PRD 分析文档',
+      path: 'docs/172014/prd/analysis.md',
+      kind: 'markdown',
+      exists: true
+    });
+    await nextTick();
+
+    expect(wrapper.find('.zoom-percent').text()).toBe('100%');
+    expect(wrapper.find('.preview-zoom-stage').attributes('style')).toContain('--preview-zoom-scale: 1');
+
+    await wrapper.find('.zoom-in-button').trigger('click');
+    await nextTick();
+
+    expect(wrapper.find('.zoom-percent').text()).toBe('110%');
+    expect(wrapper.find('.preview-zoom-stage').attributes('style')).toContain('--preview-zoom-scale: 1.1');
+
+    await wrapper.find('.zoom-out-button').trigger('click');
+    await nextTick();
+
+    expect(wrapper.find('.zoom-percent').text()).toBe('100%');
+
+    await wrapper.find('.zoom-in-button').trigger('click');
+    await wrapper.find('.zoom-in-button').trigger('click');
+    await nextTick();
+    expect(wrapper.find('.zoom-percent').text()).toBe('120%');
+
+    await wrapper.find('.zoom-reset-button').trigger('click');
+    await nextTick();
+
+    expect(wrapper.find('.zoom-percent').text()).toBe('100%');
+  });
 });

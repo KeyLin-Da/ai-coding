@@ -90,8 +90,7 @@ export const useSettingsStore = defineStore('settings', {
         centerBaseUrl: this.desktopConfig.centerBaseUrl,
         runnerBaseUrl: this.desktopConfig.runnerBaseUrl,
         userId: this.desktopConfig.userId,
-        clientSessionId: this.desktopConfig.clientSessionId,
-        projectId: this.desktopConfig.projectId
+        clientSessionId: this.desktopConfig.clientSessionId
       });
     },
     runDiagnostics() {
