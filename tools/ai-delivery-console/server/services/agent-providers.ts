@@ -146,6 +146,16 @@ export async function createPromptEnvelope(workspaceRoot: string, workflow: Requ
   const projectPathsSection = configuredProjectPaths || selectedProjects
     ? `\n## 工程代码目录\n${configuredProjectPaths}${selectedProjects}`
     : '';
+  const projectDiscoverySection = projectPathsSection
+    ? `
+## 工程检索策略
+
+- “本次涉及工程”是优先搜索工程，不是完整只读检索边界。
+- 先在本次涉及工程中定位入口和主要实现；如发现 Feign、API 包、DTO、表名、MQ Topic、Redis Key、路由、配置 Key、import 等跨工程线索，可在已配置工程父目录内只读扩展检索。
+- 技术方案或答疑产物需要声明代码检索范围：优先工程、自动扩展工程、扩展依据、未检索工程及原因。
+- 自动扩展工程仅允许只读分析；需要修改时，必须明确建议用户追加为涉及工程并等待确认。
+`
+    : '';
   const content = `# AI Delivery Agent Task
 
 你将在工作区执行一个 AI 需求交付动作。
@@ -156,7 +166,7 @@ export async function createPromptEnvelope(workspaceRoot: string, workflow: Requ
 - 关联分支: ${workflow.branchName || '未绑定'}
 - 运行 ID: ${run.id}
 - Agent: ${run.agentId || 'unknown'}
-${projectPathsSection}
+${projectPathsSection}${projectDiscoverySection}
 ## 技能
 
 - 名称: ${skillName}
@@ -172,7 +182,7 @@ ${commandText}
 
 1. 先阅读技能说明文件，并严格按技能约定执行。
 2. 交付产物、OpenSpec 工件、运行日志和报告必须写入交付工作区内的约定目录。
-3. 工程代码的读取和修改仅限于上方列出的工程代码目录；不要把工程产物写入交付工作区之外的其他位置。
+3. 工程代码读取遵守上方工程目录和检索策略；工程代码修改仅限本次涉及工程或用户明确确认的工程；不要把工程产物写入交付工作区之外的其他位置。
 4. 关键执行步骤、命令、阻塞原因和产物路径需要输出到终端。
 5. 若技能要求生成文档或报告，写入技能约定目录。
 6. 如果缺少必要输入或权限，停止并说明最小补充信息。

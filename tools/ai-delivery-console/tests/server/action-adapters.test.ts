@@ -159,6 +159,35 @@ describe('action-adapters', () => {
     );
   });
 
+  it('普通需求再次生成技术方案命令时携带已有评审文档', () => {
+    const item = {
+      ...workflow(),
+      artifacts: [
+        {
+          id: 'technical-design',
+          stage: 'TECH_DESIGN' as const,
+          label: '技术方案评审文档',
+          path: 'docs/172014/technical-design/design_review.md',
+          kind: 'markdown' as const,
+          exists: true
+        }
+      ],
+      techDesignSourceFiles: [
+        {
+          id: 'source-1',
+          name: '补充图.png',
+          path: 'docs/172014/technical-design/files/source-1.png',
+          size: 100,
+          uploadedAt: new Date().toISOString()
+        }
+      ]
+    };
+
+    expect(internalForTests.buildSkillCommand(item, { actionType: 'DESIGN_GENERATE', params: {} })).toBe(
+      '/coding-design d=docs/172014/prd/analysis.md,docs/172014/technical-design/design_review.md,docs/172014/technical-design/files/source-1.png r=172014'
+    );
+  });
+
   it('普通需求生成技术方案命令时将答疑记录放在上传补充材料之前', () => {
     const item = {
       ...workflow(),
@@ -280,6 +309,43 @@ describe('action-adapters', () => {
     const command = internalForTests.buildSkillCommand(item, { actionType: 'DESIGN_GENERATE', params: {} });
 
     expect(command).toBe('/coding-design d=邀请好友积分异常,后台配置为 1，实际奖励 10,docs/172014/technical-design/files/source-1.png r=172014');
+    expect(command).not.toContain('/prd/');
+  });
+
+  it('缺陷再次生成技术方案命令时携带已有评审文档且不自动携带 PRD', () => {
+    const item = {
+      ...workflow(),
+      title: '邀请好友积分异常',
+      requirementType: 'DEFECT' as const,
+      currentStage: 'TECH_DESIGN' as const,
+      stages: createEmptyStages('DEFECT'),
+      artifacts: [
+        {
+          id: 'technical-design',
+          stage: 'TECH_DESIGN' as const,
+          label: '技术方案评审文档',
+          path: 'docs/172014/technical-design/design_review.md',
+          kind: 'markdown' as const,
+          exists: true
+        }
+      ],
+      techDesignClarification: '后台配置为 1，实际奖励 10',
+      techDesignSourceFiles: [
+        {
+          id: 'source-1',
+          name: '配置截图.png',
+          path: 'docs/172014/technical-design/files/source-1.png',
+          size: 100,
+          uploadedAt: new Date().toISOString()
+        }
+      ]
+    };
+
+    const command = internalForTests.buildSkillCommand(item, { actionType: 'DESIGN_GENERATE', params: {} });
+
+    expect(command).toBe(
+      '/coding-design d=邀请好友积分异常,后台配置为 1，实际奖励 10,docs/172014/technical-design/design_review.md,docs/172014/technical-design/files/source-1.png r=172014'
+    );
     expect(command).not.toContain('/prd/');
   });
 

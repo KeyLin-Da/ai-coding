@@ -5,6 +5,7 @@ version: "1.0"
 
 # 技术方案必须包含以下章节（带上中文描述）
 required_sections:
+  - overview_diagram   # 整体变更时序图
   - api_scope          # 涉及接口范围
   - sql_changes        # SQL改动内容
   - performance        # 性能考量
@@ -15,11 +16,42 @@ required_sections:
 
 # 各章节说明（可根据需要扩展）
 section_descriptions:
+  overview_diagram:
+    - "使用 Mermaid sequenceDiagram 绘制本次变更的整体交互时序图，放在文档最上方"
+    - "参与者包括：前端/客户端、BFF、各微服务、数据库(DB)、缓存(Redis)、消息队列(MQ)等"
+    - "时序图必须包含：①请求入口和调用链路 ②各步骤的序号标注 ③变更点用红色或加粗标识 ④涉及的新增/修改接口名称 ⑤关键异常分支（如缓存未命中、锁获取失败等）"
+    - "示例模板："
+    - |
+        ```mermaid
+        sequenceDiagram
+            autonumber
+            actor Client as 前端/客户端
+            participant BFF as API Bff
+            participant Svc as 业务服务
+            participant Cache as Redis
+            participant DB as MySQL
+            participant MQ as RocketMQ
+
+            Client->>BFF: POST /api/xxx (①请求入口)
+            BFF->>Svc: 转发请求
+            Svc->>Cache: 查询缓存
+            alt 缓存命中
+                Cache-->>Svc: 返回缓存数据
+            else 缓存未命中 ⚠️变更点
+                Svc->>DB: 查询数据库
+                DB-->>Svc: 返回结果
+                Svc->>Cache: 写入缓存
+            end
+            Svc->>MQ: 发送变更消息 ⚠️变更点
+            Svc-->>BFF: 返回响应
+            BFF-->>Client: 返回结果
+        ```
   api_scope:
-    - "列出新增或修改的接口,包含接口路径、方法、影响级别,以及接口描述"
-    - "提供详细变更时序流程图，要求流程图包含序号，标识哪些是变更点、接口参数、返回值、异常处理、涉及表（包含sql）、redis、MQ"
+    - "列出新增或修改的接口,包含接口路径、方法、入参描述、出参描述、影响级别,以及接口描述"
+    - "列出接口入参的使用场景"
+    - "注意注意：每个接口必须提供详细变更时序流程图，要求流程图包含序号，标识哪些是变更点、接口参数、返回值、异常处理、涉及表（包含sql）、redis、MQ"
     - "罗列功能点及描述，以及变更原因"
-    - "涉及参数和枚举字段，需要列出枚举值及字段含义"
+    - "涉及参数和枚举字段，需要列出枚举值及字段中文描述"
   impact_analysis: "评估受影响的模块、系统和风险等级"
   performance: "性能指标要求和优化策略"
   concurrency: "并发场景分析和锁策略设计"

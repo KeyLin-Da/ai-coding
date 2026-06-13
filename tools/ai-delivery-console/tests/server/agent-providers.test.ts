@@ -103,6 +103,31 @@ describe('agent-providers', () => {
     expect(content).toContain('.codex/skills/coding-prd-analyzer/SKILL.md');
   });
 
+  it('Prompt Envelope 声明涉及工程优先搜索和只读扩展边界', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-agent-'));
+    const projectParent = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-projects-'));
+    const projectRoot = path.join(projectParent, 'opp-api');
+    await fs.mkdir(projectRoot, { recursive: true });
+    const item = {
+      ...workflow(),
+      projects: [{ name: 'opp-api', path: 'opp-api' }]
+    };
+    const promptPath = await createPromptEnvelope(root, item, runRecord('run-projects'), '/coding-design d=定位菜单 r=172014 p=opp-api', [projectParent]);
+    const content = await fs.readFile(resolveWorkspaceOrRuntimePath(root, promptPath), 'utf8');
+
+    expect(content).toContain('## 工程代码目录');
+    expect(content).toContain('### 已配置工程父目录');
+    expect(content).toContain(projectParent);
+    expect(content).toContain('### 本次涉及工程');
+    expect(content).toContain(projectRoot);
+    expect(content).toContain('## 工程检索策略');
+    expect(content).toContain('本次涉及工程”是优先搜索工程，不是完整只读检索边界');
+    expect(content).toContain('可在已配置工程父目录内只读扩展检索');
+    expect(content).toContain('自动扩展工程仅允许只读分析');
+    expect(content).toContain('工程代码修改仅限本次涉及工程或用户明确确认的工程');
+    expect(content).not.toContain('工程代码的读取和修改仅限于上方列出的工程代码目录');
+  });
+
   it('启动 Agent 后记录 stdout 和退出事件', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-agent-'));
     const provider: AgentProvider = {

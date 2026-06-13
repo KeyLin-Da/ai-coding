@@ -169,13 +169,33 @@ function uniqueNonEmpty(values: string[]): string[] {
   });
 }
 
+function existingTechnicalDesignDocumentPath(workflow: RequirementWorkflow, params: Record<string, unknown>): string {
+  const explicitPath = asString(params.designDocumentPath);
+  if (explicitPath) {
+    return explicitPath;
+  }
+  const defaultPath = `docs/${normalizeRequirementId(workflow.requirementId)}/technical-design/design_review.md`;
+  const officialArtifact = workflow.artifacts.find(
+    (artifact) => artifact.exists && artifact.kind !== 'directory' && (artifact.id === 'technical-design' || artifact.path === defaultPath)
+  );
+  if (officialArtifact) {
+    return officialArtifact.path;
+  }
+  const artifactPath = workflow.stages.TECH_DESIGN.artifactPath?.trim();
+  if (artifactPath && !isTechnicalDesignSourcePath(artifactPath) && !isTechnicalDesignQuestionPath(workflow, artifactPath)) {
+    return artifactPath;
+  }
+  return '';
+}
+
 function designInputParam(workflow: RequirementWorkflow, params: Record<string, unknown>): string {
+  const existingDesignDocument = existingTechnicalDesignDocumentPath(workflow, params);
   if (workflow.requirementType === 'DEFECT') {
     const explicitClarification = hasParam(params, 'clarification') ? asString(params.clarification) : '';
     const clarification = explicitClarification || workflow.techDesignClarification || '';
-    return uniqueNonEmpty([workflow.title, clarification, ...techDesignSourcePaths(workflow, params)]).join(',');
+    return uniqueNonEmpty([workflow.title, clarification, existingDesignDocument, ...techDesignSourcePaths(workflow, params)]).join(',');
   }
-  return [prdDocumentPath(workflow, params), ...techDesignSourcePaths(workflow, params)].filter(Boolean).join(',');
+  return uniqueNonEmpty([prdDocumentPath(workflow, params), existingDesignDocument, ...techDesignSourcePaths(workflow, params)]).join(',');
 }
 
 function technicalDesignDocumentPath(workflow: RequirementWorkflow, params: Record<string, unknown>): string {
