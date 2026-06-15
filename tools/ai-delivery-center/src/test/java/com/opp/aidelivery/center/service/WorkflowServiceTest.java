@@ -11,6 +11,7 @@ import com.opp.aidelivery.center.common.error.BusinessException;
 import com.opp.aidelivery.center.mapper.IssueMapper;
 import com.opp.aidelivery.center.mapper.ProjectMapper;
 import com.opp.aidelivery.center.mapper.RequirementMapper;
+import com.opp.aidelivery.center.mapper.RequirementProjectMapper;
 import com.opp.aidelivery.center.mapper.ReviewMapper;
 import com.opp.aidelivery.center.mapper.TeamMemberMapper;
 import com.opp.aidelivery.center.mapper.WorkflowStageMapper;
@@ -20,8 +21,12 @@ import com.opp.aidelivery.center.model.dto.StageReviewRequest;
 import com.opp.aidelivery.center.model.entity.IssueEntity;
 import com.opp.aidelivery.center.model.entity.ProjectEntity;
 import com.opp.aidelivery.center.model.entity.RequirementEntity;
+import com.opp.aidelivery.center.model.entity.ReviewEntity;
 import com.opp.aidelivery.center.model.entity.TeamMemberEntity;
 import com.opp.aidelivery.center.model.entity.WorkflowStageEntity;
+import com.opp.aidelivery.center.model.vo.RequirementVO;
+import java.time.LocalDateTime;
+import java.util.Collections;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -37,6 +42,8 @@ class WorkflowServiceTest {
     private TeamMemberMapper teamMemberMapper;
     @Mock
     private RequirementMapper requirementMapper;
+    @Mock
+    private RequirementProjectMapper requirementProjectMapper;
     @Mock
     private WorkflowStageMapper workflowStageMapper;
     @Mock
@@ -121,6 +128,92 @@ class WorkflowServiceTest {
         assertThat(requirement.getCurrentStage()).isEqualTo("TECH_DESIGN");
         assertThat(requirement.getStatus()).isEqualTo("REJECTED");
         verify(workflowStageMapper).updateById(stage);
+    }
+
+    @Test
+    void reviewImplementationStepApprovalKeepsImplementationStageInProgress() {
+        PermissionService permissionService = org.mockito.Mockito.mock(PermissionService.class);
+        when(permissionService.assertProjectMember(1L, 10L)).thenReturn(project());
+        ReviewService service = new ReviewService(permissionService, requirementMapper, workflowStageMapper, reviewMapper, domainEventService);
+        RequirementEntity requirement = requirement();
+        requirement.setCurrentStage("IMPLEMENTATION");
+        WorkflowStageEntity implementationStage = stage("IMPLEMENTATION", "READY_FOR_REVIEW");
+        when(requirementMapper.selectById(100L)).thenReturn(requirement);
+        when(workflowStageMapper.selectOne(any())).thenReturn(implementationStage);
+
+        StageReviewRequest request = new StageReviewRequest();
+        request.setRequirementPk(100L);
+        request.setStage("IMPLEMENTATION");
+        request.setImplementationStep("START_CHANGE");
+        request.setDecision("APPROVED");
+        service.review(1L, request);
+
+        assertThat(implementationStage.getStatus()).isEqualTo("IN_PROGRESS");
+        assertThat(requirement.getCurrentStage()).isEqualTo("IMPLEMENTATION");
+        assertThat(requirement.getStatus()).isEqualTo("IN_PROGRESS");
+        ArgumentCaptor<ReviewEntity> captor = ArgumentCaptor.forClass(ReviewEntity.class);
+        verify(reviewMapper).insert(captor.capture());
+        assertThat(captor.getValue().getImplementationStep()).isEqualTo("START_CHANGE");
+    }
+
+    @Test
+    void reviewFinalImplementationStepApprovalAdvancesToCodeReview() {
+        PermissionService permissionService = org.mockito.Mockito.mock(PermissionService.class);
+        when(permissionService.assertProjectMember(1L, 10L)).thenReturn(project());
+        ReviewService service = new ReviewService(permissionService, requirementMapper, workflowStageMapper, reviewMapper, domainEventService);
+        RequirementEntity requirement = requirement();
+        requirement.setCurrentStage("IMPLEMENTATION");
+        WorkflowStageEntity implementationStage = stage("IMPLEMENTATION", "READY_FOR_REVIEW");
+        WorkflowStageEntity codeReviewStage = stage("CODE_REVIEW", "NOT_STARTED");
+        when(requirementMapper.selectById(100L)).thenReturn(requirement);
+        when(workflowStageMapper.selectOne(any())).thenReturn(implementationStage, codeReviewStage);
+
+        StageReviewRequest request = new StageReviewRequest();
+        request.setRequirementPk(100L);
+        request.setStage("IMPLEMENTATION");
+        request.setImplementationStep("CHANGE_INSPECTION");
+        request.setDecision("APPROVED");
+        service.review(1L, request);
+
+        assertThat(implementationStage.getStatus()).isEqualTo("APPROVED");
+        assertThat(codeReviewStage.getStatus()).isEqualTo("DRAFT");
+        assertThat(requirement.getCurrentStage()).isEqualTo("CODE_REVIEW");
+        assertThat(requirement.getStatus()).isEqualTo("IN_PROGRESS");
+    }
+
+    @Test
+    void requirementServiceReturnsCenterReviews() {
+        PermissionService permissionService = org.mockito.Mockito.mock(PermissionService.class);
+        when(permissionService.assertProjectMember(1L, 10L)).thenReturn(project());
+        RequirementService service = new RequirementService(
+            permissionService,
+            requirementMapper,
+            requirementProjectMapper,
+            workflowStageMapper,
+            reviewMapper
+        );
+        RequirementEntity requirement = requirement();
+        requirement.setTitle("页面装修列表样式异常");
+        requirement.setRequirementType("DEFECT");
+        requirement.setBranchName("bugfix/opp#172014");
+        ReviewEntity review = new ReviewEntity();
+        review.setId(200L);
+        review.setRequirementPk(100L);
+        review.setStage("IMPLEMENTATION");
+        review.setImplementationStep("START_CHANGE");
+        review.setDecision("APPROVED");
+        review.setActorId(1L);
+        review.setCreatedAt(LocalDateTime.of(2026, 6, 14, 10, 0));
+        when(requirementMapper.selectOne(any())).thenReturn(requirement);
+        when(workflowStageMapper.selectList(any())).thenReturn(Collections.singletonList(stage("IMPLEMENTATION", "IN_PROGRESS")));
+        when(requirementProjectMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(reviewMapper.selectList(any())).thenReturn(Collections.singletonList(review));
+
+        RequirementVO result = service.get(1L, 10L, "172014");
+
+        assertThat(result.getReviews()).hasSize(1);
+        assertThat(result.getReviews().get(0).getImplementationStep()).isEqualTo("START_CHANGE");
+        assertThat(result.getReviews().get(0).getDecision()).isEqualTo("APPROVED");
     }
 
     @Test

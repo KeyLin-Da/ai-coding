@@ -4,7 +4,6 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.opp.aidelivery.center.common.error.AiDeliveryErrorCode;
 import com.opp.aidelivery.center.common.error.BusinessException;
 import com.opp.aidelivery.center.mapper.ArtifactMapper;
-import com.opp.aidelivery.center.mapper.ArtifactVersionMapper;
 import com.opp.aidelivery.center.mapper.ImportItemMapper;
 import com.opp.aidelivery.center.mapper.ImportSessionMapper;
 import com.opp.aidelivery.center.mapper.IssueMapper;
@@ -16,7 +15,6 @@ import com.opp.aidelivery.center.mapper.WorkflowStageMapper;
 import com.opp.aidelivery.center.model.dto.ImportRecordsRequest;
 import com.opp.aidelivery.center.model.dto.ImportSessionCreateRequest;
 import com.opp.aidelivery.center.model.entity.ArtifactEntity;
-import com.opp.aidelivery.center.model.entity.ArtifactVersionEntity;
 import com.opp.aidelivery.center.model.entity.ImportItemEntity;
 import com.opp.aidelivery.center.model.entity.ImportSessionEntity;
 import com.opp.aidelivery.center.model.entity.IssueEntity;
@@ -60,7 +58,6 @@ public class ImportService {
     private final RunMapper runMapper;
     private final RunEventMapper runEventMapper;
     private final ArtifactMapper artifactMapper;
-    private final ArtifactVersionMapper artifactVersionMapper;
 
     @Transactional(rollbackFor = Exception.class)
     public ImportSessionVO createSession(Long userId, ImportSessionCreateRequest request) {
@@ -229,21 +226,17 @@ public class ImportService {
         } else {
             artifactMapper.updateById(artifact);
         }
-        ArtifactVersionEntity duplicateVersion = item.getSha256() == null ? null : findVersionByHash(artifact.getId(), item.getSha256());
         ImportRecordResultVO result = saveItem(
             session.getId(),
             "ARTIFACT",
             sourceKey,
             item.getSha256(),
-            duplicateVersion == null ? "ARTIFACT" : "ARTIFACT_VERSION",
-            duplicateVersion == null ? artifact.getId() : duplicateVersion.getId(),
-            duplicateVersion == null ? STATUS_IMPORTED : STATUS_DUPLICATED,
-            duplicateVersion == null ? null : "相同内容版本已存在"
+            "ARTIFACT",
+            artifact.getId(),
+            STATUS_IMPORTED,
+            null
         );
         result.setArtifactId(artifact.getId());
-        if (duplicateVersion != null) {
-            result.setExistingVersionId(duplicateVersion.getId());
-        }
         return result;
     }
 
@@ -328,7 +321,6 @@ public class ImportService {
         event.setLevel(item.getLevel());
         event.setType(item.getType());
         event.setMessage(item.getMessage());
-        event.setTextObjectId(item.getTextObjectId());
         event.setPayloadJson(item.getPayloadJson());
         if (event.getId() == null) {
             runEventMapper.insert(event);
@@ -419,13 +411,6 @@ public class ImportService {
         return artifactMapper.selectOne(new LambdaQueryWrapper<ArtifactEntity>()
             .eq(ArtifactEntity::getRequirementPk, requirementPk)
             .eq(ArtifactEntity::getLogicalPath, logicalPath)
-            .last("LIMIT 1"));
-    }
-
-    private ArtifactVersionEntity findVersionByHash(Long artifactId, String sha256) {
-        return artifactVersionMapper.selectOne(new LambdaQueryWrapper<ArtifactVersionEntity>()
-            .eq(ArtifactVersionEntity::getArtifactId, artifactId)
-            .eq(ArtifactVersionEntity::getContentSha256, sha256)
             .last("LIMIT 1"));
     }
 

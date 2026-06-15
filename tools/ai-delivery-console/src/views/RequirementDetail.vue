@@ -919,7 +919,7 @@ async function uploadPrdFiles(event: Event) {
   if (!files.length) {
     return;
   }
-  if (!(await ensureDeliveryReady('上传 PRD 来源文件', { allowDirty: true }))) {
+  if (!(await ensureDeliveryReady('上传 PRD 来源文件', { allowDirty: true, skipRepositoryChecks: true }))) {
     input.value = '';
     return;
   }
@@ -936,7 +936,7 @@ async function uploadPrdFiles(event: Event) {
 }
 
 async function deletePrdFile(fileId: string) {
-  if (!(await ensureDeliveryReady('删除 PRD 来源文件', { allowDirty: true }))) {
+  if (!(await ensureDeliveryReady('删除 PRD 来源文件', { allowDirty: true, skipRepositoryChecks: true }))) {
     return;
   }
   actionRunning.value = true;
@@ -960,7 +960,7 @@ async function uploadTechDesignFiles(event: Event) {
   if (!files.length) {
     return;
   }
-  if (!(await ensureDeliveryReady('上传技术方案补充材料', { allowDirty: true }))) {
+  if (!(await ensureDeliveryReady('上传技术方案补充材料', { allowDirty: true, skipRepositoryChecks: true }))) {
     input.value = '';
     return;
   }
@@ -977,7 +977,7 @@ async function uploadTechDesignFiles(event: Event) {
 }
 
 async function deleteTechDesignFile(fileId: string) {
-  if (!(await ensureDeliveryReady('删除技术方案补充材料', { allowDirty: true }))) {
+  if (!(await ensureDeliveryReady('删除技术方案补充材料', { allowDirty: true, skipRepositoryChecks: true }))) {
     return;
   }
   actionRunning.value = true;
@@ -1052,7 +1052,7 @@ async function copyToClipboard(text: string) {
   }
 }
 
-async function ensureDeliveryReady(actionLabel: string, options: { allowDirty?: boolean } = {}) {
+async function ensureDeliveryReady(actionLabel: string, options: { allowDirty?: boolean; skipRepositoryChecks?: boolean } = {}) {
   const runtime = getApiRuntimeConfig();
   if (!runtime.clientSessionId) {
     ElMessage.warning('请先在个人中心配置客户端会话ID');
@@ -1064,12 +1064,14 @@ async function ensureDeliveryReady(actionLabel: string, options: { allowDirty?: 
       ElMessage.warning(`请先在个人中心配置交付工作区，再${actionLabel}`);
       return false;
     }
-    const credentials = await apiClient.listGitCredentials();
-    if (!credentials.some((credential) => credential.status === 'ACTIVE')) {
-      ElMessage.warning(`请先在个人中心生成Git SSH凭证，再${actionLabel}`);
-      return false;
+    if (!options.skipRepositoryChecks) {
+      const credentials = await apiClient.listGitCredentials();
+      if (!credentials.some((credential) => credential.status === 'ACTIVE')) {
+        ElMessage.warning(`请先在个人中心生成Git SSH凭证，再${actionLabel}`);
+        return false;
+      }
     }
-    if (runtime.projectId) {
+    if (!options.skipRepositoryChecks && runtime.projectId) {
       const repoState = await apiClient.refreshProjectRepositoryStatus(runtime.projectId);
       if (repoState.syncStatus === 'NOT_CLONED') {
         ElMessage.warning('项目产物仓尚未 clone，请先在个人中心完成项目仓初始化');
@@ -1404,8 +1406,13 @@ async function submitReview(input: {
   ElMessage.success('审核记录已保存');
 }
 
-async function handleArtifactGitSynced(result: { commitSha?: string }) {
-  ElMessage.success(result.commitSha ? `产物已推送：${result.commitSha}` : '产物已推送');
+async function handleArtifactGitSynced(result: { commitSha?: string; pushed?: boolean }) {
+  const successMessage = result.pushed === false
+    ? '审核记录已保存'
+    : result.commitSha
+      ? `产物已推送：${result.commitSha}`
+      : '产物已推送';
+  ElMessage.success(successMessage);
   await reload();
   if (workflow.value) {
     await store.loadRequirements();

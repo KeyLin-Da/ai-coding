@@ -21,7 +21,6 @@ export interface CenterRunEventPayload {
   level: 'INFO' | 'WARN' | 'ERROR';
   type: 'stdout' | 'stderr' | 'exit' | 'cancelled';
   message: string;
-  textObjectId?: number;
   payloadJson?: string;
 }
 

@@ -71,31 +71,18 @@ class RunEventServiceTest {
     }
 
     @Test
-    void appendRejectsLongTranscriptWithoutCosChunkReference() {
-        stubAuthorizedRun();
-
-        assertThatThrownBy(() -> runEventService.append(1L, request("stdout", "0123456789")))
-            .isInstanceOf(BusinessException.class)
-            .extracting("errorCode")
-            .isEqualTo(AiDeliveryErrorCode.VALIDATION_FAILED);
-
-        verify(runEventRepository, never()).append(any());
-    }
-
-    @Test
-    void appendLongTranscriptStoresSummaryAndChunkReference() {
+    void appendLongTranscriptStoresTruncatedSummary() {
+        // 验证 Git-only 后长日志不再要求 COS chunk，只保存截断摘要和 payload 标记。
         stubAuthorizedRun();
         when(runEventRepository.nextSeq(700L)).thenReturn(4L);
         doAnswer(invocation -> invocation.getArgument(0)).when(runEventRepository).append(any(RunEventEntity.class));
         RunEventCreateRequest request = request("stdout", "0123456789ABC");
-        request.setTextObjectId(900L);
 
         RunEventVO result = runEventService.append(1L, request);
 
         assertThat(result.getMessage()).isEqualTo("01234567");
-        assertThat(result.getTextObjectId()).isEqualTo(900L);
-        assertThat(result.getPayloadJson()).contains("\"chunked\":true");
-        assertThat(result.getPayloadJson()).contains("\"textObjectId\":900");
+        assertThat(result.getPayloadJson()).contains("\"truncated\":true");
+        assertThat(result.getPayloadJson()).contains("\"originalLength\":13");
     }
 
     @Test

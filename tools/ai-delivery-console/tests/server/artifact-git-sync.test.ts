@@ -101,6 +101,15 @@ describe('artifact-git-sync', () => {
     expect(() => assertControlledArtifactPath(current, '.qoder/settings.local.json')).toThrow('不在受控产物路径内');
   });
 
+  it('公开同步仍拒绝空文件列表', async () => {
+    await expect(confirmArtifactGitSync({} as any, workflow(), {
+      stage: 'PRD',
+      syncType: 'PUBLIC_SYNC',
+      requirementPk: 100,
+      files: []
+    })).rejects.toThrow('请至少选择一个需要同步的产物文件');
+  });
+
   it('基于本地项目仓生成计划并确认 push', async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-artifact-sync-'));
     const sourceRepo = path.join(tempDir, 'source');
@@ -189,6 +198,257 @@ describe('artifact-git-sync', () => {
       expect(centerCalls).toContain('/api/ai-delivery/requirements/100/artifact-git-syncs/complete');
       const { stdout: remainingDiff } = await exec('git', ['diff', '--', 'docs/172014/technical-design/design_review.md'], { cwd: repoPath });
       expect(remainingDiff).toContain('pending');
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('审核同步计划为空时不推送并直接提交审核结论', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-artifact-sync-empty-review-'));
+    const sourceRepo = path.join(tempDir, 'source');
+    const remoteRepo = path.join(tempDir, 'remote.git');
+    const deliveryRoot = path.join(tempDir, 'delivery');
+    await fs.mkdir(path.join(sourceRepo, 'docs', '172014', 'technical-design'), { recursive: true });
+    await fs.writeFile(path.join(sourceRepo, 'docs', '172014', 'technical-design', 'design_review.md'), 'design synced\n', 'utf8');
+    await git(sourceRepo, ['init']);
+    await git(sourceRepo, ['config', 'user.email', 'test@example.com']);
+    await git(sourceRepo, ['config', 'user.name', 'Test']);
+    await git(sourceRepo, ['add', '.']);
+    await git(sourceRepo, ['commit', '-m', 'init']);
+    await git(sourceRepo, ['branch', '-M', 'master']);
+    await git(tempDir, ['clone', '--bare', sourceRepo, remoteRepo]);
+    await fs.mkdir(path.join(deliveryRoot, '.ai-delivery', 'keys'), { recursive: true });
+    await fs.writeFile(path.join(deliveryRoot, '.ai-delivery', 'keys', 'fp'), 'not-used-for-local-remote', 'utf8');
+
+    const centerCalls: string[] = [];
+    const reviewBodies: any[] = [];
+    const baseFetch = projectRepoFetchImpl(deliveryRoot, remoteRepo);
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+      const parsed = new URL(String(url));
+      centerCalls.push(`${init?.method || 'GET'} ${parsed.pathname}`);
+      if (parsed.pathname === '/api/ai-delivery/reviews') {
+        reviewBodies.push(JSON.parse(String(init?.body || '{}')));
+        return jsonResponse({ reviewed: true });
+      }
+      return baseFetch(url, init);
+    };
+    const context = {
+      centerBaseUrl: 'http://center.local',
+      userId: '1',
+      clientSessionId: '9',
+      projectId: '1',
+      fetchImpl
+    } as any;
+
+    try {
+      await cloneProjectRepository(context);
+      const repoPath = path.join(deliveryRoot, 'demo');
+      const { stdout: headBefore } = await exec('git', ['rev-parse', 'HEAD'], { cwd: repoPath });
+
+      const result = await confirmArtifactGitSync(context, workflow(), {
+        stage: 'IMPLEMENTATION',
+        syncType: 'REVIEW_APPROVAL',
+        requirementPk: 100,
+        files: [],
+        review: {
+          decision: 'APPROVED',
+          comment: '通过',
+          implementationStep: 'CHANGE_INSPECTION'
+        }
+      });
+
+      const { stdout: headAfter } = await exec('git', ['rev-parse', 'HEAD'], { cwd: repoPath });
+      expect(result).toEqual({
+        pushed: false,
+        centerResult: {
+          reviewed: true
+        }
+      });
+      expect(headAfter.trim()).toBe(headBefore.trim());
+      expect(centerCalls).toContain('POST /api/ai-delivery/reviews');
+      expect(centerCalls).not.toContain('POST /api/ai-delivery/reviews/with-artifact-git-sync');
+      expect(reviewBodies[0]).toEqual({
+        requirementPk: 100,
+        requirementId: '172014',
+        stage: 'IMPLEMENTATION',
+        decision: 'APPROVED',
+        comment: '通过',
+        implementationStep: 'CHANGE_INSPECTION'
+      });
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('空文件审核确认前发现受控变更时要求刷新同步计划', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-artifact-sync-empty-review-dirty-'));
+    const sourceRepo = path.join(tempDir, 'source');
+    const remoteRepo = path.join(tempDir, 'remote.git');
+    const deliveryRoot = path.join(tempDir, 'delivery');
+    await fs.mkdir(path.join(sourceRepo, 'docs', '172014', 'prd'), { recursive: true });
+    await fs.writeFile(path.join(sourceRepo, 'docs', '172014', 'prd', 'analysis.md'), 'prd synced\n', 'utf8');
+    await git(sourceRepo, ['init']);
+    await git(sourceRepo, ['config', 'user.email', 'test@example.com']);
+    await git(sourceRepo, ['config', 'user.name', 'Test']);
+    await git(sourceRepo, ['add', '.']);
+    await git(sourceRepo, ['commit', '-m', 'init']);
+    await git(sourceRepo, ['branch', '-M', 'master']);
+    await git(tempDir, ['clone', '--bare', sourceRepo, remoteRepo]);
+    await fs.mkdir(path.join(deliveryRoot, '.ai-delivery', 'keys'), { recursive: true });
+    await fs.writeFile(path.join(deliveryRoot, '.ai-delivery', 'keys', 'fp'), 'not-used-for-local-remote', 'utf8');
+
+    const context = {
+      centerBaseUrl: 'http://center.local',
+      userId: '1',
+      clientSessionId: '9',
+      projectId: '1',
+      fetchImpl: projectRepoFetchImpl(deliveryRoot, remoteRepo)
+    } as any;
+
+    try {
+      await cloneProjectRepository(context);
+      const repoPath = path.join(deliveryRoot, 'demo');
+      await fs.writeFile(path.join(repoPath, 'docs', '172014', 'prd', 'analysis.md'), 'prd synced\nnew local change\n', 'utf8');
+
+      await expect(confirmArtifactGitSync(context, workflow(), {
+        stage: 'PRD',
+        syncType: 'REVIEW_APPROVAL',
+        requirementPk: 100,
+        files: [],
+        review: {
+          decision: 'APPROVED',
+          comment: ''
+        }
+      })).rejects.toThrow('当前仍有待同步产物文件');
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('确认同步时发现所选文件已不在当前变更中则提示刷新计划', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-artifact-sync-stale-plan-'));
+    const sourceRepo = path.join(tempDir, 'source');
+    const remoteRepo = path.join(tempDir, 'remote.git');
+    const deliveryRoot = path.join(tempDir, 'delivery');
+    await fs.mkdir(path.join(sourceRepo, 'docs', '172014', 'technical-design'), { recursive: true });
+    await fs.writeFile(path.join(sourceRepo, 'docs', '172014', 'technical-design', 'design_review.md'), 'design synced\n', 'utf8');
+    await git(sourceRepo, ['init']);
+    await git(sourceRepo, ['config', 'user.email', 'test@example.com']);
+    await git(sourceRepo, ['config', 'user.name', 'Test']);
+    await git(sourceRepo, ['add', '.']);
+    await git(sourceRepo, ['commit', '-m', 'init']);
+    await git(sourceRepo, ['branch', '-M', 'master']);
+    await git(tempDir, ['clone', '--bare', sourceRepo, remoteRepo]);
+    await fs.mkdir(path.join(deliveryRoot, '.ai-delivery', 'keys'), { recursive: true });
+    await fs.writeFile(path.join(deliveryRoot, '.ai-delivery', 'keys', 'fp'), 'not-used-for-local-remote', 'utf8');
+
+    const context = {
+      centerBaseUrl: 'http://center.local',
+      userId: '1',
+      clientSessionId: '9',
+      projectId: '1',
+      fetchImpl: projectRepoFetchImpl(deliveryRoot, remoteRepo)
+    } as any;
+
+    try {
+      await cloneProjectRepository(context);
+      const repoPath = path.join(deliveryRoot, 'demo');
+      const stalePath = 'openspec/changes/req-172014/design.md';
+      await fs.mkdir(path.dirname(path.join(repoPath, stalePath)), { recursive: true });
+      await fs.writeFile(path.join(repoPath, stalePath), 'temporary design\n', 'utf8');
+      const plan = await buildArtifactGitSyncPlan(context, workflow(), { stage: 'IMPLEMENTATION', syncType: 'REVIEW_APPROVAL' });
+      expect(plan.files.map((file) => file.path)).toContain(stalePath);
+      await fs.rm(path.join(repoPath, stalePath));
+
+      await expect(confirmArtifactGitSync(context, workflow(), {
+        stage: 'IMPLEMENTATION',
+        syncType: 'REVIEW_APPROVAL',
+        requirementPk: 100,
+        files: [stalePath],
+        review: {
+          decision: 'APPROVED',
+          comment: ''
+        }
+      })).rejects.toThrow(`同步计划已过期，请返回上一步重新生成同步计划后重试：${stalePath}`);
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('审核同步支持已暂存删除文件和未跟踪文件混合提交', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-artifact-sync-staged-delete-'));
+    const sourceRepo = path.join(tempDir, 'source');
+    const remoteRepo = path.join(tempDir, 'remote.git');
+    const deliveryRoot = path.join(tempDir, 'delivery');
+    const changeDir = path.join(sourceRepo, 'openspec', 'changes', 'req-172014');
+    await fs.mkdir(changeDir, { recursive: true });
+    await fs.writeFile(path.join(changeDir, 'design.md'), 'design\n', 'utf8');
+    await fs.writeFile(path.join(changeDir, 'proposal.md'), 'proposal\n', 'utf8');
+    await fs.writeFile(path.join(changeDir, 'tasks.md'), 'tasks\n', 'utf8');
+    await git(sourceRepo, ['init']);
+    await git(sourceRepo, ['config', 'user.email', 'test@example.com']);
+    await git(sourceRepo, ['config', 'user.name', 'Test']);
+    await git(sourceRepo, ['add', '.']);
+    await git(sourceRepo, ['commit', '-m', 'init']);
+    await git(sourceRepo, ['branch', '-M', 'master']);
+    await git(tempDir, ['clone', '--bare', sourceRepo, remoteRepo]);
+    await fs.mkdir(path.join(deliveryRoot, '.ai-delivery', 'keys'), { recursive: true });
+    await fs.writeFile(path.join(deliveryRoot, '.ai-delivery', 'keys', 'fp'), 'not-used-for-local-remote', 'utf8');
+
+    const centerCalls: string[] = [];
+    const baseFetch = projectRepoFetchImpl(deliveryRoot, remoteRepo);
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+      const parsed = new URL(String(url));
+      centerCalls.push(`${init?.method || 'GET'} ${parsed.pathname}`);
+      if (parsed.pathname === '/api/ai-delivery/reviews/with-artifact-git-sync') {
+        return jsonResponse({ reviewed: true });
+      }
+      return baseFetch(url, init);
+    };
+    const context = {
+      centerBaseUrl: 'http://center.local',
+      userId: '1',
+      clientSessionId: '9',
+      projectId: '1',
+      fetchImpl
+    } as any;
+
+    try {
+      await cloneProjectRepository(context);
+      const repoPath = path.join(deliveryRoot, 'demo');
+      const files = [
+        'openspec/changes/req-172014/design.md',
+        'openspec/changes/req-172014/proposal.md',
+        'openspec/changes/req-172014/tasks.md',
+        'openspec/changes/req-172014/.openspec.yaml'
+      ];
+      await fs.rm(path.join(repoPath, files[0]));
+      await fs.rm(path.join(repoPath, files[1]));
+      await fs.rm(path.join(repoPath, files[2]));
+      await git(repoPath, ['add', '--', files[0], files[1], files[2]]);
+      await fs.writeFile(path.join(repoPath, files[3]), 'id: req-172014\n', 'utf8');
+
+      const plan = await buildArtifactGitSyncPlan(context, workflow(), { stage: 'IMPLEMENTATION', syncType: 'REVIEW_APPROVAL' });
+      expect(plan.files.map((file) => file.path)).toEqual(expect.arrayContaining(files));
+
+      const result = await confirmArtifactGitSync(context, workflow(), {
+        stage: 'IMPLEMENTATION',
+        syncType: 'REVIEW_APPROVAL',
+        requirementPk: 100,
+        files,
+        review: {
+          decision: 'APPROVED',
+          comment: ''
+        }
+      });
+
+      expect(result.pushed).toBe(true);
+      expect(centerCalls).toContain('POST /api/ai-delivery/reviews/with-artifact-git-sync');
+      const { stdout: committedFiles } = await exec('git', ['show', '--name-status', '--format=', 'HEAD'], { cwd: repoPath });
+      expect(committedFiles).toContain(`A\t${files[3]}`);
+      expect(committedFiles).toContain(`D\t${files[0]}`);
+      expect(committedFiles).toContain(`D\t${files[1]}`);
+      expect(committedFiles).toContain(`D\t${files[2]}`);
     } finally {
       await fs.rm(tempDir, { recursive: true, force: true });
     }

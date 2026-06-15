@@ -8,7 +8,6 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "ai-delivery.center")
 public class AiDeliveryCenterProperties {
 
-    private Cos cos = new Cos();
     private Redis redis = new Redis();
     private Job job = new Job();
     private Event event = new Event();
@@ -16,16 +15,6 @@ public class AiDeliveryCenterProperties {
     private Websocket websocket = new Websocket();
     private BootstrapImport bootstrapImport = new BootstrapImport();
     private Preflight preflight = new Preflight();
-
-    @Data
-    public static class Cos {
-        private String bucket;
-        private String region;
-        private String secretId;
-        private String secretKey;
-        private Duration signedUrlTtl = Duration.ofMinutes(10);
-        private boolean bucketVersioningEnabled = true;
-    }
 
     @Data
     public static class Redis {
@@ -72,6 +61,5 @@ public class AiDeliveryCenterProperties {
 
     @Data
     public static class Preflight {
-        private boolean objectStorageTestEnabled = true;
     }
 }

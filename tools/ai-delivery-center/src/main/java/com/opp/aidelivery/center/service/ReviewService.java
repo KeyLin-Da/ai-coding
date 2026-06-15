@@ -16,12 +16,15 @@ import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 @Service
 @RequiredArgsConstructor
 public class ReviewService {
 
     private static final List<String> STAGES = Arrays.asList("PRD", "TECH_DESIGN", "IMPLEMENTATION", "CODE_REVIEW");
+    private static final List<String> IMPLEMENTATION_STEPS = Arrays.asList("START_CHANGE", "ARTIFACT_REVIEW", "APPLY", "CHANGE_INSPECTION");
+    private static final String LAST_IMPLEMENTATION_STEP = "CHANGE_INSPECTION";
 
     private final PermissionService permissionService;
     private final RequirementMapper requirementMapper;
@@ -71,6 +74,12 @@ public class ReviewService {
     private void applyStageDecision(RequirementEntity requirement, WorkflowStageEntity stage, StageReviewRequest request) {
         LocalDateTime now = LocalDateTime.now();
         stage.setComment(request.getComment());
+        if ("IMPLEMENTATION".equals(request.getStage()) && StringUtils.hasText(request.getImplementationStep())) {
+            applyImplementationStepDecision(requirement, stage, request, now);
+            workflowStageMapper.updateById(stage);
+            requirementMapper.updateById(requirement);
+            return;
+        }
         if ("APPROVED".equals(request.getDecision())) {
             stage.setStatus("APPROVED");
             stage.setApprovedAt(now);
@@ -87,6 +96,39 @@ public class ReviewService {
         }
         workflowStageMapper.updateById(stage);
         requirementMapper.updateById(requirement);
+    }
+
+    private void applyImplementationStepDecision(
+        RequirementEntity requirement,
+        WorkflowStageEntity stage,
+        StageReviewRequest request,
+        LocalDateTime now
+    ) {
+        if (!IMPLEMENTATION_STEPS.contains(request.getImplementationStep())) {
+            throw new BusinessException(AiDeliveryErrorCode.VALIDATION_FAILED, "实施步骤不存在");
+        }
+        if ("APPROVED".equals(request.getDecision())) {
+            if (LAST_IMPLEMENTATION_STEP.equals(request.getImplementationStep())) {
+                stage.setStatus("APPROVED");
+                stage.setApprovedAt(now);
+                advanceRequirement(requirement, stage.getStage());
+                return;
+            }
+            stage.setStatus("IN_PROGRESS");
+            requirement.setStatus("IN_PROGRESS");
+            requirement.setCurrentStage("IMPLEMENTATION");
+            return;
+        }
+        if ("REJECTED".equals(request.getDecision())) {
+            stage.setStatus("REJECTED");
+            stage.setRejectedAt(now);
+            requirement.setStatus("REJECTED");
+            requirement.setCurrentStage("IMPLEMENTATION");
+            return;
+        }
+        stage.setStatus("IN_REVIEW");
+        requirement.setStatus("IN_PROGRESS");
+        requirement.setCurrentStage("IMPLEMENTATION");
     }
 
     private void advanceRequirement(RequirementEntity requirement, String currentStage) {

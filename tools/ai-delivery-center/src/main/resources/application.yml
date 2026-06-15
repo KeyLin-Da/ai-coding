@@ -49,13 +49,6 @@ management:
 
 ai-delivery:
   center:
-    cos:
-      bucket: ${AI_DELIVERY_CENTER_COS_BUCKET:}
-      region: ${AI_DELIVERY_CENTER_COS_REGION:ap-guangzhou}
-      secret-id: ${AI_DELIVERY_CENTER_COS_SECRET_ID:}
-      secret-key: ${AI_DELIVERY_CENTER_COS_SECRET_KEY:}
-      signed-url-ttl: ${AI_DELIVERY_CENTER_COS_SIGNED_URL_TTL:10m}
-      bucket-versioning-enabled: ${AI_DELIVERY_CENTER_COS_BUCKET_VERSIONING_ENABLED:true}
     redis:
       key-prefix: ${AI_DELIVERY_CENTER_REDIS_KEY_PREFIX:ai-delivery}
     job:

@@ -5,6 +5,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.opp.aidelivery.center.common.error.AiDeliveryErrorCode;
@@ -13,8 +15,6 @@ import com.opp.aidelivery.center.config.AiDeliveryCenterProperties;
 import com.opp.aidelivery.center.model.dto.PreflightRequest;
 import com.opp.aidelivery.center.model.entity.ProjectEntity;
 import com.opp.aidelivery.center.model.vo.PreflightResultVO;
-import com.opp.aidelivery.center.storage.StorageObjectMetadata;
-import com.opp.aidelivery.center.storage.StorageService;
 import java.util.Arrays;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -36,8 +36,6 @@ class PreflightServiceTest {
     private StringRedisTemplate redisTemplate;
     @Mock
     private ValueOperations<String, String> valueOperations;
-    @Mock
-    private StorageService storageService;
 
     private AiDeliveryCenterProperties properties;
     private PreflightService preflightService;
@@ -45,9 +43,8 @@ class PreflightServiceTest {
     @BeforeEach
     void setUp() {
         properties = new AiDeliveryCenterProperties();
-        properties.getCos().setBucket("delivery-bucket");
         properties.getRedis().setKeyPrefix("ai-delivery");
-        preflightService = new PreflightService(properties, permissionService, jdbcTemplate, redisTemplate, storageService);
+        preflightService = new PreflightService(properties, permissionService, jdbcTemplate, redisTemplate);
     }
 
     @Test
@@ -111,14 +108,15 @@ class PreflightServiceTest {
     }
 
     @Test
-    void preflightChecksCosUploadMetadata() {
-        // 验证 COS 小文件写入与 metadata 校验成功后，预检返回 PASS。
-        when(storageService.getObjectMetadata(anyString())).thenReturn(new StorageObjectMetadata(null, 58L, "text/plain", null));
+    void preflightIgnoresCosCheckInGitOnlyMode() {
+        // 验证 Git-only 后即使调用方传入 COS 检查，也不会触发对象存储预检。
         PreflightRequest request = request("COS");
 
         PreflightResultVO result = preflightService.check(1L, request);
 
         assertThat(result.getOverallStatus()).isEqualTo("PASS");
+        assertThat(result.getChecks()).isEmpty();
+        verify(jdbcTemplate, never()).queryForObject(anyString(), eq(Integer.class), any());
     }
 
     private PreflightRequest request(String check) {

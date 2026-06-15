@@ -14,6 +14,4 @@ public class PreflightRequest {
     private Long clientSessionId;
 
     private List<String> checks = new ArrayList<>();
-
-    private Boolean testObjectStorage = true;
 }

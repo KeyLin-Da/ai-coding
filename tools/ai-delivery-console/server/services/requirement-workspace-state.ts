@@ -167,6 +167,13 @@ export async function assertRequirementWorkspaceWritable(
 ): Promise<void> {
   const requirementPk = requireRequirementPk(workflow);
   await reportRequirementWorkspaceState(context, workflow).catch(() => undefined);
+  await assertRequirementCollaborationWritable(context, requirementPk);
+}
+
+export async function assertRequirementCollaborationWritable(
+  context: LocalRequestContext,
+  requirementPk: string | number
+): Promise<void> {
   await centerRequest<RequirementWorkspaceState[]>(
     context,
     `/api/ai-delivery/requirements/${encodeURIComponent(String(requirementPk))}/workspace-states/assert-writable`,

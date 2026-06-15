@@ -3,12 +3,15 @@ package com.opp.aidelivery.center.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.opp.aidelivery.center.mapper.RequirementMapper;
 import com.opp.aidelivery.center.mapper.RequirementProjectMapper;
+import com.opp.aidelivery.center.mapper.ReviewMapper;
 import com.opp.aidelivery.center.mapper.WorkflowStageMapper;
 import com.opp.aidelivery.center.model.dto.RequirementCreateRequest;
 import com.opp.aidelivery.center.model.entity.RequirementEntity;
 import com.opp.aidelivery.center.model.entity.RequirementProjectEntity;
+import com.opp.aidelivery.center.model.entity.ReviewEntity;
 import com.opp.aidelivery.center.model.entity.WorkflowStageEntity;
 import com.opp.aidelivery.center.model.vo.RequirementVO;
+import com.opp.aidelivery.center.model.vo.ReviewVO;
 import com.opp.aidelivery.center.model.vo.WorkflowStageVO;
 import java.util.Arrays;
 import java.util.List;
@@ -28,6 +31,7 @@ public class RequirementService {
     private final RequirementMapper requirementMapper;
     private final RequirementProjectMapper requirementProjectMapper;
     private final WorkflowStageMapper workflowStageMapper;
+    private final ReviewMapper reviewMapper;
 
     @Transactional(rollbackFor = Exception.class)
     public RequirementVO create(Long userId, RequirementCreateRequest request) {
@@ -122,6 +126,7 @@ public class RequirementService {
     private RequirementVO toVOWithStagesAndProjects(RequirementEntity requirement) {
         RequirementVO vo = toVOWithStages(requirement);
         vo.setProjectNames(loadProjectNames(requirement.getId()));
+        vo.setReviews(loadReviews(requirement.getId()));
         return vo;
     }
 
@@ -161,6 +166,28 @@ public class RequirementService {
         vo.setRejectedAt(entity.getRejectedAt());
         vo.setComment(entity.getComment());
         vo.setVersion(entity.getVersion());
+        return vo;
+    }
+
+    private List<ReviewVO> loadReviews(Long requirementPk) {
+        List<ReviewEntity> reviews = reviewMapper.selectList(new LambdaQueryWrapper<ReviewEntity>()
+            .eq(ReviewEntity::getRequirementPk, requirementPk)
+            .orderByDesc(ReviewEntity::getCreatedAt)
+            .orderByDesc(ReviewEntity::getId));
+        return reviews.stream().map(this::toReviewVO).collect(Collectors.toList());
+    }
+
+    private ReviewVO toReviewVO(ReviewEntity entity) {
+        ReviewVO vo = new ReviewVO();
+        vo.setId(entity.getId());
+        vo.setRequirementPk(entity.getRequirementPk());
+        vo.setStage(entity.getStage());
+        vo.setImplementationStep(entity.getImplementationStep());
+        vo.setDecision(entity.getDecision());
+        vo.setComment(entity.getComment());
+        vo.setActorId(entity.getActorId());
+        vo.setArtifactVersionId(entity.getArtifactVersionId());
+        vo.setCreatedAt(entity.getCreatedAt());
         return vo;
     }
 

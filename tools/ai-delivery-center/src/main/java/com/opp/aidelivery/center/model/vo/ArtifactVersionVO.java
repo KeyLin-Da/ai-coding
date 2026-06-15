@@ -9,8 +9,6 @@ public class ArtifactVersionVO {
     private Long id;
     private Long artifactId;
     private Integer versionNo;
-    private Long baseVersionId;
-    private Long fileObjectId;
     private String status;
     private Long sourceRunId;
     private Long createdBy;
@@ -18,8 +16,6 @@ public class ArtifactVersionVO {
     private String sourceType;
     private String contentSha256;
     private String sha256;
-    private Long size;
-    private String contentType;
     private String commitSha;
     private String blobSha;
     private String filePath;

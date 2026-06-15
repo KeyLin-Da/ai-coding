@@ -3,7 +3,7 @@
     <el-steps :active="activeStep" finish-status="success" class="review-steps">
       <el-step title="审核意见" />
       <el-step title="同步文件" />
-      <el-step title="确认推送" />
+      <el-step :title="confirmStepTitle" />
     </el-steps>
 
     <section v-if="activeStep === 0" class="review-step-panel">
@@ -33,16 +33,16 @@
         v-if="syncPlan"
         v-model:selected-files="selectedFiles"
         :plan="syncPlan"
-        diff-hint="确认后会提交当前勾选文件，push 成功后再推进审核状态。"
+        :diff-hint="syncDiffHint"
       />
     </section>
 
     <section v-else class="review-step-panel confirm-panel">
-      <el-alert type="info" show-icon title="确认推送后，中心才会写入 Git 版本索引并推进审核状态。" />
+      <el-alert type="info" show-icon :title="confirmAlertTitle" />
       <el-descriptions :column="1" border>
         <el-descriptions-item label="阶段">{{ stageLabels[stage] }}</el-descriptions-item>
         <el-descriptions-item label="文件数">{{ selectedFiles.length }}</el-descriptions-item>
-        <el-descriptions-item label="提交信息">{{ commitMessage }}</el-descriptions-item>
+        <el-descriptions-item label="提交信息">{{ confirmCommitMessage }}</el-descriptions-item>
       </el-descriptions>
     </section>
 
@@ -60,8 +60,8 @@
       >
         下一步
       </el-button>
-      <el-button v-else type="primary" :icon="Check" :loading="pushing" :disabled="!selectedFiles.length" @click="confirmPush">
-        确认推送并通过
+      <el-button v-else type="primary" :icon="Check" :loading="pushing" :disabled="!canConfirmReview" @click="confirmPush">
+        {{ confirmButtonText }}
       </el-button>
     </template>
   </el-dialog>
@@ -98,8 +98,23 @@ const emit = defineEmits<{
 
 const requiresGitSync = computed(() => decision.value === 'APPROVED' || decision.value === 'RISK_ACCEPTED');
 
-const canContinueToConfirm = computed(() => Boolean(syncPlan.value && !syncPlan.value.blocked && selectedFiles.value.length));
+const hasSyncFiles = computed(() => Boolean(syncPlan.value?.files.length));
+const canContinueToConfirm = computed(() => Boolean(syncPlan.value && !syncPlan.value.blocked && (!hasSyncFiles.value || selectedFiles.value.length)));
+const canConfirmReview = computed(() => Boolean(!pushing.value && syncPlan.value && !syncPlan.value.blocked && (!hasSyncFiles.value || selectedFiles.value.length)));
 const commitMessage = computed(() => `ai-delivery(${requirementId.value}): sync ${stage.value}`);
+const confirmCommitMessage = computed(() => (hasSyncFiles.value ? commitMessage.value : '无需提交'));
+const syncDiffHint = computed(() => (
+  hasSyncFiles.value
+    ? '确认后会提交当前勾选文件，push 成功后再推进审核状态。'
+    : '当前没有需要同步的文件，确认后将直接提交审核结论。'
+));
+const confirmStepTitle = computed(() => (syncPlan.value && !hasSyncFiles.value ? '确认审核' : '确认推送'));
+const confirmAlertTitle = computed(() => (
+  hasSyncFiles.value
+    ? '确认推送后，中心才会写入 Git 版本索引并推进审核状态。'
+    : '当前没有待同步文件，确认后将直接推进审核状态。'
+));
+const confirmButtonText = computed(() => (hasSyncFiles.value ? '确认推送并通过' : '确认提交审核'));
 
 function open(nextStage: WorkflowStage, path?: string, nextImplementationStep?: ImplementationStep, nextRequirementId?: string, nextRequirementPk?: string | number) {
   stage.value = nextStage;
@@ -147,7 +162,11 @@ async function loadSyncPlan() {
 }
 
 async function confirmPush() {
-  if (!selectedFiles.value.length) {
+  if (!syncPlan.value) {
+    ElMessage.warning('请先生成Git同步计划');
+    return;
+  }
+  if (hasSyncFiles.value && !selectedFiles.value.length) {
     ElMessage.warning('请选择需要同步的文件');
     return;
   }

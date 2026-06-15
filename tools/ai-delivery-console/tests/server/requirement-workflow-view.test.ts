@@ -73,6 +73,46 @@ describe('requirement-workflow-view', () => {
     expect(merged.techDesignSourceFiles?.[0].path).toBe('docs/172014/technical-design/file/file-1.md');
   });
 
+  it('中心实施步骤审核记录会恢复 OpenSpec 子步骤状态', () => {
+    const centerWorkflow = centerRequirementToWorkflow({
+      id: 100,
+      projectId: 10,
+      requirementId: '141846',
+      title: '页面装修列表样式异常',
+      requirementType: 'DEFECT',
+      branchName: 'bugfix/opp#141846',
+      status: 'IN_PROGRESS',
+      currentStage: 'CODE_REVIEW',
+      stages: [
+        {
+          stage: 'TECH_DESIGN',
+          status: 'APPROVED'
+        },
+        {
+          stage: 'IMPLEMENTATION',
+          status: 'APPROVED'
+        }
+      ],
+      reviews: [
+        {
+          id: 501,
+          stage: 'IMPLEMENTATION',
+          implementationStep: 'START_CHANGE',
+          decision: 'APPROVED',
+          comment: '开始变更通过',
+          actorId: 1,
+          createdAt: '2026-06-14T10:00:00'
+        }
+      ]
+    });
+
+    expect(centerWorkflow.reviews[0].implementationStep).toBe('START_CHANGE');
+    expect(centerWorkflow.implementationSteps?.START_CHANGE.status).toBe('APPROVED');
+    expect(centerWorkflow.implementationSteps?.ARTIFACT_REVIEW.status).toBe('DRAFT');
+    expect(centerWorkflow.stages.IMPLEMENTATION.status).toBe('IN_PROGRESS');
+    expect(centerWorkflow.currentStage).toBe('IMPLEMENTATION');
+  });
+
   it('中心详情读取超时时先返回 undefined，并在完成后命中短缓存', async () => {
     let resolveResponse!: (value: Response) => void;
     const fetchImpl = vi.fn(

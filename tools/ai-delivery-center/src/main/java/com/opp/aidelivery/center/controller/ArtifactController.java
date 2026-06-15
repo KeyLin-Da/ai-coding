@@ -2,10 +2,7 @@ package com.opp.aidelivery.center.controller;
 
 import com.opp.aidelivery.center.common.api.ApiResponse;
 import com.opp.aidelivery.center.model.dto.ArtifactCreateRequest;
-import com.opp.aidelivery.center.model.dto.ArtifactUploadSessionCreateRequest;
-import com.opp.aidelivery.center.model.dto.ArtifactVersionCompleteRequest;
 import com.opp.aidelivery.center.model.vo.ArtifactPreviewUrlVO;
-import com.opp.aidelivery.center.model.vo.ArtifactUploadSessionVO;
 import com.opp.aidelivery.center.model.vo.ArtifactVersionVO;
 import com.opp.aidelivery.center.model.vo.ArtifactVO;
 import com.opp.aidelivery.center.service.ArtifactService;
@@ -33,22 +30,6 @@ public class ArtifactController {
         @Valid @RequestBody ArtifactCreateRequest request
     ) {
         return ApiResponse.ok(artifactService.createArtifact(userId, request));
-    }
-
-    @PostMapping("/artifact-upload-sessions")
-    public ApiResponse<ArtifactUploadSessionVO> createUploadSession(
-        @RequestHeader("X-User-Id") Long userId,
-        @Valid @RequestBody ArtifactUploadSessionCreateRequest request
-    ) {
-        return ApiResponse.ok(artifactService.createUploadSession(userId, request));
-    }
-
-    @PostMapping("/artifact-versions/complete")
-    public ApiResponse<ArtifactVersionVO> completeUpload(
-        @RequestHeader("X-User-Id") Long userId,
-        @Valid @RequestBody ArtifactVersionCompleteRequest request
-    ) {
-        return ApiResponse.ok(artifactService.completeUpload(userId, request));
     }
 
     @GetMapping("/artifacts/{artifactId}/versions")

@@ -9,7 +9,6 @@ import static org.mockito.Mockito.when;
 import com.opp.aidelivery.center.common.error.AiDeliveryErrorCode;
 import com.opp.aidelivery.center.common.error.BusinessException;
 import com.opp.aidelivery.center.mapper.ArtifactMapper;
-import com.opp.aidelivery.center.mapper.ArtifactVersionMapper;
 import com.opp.aidelivery.center.mapper.ImportItemMapper;
 import com.opp.aidelivery.center.mapper.ImportSessionMapper;
 import com.opp.aidelivery.center.mapper.IssueMapper;
@@ -21,7 +20,6 @@ import com.opp.aidelivery.center.mapper.WorkflowStageMapper;
 import com.opp.aidelivery.center.model.dto.ImportRecordsRequest;
 import com.opp.aidelivery.center.model.dto.ImportSessionCreateRequest;
 import com.opp.aidelivery.center.model.entity.ArtifactEntity;
-import com.opp.aidelivery.center.model.entity.ArtifactVersionEntity;
 import com.opp.aidelivery.center.model.entity.ImportItemEntity;
 import com.opp.aidelivery.center.model.entity.ImportSessionEntity;
 import com.opp.aidelivery.center.model.entity.ProjectEntity;
@@ -62,8 +60,6 @@ class ImportServiceTest {
     private RunEventMapper runEventMapper;
     @Mock
     private ArtifactMapper artifactMapper;
-    @Mock
-    private ArtifactVersionMapper artifactVersionMapper;
 
     private final List<ImportItemEntity> importItems = new ArrayList<>();
     private final AtomicReference<ImportSessionEntity> currentSession = new AtomicReference<>();
@@ -83,8 +79,7 @@ class ImportServiceTest {
             issueMapper,
             runMapper,
             runEventMapper,
-            artifactMapper,
-            artifactVersionMapper
+            artifactMapper
         );
         lenient().when(permissionService.assertProjectMember(1L, 10L)).thenReturn(project());
         lenient().when(importSessionMapper.selectById(100L)).thenAnswer(invocation -> currentSession.get());
@@ -140,7 +135,6 @@ class ImportServiceTest {
             currentArtifact.set(entity);
             return 1;
         });
-        when(artifactVersionMapper.selectOne(any())).thenReturn(null);
 
         ImportRecordsResultVO result = importService.importRecords(1L, 100L, recordsRequest(false));
 
@@ -151,25 +145,21 @@ class ImportServiceTest {
     }
 
     @Test
-    void importArtifactReturnsDuplicatedWhenSameHashVersionExists() {
-        // 验证同一 artifact + SHA-256 已存在时，不创建新版本，只返回既有版本 ID。
+    void importArtifactRecordsExistingLogicalArtifactWithoutVersionLookup() {
+        // 验证 Git-only 后导入只维护逻辑产物，具体版本由后续 Git sync 写入。
         currentSession.set(session());
         RequirementEntity requirement = requirement();
         currentRequirement.set(requirement);
         ArtifactEntity artifact = artifact();
         currentArtifact.set(artifact);
-        ArtifactVersionEntity version = new ArtifactVersionEntity();
-        version.setId(900L);
-        version.setArtifactId(300L);
-        version.setContentSha256(hash());
         when(requirementMapper.selectOne(any())).thenReturn(requirement);
         when(artifactMapper.selectOne(any())).thenReturn(artifact);
-        when(artifactVersionMapper.selectOne(any())).thenReturn(version);
 
         ImportRecordsResultVO result = importService.importRecords(1L, 100L, recordsRequest(true));
 
-        assertThat(result.getDuplicatedCount()).isEqualTo(1);
-        assertThat(result.getResults().get(0).getExistingVersionId()).isEqualTo(900L);
+        assertThat(result.getImportedCount()).isEqualTo(1);
+        assertThat(result.getResults().get(0).getTargetType()).isEqualTo("ARTIFACT");
+        assertThat(result.getResults().get(0).getArtifactId()).isEqualTo(300L);
     }
 
     @Test

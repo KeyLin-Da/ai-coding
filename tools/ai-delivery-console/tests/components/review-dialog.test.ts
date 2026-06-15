@@ -1,5 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ReviewDialog from '../../src/components/ReviewDialog.vue';
 import { apiClient } from '@/api/client';
 
@@ -77,6 +77,10 @@ function stubs() {
 }
 
 describe('ReviewDialog', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('审核通过时先生成 Git 同步计划，确认后携带 review 信息推送', async () => {
     vi.mocked(apiClient.planArtifactGitSync).mockResolvedValue({
       requirementId: '172014',
@@ -142,6 +146,63 @@ describe('ReviewDialog', () => {
       pushed: true,
       centerResult: {
         syncedFiles: ['docs/172014/technical-design/design_review.md']
+      }
+    });
+  });
+
+  it('审核同步计划为空时允许直接提交审核结论', async () => {
+    vi.mocked(apiClient.planArtifactGitSync).mockResolvedValue({
+      requirementId: '141846',
+      stage: 'IMPLEMENTATION',
+      syncType: 'REVIEW_APPROVAL',
+      blocked: false,
+      blockers: [],
+      repoPath: '/Users/me/ai-delivery',
+      headCommit: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      remoteCommit: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      files: [],
+      diff: ''
+    });
+    vi.mocked(apiClient.confirmArtifactGitSync).mockResolvedValue({
+      pushed: false,
+      centerResult: {
+        reviewed: true
+      }
+    });
+
+    const wrapper = mount(ReviewDialog, {
+      global: {
+        stubs: stubs()
+      }
+    });
+    (wrapper.vm as any).open('IMPLEMENTATION', undefined, 'CHANGE_INSPECTION', '141846', 200);
+    await flushPromises();
+
+    await wrapper.findAll('button').find((button) => button.text() === '下一步')?.trigger('click');
+    await flushPromises();
+    expect(wrapper.text()).toContain('0');
+
+    await wrapper.findAll('button').find((button) => button.text() === '下一步')?.trigger('click');
+    await flushPromises();
+    await wrapper.findAll('button').find((button) => button.text() === '确认提交审核')?.trigger('click');
+    await flushPromises();
+
+    expect(apiClient.confirmArtifactGitSync).toHaveBeenCalledWith('141846', {
+      stage: 'IMPLEMENTATION',
+      syncType: 'REVIEW_APPROVAL',
+      requirementPk: 200,
+      files: [],
+      message: 'ai-delivery(141846): sync IMPLEMENTATION',
+      review: {
+        decision: 'APPROVED',
+        comment: '',
+        implementationStep: 'CHANGE_INSPECTION'
+      }
+    });
+    expect(wrapper.emitted('synced')?.[0]?.[0]).toEqual({
+      pushed: false,
+      centerResult: {
+        reviewed: true
       }
     });
   });

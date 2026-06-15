@@ -9,20 +9,18 @@ import static org.mockito.Mockito.when;
 
 import com.opp.aidelivery.center.common.error.AiDeliveryErrorCode;
 import com.opp.aidelivery.center.common.error.BusinessException;
+import com.opp.aidelivery.center.mapper.ArtifactGitVersionMapper;
 import com.opp.aidelivery.center.mapper.ArtifactMapper;
-import com.opp.aidelivery.center.mapper.ArtifactVersionMapper;
 import com.opp.aidelivery.center.mapper.CollabDocumentMapper;
 import com.opp.aidelivery.center.mapper.CollabOperationMapper;
 import com.opp.aidelivery.center.mapper.CollabSnapshotMapper;
-import com.opp.aidelivery.center.mapper.FileObjectMapper;
 import com.opp.aidelivery.center.mapper.RequirementMapper;
 import com.opp.aidelivery.center.model.dto.CollabDocumentOpenRequest;
 import com.opp.aidelivery.center.model.dto.CollabOperationCreateRequest;
 import com.opp.aidelivery.center.model.entity.ArtifactEntity;
-import com.opp.aidelivery.center.model.entity.ArtifactVersionEntity;
+import com.opp.aidelivery.center.model.entity.ArtifactGitVersionEntity;
 import com.opp.aidelivery.center.model.entity.CollabDocumentEntity;
 import com.opp.aidelivery.center.model.entity.CollabOperationEntity;
-import com.opp.aidelivery.center.model.entity.FileObjectEntity;
 import com.opp.aidelivery.center.model.entity.RequirementEntity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,9 +36,7 @@ class CollabDocumentServiceTest {
     @Mock
     private ArtifactMapper artifactMapper;
     @Mock
-    private ArtifactVersionMapper artifactVersionMapper;
-    @Mock
-    private FileObjectMapper fileObjectMapper;
+    private ArtifactGitVersionMapper artifactGitVersionMapper;
     @Mock
     private RequirementMapper requirementMapper;
     @Mock
@@ -57,8 +53,7 @@ class CollabDocumentServiceTest {
         service = new CollabDocumentService(
             permissionService,
             artifactMapper,
-            artifactVersionMapper,
-            fileObjectMapper,
+            artifactGitVersionMapper,
             requirementMapper,
             collabDocumentMapper,
             collabOperationMapper,
@@ -68,7 +63,7 @@ class CollabDocumentServiceTest {
 
     @Test
     void openDraftCreatesTextDraft() {
-        stubArtifactWithVersion("text/markdown", 400L);
+        stubArtifactWithVersion("docs/172014/prd/analysis.md", 400L);
         when(collabDocumentMapper.selectOne(any())).thenReturn(null);
         when(collabDocumentMapper.insert(any())).thenAnswer(invocation -> {
             CollabDocumentEntity document = invocation.getArgument(0);
@@ -81,7 +76,7 @@ class CollabDocumentServiceTest {
 
     @Test
     void openDraftRejectsBinaryArtifact() {
-        stubArtifactWithVersion("application/pdf", 400L);
+        stubArtifactWithVersion("docs/172014/prd/report.pdf", 400L);
 
         assertThatThrownBy(() -> service.openDraft(1L, openRequest(400L)))
             .isInstanceOf(BusinessException.class)
@@ -125,18 +120,14 @@ class CollabDocumentServiceTest {
         verify(collabOperationMapper, never()).insert(any());
     }
 
-    private void stubArtifactWithVersion(String contentType, Long currentVersionId) {
+    private void stubArtifactWithVersion(String filePath, Long currentVersionId) {
         when(artifactMapper.selectById(200L)).thenReturn(artifact(currentVersionId));
         when(requirementMapper.selectById(100L)).thenReturn(requirement());
-        ArtifactVersionEntity version = new ArtifactVersionEntity();
+        ArtifactGitVersionEntity version = new ArtifactGitVersionEntity();
         version.setId(currentVersionId);
         version.setArtifactId(200L);
-        version.setFileObjectId(500L);
-        when(artifactVersionMapper.selectById(currentVersionId)).thenReturn(version);
-        FileObjectEntity fileObject = new FileObjectEntity();
-        fileObject.setId(500L);
-        fileObject.setContentType(contentType);
-        when(fileObjectMapper.selectById(500L)).thenReturn(fileObject);
+        version.setFilePath(filePath);
+        when(artifactGitVersionMapper.selectById(currentVersionId)).thenReturn(version);
     }
 
     private CollabDocumentOpenRequest openRequest(Long baseVersionId) {

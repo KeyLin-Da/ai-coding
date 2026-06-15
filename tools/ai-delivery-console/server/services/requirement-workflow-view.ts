@@ -1,6 +1,23 @@
-import type { RequirementType, RequirementWorkflow, StageState, WorkflowProject, WorkflowStage, WorkflowStatus } from '../../shared/workflow';
-import { createEmptyStages, defaultBranchName, ensureImplementationSteps, workflowStages } from '../../shared/workflow';
-import { deriveCurrentStage } from '../../shared/stage-rules';
+import type {
+  ImplementationStep,
+  RequirementType,
+  RequirementWorkflow,
+  ReviewDecision,
+  ReviewRecord,
+  StageState,
+  WorkflowProject,
+  WorkflowStage,
+  WorkflowStatus
+} from '../../shared/workflow';
+import {
+  createEmptyStages,
+  defaultBranchName,
+  ensureImplementationSteps,
+  isImplementationStep,
+  nextImplementationStep,
+  workflowStages
+} from '../../shared/workflow';
+import { deriveCurrentStage, statusAfterReview } from '../../shared/stage-rules';
 import type { LocalRequestContext } from './local-request-context';
 import { centerRequest } from './center-client';
 
@@ -29,6 +46,17 @@ interface CenterWorkflowStagePayload {
   comment?: string;
 }
 
+interface CenterReviewPayload {
+  id: string | number;
+  stage: WorkflowStage;
+  implementationStep?: string;
+  decision: ReviewDecision;
+  comment?: string;
+  actorId?: string | number;
+  artifactVersionId?: string | number;
+  createdAt?: string | number[] | null;
+}
+
 export interface CenterRequirementPayload {
   id: string | number;
   projectId?: string | number;
@@ -44,6 +72,7 @@ export interface CenterRequirementPayload {
   pendingReviewCount?: number;
   jobStatus?: string;
   lastEventId?: string | number;
+  reviews?: CenterReviewPayload[];
 }
 
 function requireProjectId(context: LocalRequestContext): string {
@@ -56,6 +85,75 @@ function requireProjectId(context: LocalRequestContext): string {
 
 function centerProjectNamesToWorkflowProjects(projectNames?: string[]): WorkflowProject[] {
   return (projectNames || []).map((name) => ({ name, path: name }));
+}
+
+function normalizeCenterDate(value: CenterReviewPayload['createdAt']): string {
+  if (typeof value === 'string' && value.trim()) {
+    return value;
+  }
+  if (Array.isArray(value) && value.length >= 3) {
+    const [year, month, day, hour = 0, minute = 0, second = 0, nano = 0] = value;
+    return new Date(Date.UTC(year, month - 1, day, hour, minute, second, Math.floor(nano / 1_000_000))).toISOString();
+  }
+  return new Date().toISOString();
+}
+
+function centerReviewsToWorkflowReviews(reviews?: CenterReviewPayload[]): ReviewRecord[] {
+  return (reviews || [])
+    .filter((review) => workflowStages.includes(review.stage))
+    .map((review) => ({
+      id: String(review.id),
+      stage: review.stage,
+      implementationStep: isImplementationStep(review.implementationStep as ImplementationStep)
+        ? (review.implementationStep as ImplementationStep)
+        : undefined,
+      decision: review.decision,
+      comment: review.comment || '',
+      actor: review.actorId == null ? 'center-user' : String(review.actorId),
+      artifactPath: review.artifactVersionId == null ? undefined : String(review.artifactVersionId),
+      createdAt: normalizeCenterDate(review.createdAt)
+    }));
+}
+
+function deriveImplementationStepsFromReviews(reviews: ReviewRecord[]) {
+  const steps = ensureImplementationSteps();
+  const chronologicalReviews = [...reviews].reverse();
+  for (const review of chronologicalReviews) {
+    if (review.stage !== 'IMPLEMENTATION' || !isImplementationStep(review.implementationStep)) {
+      continue;
+    }
+    const step = review.implementationStep;
+    steps[step] = {
+      ...steps[step],
+      status: statusAfterReview(review.decision),
+      approvedAt: review.decision === 'APPROVED' ? review.createdAt : steps[step].approvedAt,
+      rejectedAt: review.decision === 'REJECTED' ? review.createdAt : steps[step].rejectedAt,
+      comment: review.comment
+    };
+    if (review.decision === 'APPROVED') {
+      const next = nextImplementationStep(step);
+      if (next && steps[next].status === 'NOT_STARTED') {
+        steps[next].status = 'DRAFT';
+      }
+    }
+  }
+  return steps;
+}
+
+function hasImplementationStepReview(reviews: ReviewRecord[]): boolean {
+  return reviews.some((review) => review.stage === 'IMPLEMENTATION' && isImplementationStep(review.implementationStep));
+}
+
+function hasIncompleteImplementationApproval(
+  stages: RequirementWorkflow['stages'],
+  steps: NonNullable<RequirementWorkflow['implementationSteps']>,
+  reviews: ReviewRecord[]
+): boolean {
+  return (
+    hasImplementationStepReview(reviews)
+    && stages.IMPLEMENTATION.status === 'APPROVED'
+    && steps.CHANGE_INSPECTION?.status !== 'APPROVED'
+  );
 }
 
 export function centerRequirementToWorkflow(item: CenterRequirementPayload): RequirementWorkflow {
@@ -74,6 +172,16 @@ export function centerRequirementToWorkflow(item: CenterRequirementPayload): Req
     }
   }
   const now = new Date().toISOString();
+  const reviews = centerReviewsToWorkflowReviews(item.reviews);
+  const implementationStepStates = deriveImplementationStepsFromReviews(reviews);
+  const shouldRestoreImplementationStage = hasIncompleteImplementationApproval(stages, implementationStepStates, reviews);
+  if (shouldRestoreImplementationStage) {
+    stages.IMPLEMENTATION = {
+      ...stages.IMPLEMENTATION,
+      status: 'IN_PROGRESS',
+      approvedAt: undefined
+    };
+  }
   return {
     id: item.id,
     requirementId: item.requirementId,
@@ -82,15 +190,15 @@ export function centerRequirementToWorkflow(item: CenterRequirementPayload): Req
     branchName: item.branchName || defaultBranchName(item.requirementId, requirementType),
     projects: centerProjectNamesToWorkflowProjects(item.projectNames),
     sources: [],
-    currentStage: item.currentStage,
-    status: item.status,
+    currentStage: shouldRestoreImplementationStage ? 'IMPLEMENTATION' : item.currentStage,
+    status: shouldRestoreImplementationStage ? 'IN_PROGRESS' : item.status,
     createdAt: now,
     updatedAt: now,
     stages,
-    implementationSteps: ensureImplementationSteps(),
+    implementationSteps: implementationStepStates,
     artifacts: [],
     runs: [],
-    reviews: [],
+    reviews,
     issues: [],
     onlineClientCount: item.onlineClientCount,
     pendingReviewCount: item.pendingReviewCount,
@@ -128,7 +236,10 @@ export function mergeRequirementWorkflow(centerWorkflow: RequirementWorkflow, lo
     currentStage: centerWorkflow.currentStage,
     status: centerWorkflow.status,
     stages,
-    implementationSteps: ensureImplementationSteps(localWorkflow.implementationSteps),
+    implementationSteps: hasImplementationStepReview(centerWorkflow.reviews)
+      ? centerWorkflow.implementationSteps
+      : ensureImplementationSteps(localWorkflow.implementationSteps),
+    reviews: centerWorkflow.reviews.length ? centerWorkflow.reviews : localWorkflow.reviews,
     onlineClientCount: centerWorkflow.onlineClientCount,
     pendingReviewCount: centerWorkflow.pendingReviewCount,
     jobStatus: centerWorkflow.jobStatus,

@@ -186,7 +186,6 @@ public class ImportRecordsRequest {
         @NotNull
         private String message;
 
-        private Long textObjectId;
         private String payloadJson;
     }
 

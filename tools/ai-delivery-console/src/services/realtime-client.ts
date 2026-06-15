@@ -27,7 +27,6 @@ interface CenterRunEvent {
   level: RunEvent['level'];
   type: 'stdout' | 'stderr' | 'exit' | 'cancelled';
   message: string;
-  textObjectId?: number;
   payloadJson?: string;
   createdAt?: string;
 }
@@ -364,11 +363,6 @@ function centerRunEventToRunEvent(item: CenterRunEvent): RunEvent {
     level: item.level,
     message: item.message,
     text: item.message,
-    data: item.textObjectId
-      ? {
-          textObjectId: item.textObjectId,
-          payloadJson: item.payloadJson
-        }
-      : item.payloadJson
+    data: parseJson(item.payloadJson || '') || item.payloadJson
   };
 }

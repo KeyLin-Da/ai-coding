@@ -34,7 +34,6 @@ public class RunEventService {
         event.setSeq(request.getSeq() == null ? runEventRepository.nextSeq(run.getId()) : request.getSeq());
         event.setLevel(normalizeLevel(request.getLevel()));
         event.setType(normalizeType(request.getType()));
-        event.setTextObjectId(request.getTextObjectId());
         event.setPayloadJson(normalizePayload(request));
         event.setMessage(normalizeMessage(request));
         runEventRepository.append(event);
@@ -82,9 +81,6 @@ public class RunEventService {
         if (message.length() <= maxLength) {
             return message;
         }
-        if (request.getTextObjectId() == null) {
-            throw new BusinessException(AiDeliveryErrorCode.VALIDATION_FAILED, "长日志需先上传 COS chunk 并传 textObjectId");
-        }
         return message.substring(0, maxLength);
     }
 
@@ -93,7 +89,7 @@ public class RunEventService {
         if (request.getMessage().length() <= properties.getEvent().getInlineMessageMaxLength()) {
             return payload;
         }
-        String chunkPayload = "{\"chunked\":true,\"textObjectId\":" + request.getTextObjectId()
+        String chunkPayload = "{\"truncated\":true"
             + ",\"originalLength\":" + request.getMessage().length() + "}";
         if (payload == null || payload.trim().isEmpty()) {
             return chunkPayload;
@@ -113,7 +109,6 @@ public class RunEventService {
         vo.setLevel(event.getLevel());
         vo.setType(event.getType());
         vo.setMessage(event.getMessage());
-        vo.setTextObjectId(event.getTextObjectId());
         vo.setPayloadJson(event.getPayloadJson());
         vo.setCreatedAt(event.getCreatedAt());
         return vo;

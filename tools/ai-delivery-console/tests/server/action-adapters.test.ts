@@ -506,7 +506,17 @@ describe('agent-providers', () => {
     expect(providers.map((provider) => provider.id)).toEqual(expect.arrayContaining(['codex']));
     const codex = providers.find((provider) => provider.id === 'codex');
     expect(codex?.inputMode).toBe('STDIN');
-    expect(codex?.command).toEqual(['codex', 'exec', '--sandbox', 'workspace-write', '-C', '{workspaceRoot}', '{projectParentAddDirArgs}', '-']);
+    expect(codex?.command).toEqual([
+      'codex',
+      'exec',
+      '--sandbox',
+      'workspace-write',
+      '-C',
+      '{workspaceRoot}',
+      '{projectParentAddDirArgs}',
+      '{projectAddDirArgs}',
+      '-'
+    ]);
     expect(codex?.interactiveCommand).toEqual([
       'codex',
       '--sandbox',
@@ -514,6 +524,7 @@ describe('agent-providers', () => {
       '-C',
       '{workspaceRoot}',
       '{projectParentAddDirArgs}',
+      '{projectAddDirArgs}',
       '--no-alt-screen',
       '{prompt}'
     ]);

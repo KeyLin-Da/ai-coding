@@ -1,16 +1,10 @@
 package com.opp.aidelivery.center.service;
 
-import com.opp.aidelivery.center.common.error.AiDeliveryErrorCode;
 import com.opp.aidelivery.center.common.error.BusinessException;
 import com.opp.aidelivery.center.config.AiDeliveryCenterProperties;
 import com.opp.aidelivery.center.model.dto.PreflightRequest;
 import com.opp.aidelivery.center.model.vo.PreflightCheckVO;
 import com.opp.aidelivery.center.model.vo.PreflightResultVO;
-import com.opp.aidelivery.center.storage.StorageObjectMetadata;
-import com.opp.aidelivery.center.storage.StorageService;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Locale;
@@ -28,13 +22,12 @@ import org.springframework.util.StringUtils;
 @RequiredArgsConstructor
 public class PreflightService {
 
-    private static final Set<String> DEFAULT_CHECKS = new HashSet<>(Arrays.asList("CENTER", "PROJECT_PERMISSION", "DB", "REDIS", "COS", "WEBSOCKET"));
+    private static final Set<String> DEFAULT_CHECKS = new HashSet<>(Arrays.asList("CENTER", "PROJECT_PERMISSION", "DB", "REDIS", "WEBSOCKET"));
 
     private final AiDeliveryCenterProperties properties;
     private final PermissionService permissionService;
     private final JdbcTemplate jdbcTemplate;
     private final StringRedisTemplate redisTemplate;
-    private final StorageService storageService;
 
     public PreflightResultVO check(Long userId, PreflightRequest request) {
         Set<String> requested = normalizeChecks(request);
@@ -54,9 +47,6 @@ public class PreflightService {
         if (requested.contains("WEBSOCKET")) {
             result.getChecks().add(checkWebSocket());
         }
-        if (requested.contains("COS")) {
-            result.getChecks().add(checkCos(Boolean.TRUE.equals(request.getTestObjectStorage())));
-        }
         result.setOverallStatus(overallStatus(result));
         return result;
     }
@@ -75,19 +65,33 @@ public class PreflightService {
     private PreflightCheckVO checkDb() {
         try {
             PreflightCheckVO vo = pass("DB", "schema ready");
-            for (String table : Arrays.asList("ad_import_session", "ad_import_item")) {
+            for (String table : Arrays.asList(
+                "ad_import_session",
+                "ad_import_item",
+                "ad_artifact_git_version",
+                "ad_artifact_sync",
+                "ad_project_repository",
+                "ad_user_project_repo_state"
+            )) {
                 if (!existsInInformationSchema("tables", "table_name", table)) {
                     return fail("DB", "missing table: " + table);
                 }
             }
             if (!existsInInformationSchema("columns", "column_name", "content_sha256")) {
-                return fail("DB", "missing artifact version content hash column");
+                return fail("DB", "missing git artifact content hash column");
             }
-            if (!existsInInformationSchema("statistics", "index_name", "idx_artifact_content_hash")) {
-                return fail("DB", "missing artifact content hash index");
+            if (!existsInInformationSchema("statistics", "index_name", "idx_content_hash")) {
+                return fail("DB", "missing git artifact content hash index");
             }
-            vo.getDetails().put("requiredTables", Arrays.asList("ad_import_session", "ad_import_item"));
-            vo.getDetails().put("requiredIndex", "idx_artifact_content_hash");
+            vo.getDetails().put("requiredTables", Arrays.asList(
+                "ad_import_session",
+                "ad_import_item",
+                "ad_artifact_git_version",
+                "ad_artifact_sync",
+                "ad_project_repository",
+                "ad_user_project_repo_state"
+            ));
+            vo.getDetails().put("requiredIndex", "idx_content_hash");
             return vo;
         } catch (DataAccessException ex) {
             return fail("DB", ex.getMessage());
@@ -133,40 +137,6 @@ public class PreflightService {
         return vo;
     }
 
-    private PreflightCheckVO checkCos(boolean testObjectStorage) {
-        if (!StringUtils.hasText(properties.getCos().getBucket())) {
-            return fail("COS", "cos bucket is empty");
-        }
-        if (!properties.getPreflight().isObjectStorageTestEnabled() || !testObjectStorage) {
-            PreflightCheckVO vo = pass("COS", "cos configuration present");
-            vo.getDetails().put("bucket", properties.getCos().getBucket());
-            vo.getDetails().put("testObjectStorage", false);
-            return vo;
-        }
-        byte[] content = ("ai-delivery-preflight-" + UUID.randomUUID()).getBytes(StandardCharsets.UTF_8);
-        String sha256 = sha256(content);
-        String key = "preflight/" + UUID.randomUUID() + ".txt";
-        try {
-            storageService.putObject(key, content, "text/plain", sha256);
-            StorageObjectMetadata metadata = storageService.getObjectMetadata(key);
-            if (metadata.getSize() != content.length || (metadata.getSha256() != null && !metadata.getSha256().equalsIgnoreCase(sha256))) {
-                return fail("COS", "cos metadata mismatch");
-            }
-            PreflightCheckVO vo = pass("COS", "cos upload flow ready");
-            vo.getDetails().put("bucket", properties.getCos().getBucket());
-            vo.getDetails().put("objectKey", key);
-            return vo;
-        } catch (RuntimeException ex) {
-            return fail("COS", ex.getMessage());
-        } finally {
-            try {
-                storageService.deleteObject(key);
-            } catch (RuntimeException ignored) {
-                // Preflight cleanup failure is not a separate blocking fact.
-            }
-        }
-    }
-
     private Set<String> normalizeChecks(PreflightRequest request) {
         if (request.getChecks() == null || request.getChecks().isEmpty()) {
             return DEFAULT_CHECKS;
@@ -207,17 +177,4 @@ public class PreflightService {
         return vo;
     }
 
-    private String sha256(byte[] content) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] bytes = digest.digest(content);
-            StringBuilder builder = new StringBuilder();
-            for (byte item : bytes) {
-                builder.append(String.format("%02x", item));
-            }
-            return builder.toString();
-        } catch (NoSuchAlgorithmException ex) {
-            throw new BusinessException(AiDeliveryErrorCode.INTERNAL_ERROR, ex.getMessage());
-        }
-    }
 }

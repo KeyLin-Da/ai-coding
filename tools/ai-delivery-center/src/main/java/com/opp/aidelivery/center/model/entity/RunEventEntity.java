@@ -14,6 +14,5 @@ public class RunEventEntity extends BaseEntity {
     private String level;
     private String type;
     private String message;
-    private Long textObjectId;
     private String payloadJson;
 }

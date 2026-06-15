@@ -29,10 +29,16 @@ vi.mock('@/api/client', () => ({
     previewActionCommand: vi.fn(),
     readArtifact: vi.fn(),
     deleteTechDesignQuestion: vi.fn(),
+    uploadTechDesignFiles: vi.fn(),
+    uploadPrdFiles: vi.fn(),
+    deleteTechDesignFile: vi.fn(),
+    deletePrdFile: vi.fn(),
     getDeliveryWorkspace: vi.fn(),
     listGitCredentials: vi.fn(),
     getProjectRepositoryStatus: vi.fn(),
-    refreshProjectRepositoryStatus: vi.fn()
+    refreshProjectRepositoryStatus: vi.fn(),
+    assertRequirementWritable: vi.fn(),
+    listRequirementWorkspaceStates: vi.fn()
   }
 }));
 
@@ -241,6 +247,12 @@ async function mountDetail(current: RequirementWorkflow, openSpecSummary: OpenSp
   };
   vi.mocked(apiClient.runAction).mockResolvedValue({ run, workflow: current });
   vi.mocked(apiClient.deleteTechDesignQuestion).mockResolvedValue(current);
+  vi.mocked(apiClient.uploadTechDesignFiles).mockResolvedValue(current);
+  vi.mocked(apiClient.uploadPrdFiles).mockResolvedValue(current);
+  vi.mocked(apiClient.deleteTechDesignFile).mockResolvedValue(current);
+  vi.mocked(apiClient.deletePrdFile).mockResolvedValue(current);
+  vi.mocked(apiClient.assertRequirementWritable).mockResolvedValue([]);
+  vi.mocked(apiClient.listRequirementWorkspaceStates).mockResolvedValue([]);
 
   const wrapper = mount(RequirementDetail, {
     global: {
@@ -464,6 +476,41 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     expect(inputPanel.text()).toContain('生成技术方案');
     expect(inputPanel.find('.design-run-footer').exists()).toBe(true);
     expect(inputPanel.find('.design-clarification').attributes('rows')).toBe('4');
+  });
+
+  it('上传技术方案补充材料不刷新项目仓库状态', async () => {
+    const current = defectWorkflow([]);
+    current.id = 172014;
+    vi.mocked(apiClient.uploadTechDesignFiles).mockResolvedValue({
+      ...current,
+      techDesignSourceFiles: [
+        {
+          id: 'file-1',
+          name: '补充说明.md',
+          path: 'docs/172014/technical-design/file/file-1.md',
+          size: 8,
+          mimeType: 'text/markdown',
+          uploadedAt: new Date().toISOString()
+        }
+      ]
+    });
+    const wrapper = await mountDetail(current);
+    vi.mocked(apiClient.listGitCredentials).mockClear();
+    vi.mocked(apiClient.refreshProjectRepositoryStatus).mockClear();
+    vi.mocked(apiClient.assertRequirementWritable).mockClear();
+
+    const input = wrapper.find<HTMLInputElement>('input.hidden-file-input');
+    Object.defineProperty(input.element, 'files', {
+      value: [new File(['# design'], '补充说明.md', { type: 'text/markdown' })],
+      configurable: true
+    });
+    await input.trigger('change');
+    await flushPromises();
+
+    expect(apiClient.uploadTechDesignFiles).toHaveBeenCalledWith('172014', expect.any(Array));
+    expect(apiClient.assertRequirementWritable).toHaveBeenCalledWith(172014, '20');
+    expect(apiClient.listGitCredentials).not.toHaveBeenCalled();
+    expect(apiClient.refreshProjectRepositoryStatus).not.toHaveBeenCalled();
   });
 
   it('缺陷生成技术方案时不传 PRD documentPath', async () => {

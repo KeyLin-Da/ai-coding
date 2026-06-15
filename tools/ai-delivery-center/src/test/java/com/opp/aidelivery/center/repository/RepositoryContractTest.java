@@ -7,9 +7,7 @@ import static org.mockito.Mockito.when;
 
 import com.baomidou.mybatisplus.annotation.Version;
 import com.opp.aidelivery.center.mapper.ArtifactMapper;
-import com.opp.aidelivery.center.mapper.ArtifactVersionMapper;
 import com.opp.aidelivery.center.mapper.DomainEventMapper;
-import com.opp.aidelivery.center.mapper.FileObjectMapper;
 import com.opp.aidelivery.center.mapper.RunEventMapper;
 import com.opp.aidelivery.center.model.entity.ArtifactEntity;
 import com.opp.aidelivery.center.model.entity.DomainEventEntity;
@@ -30,10 +28,6 @@ class RepositoryContractTest {
     @Mock
     private ArtifactMapper artifactMapper;
     @Mock
-    private ArtifactVersionMapper artifactVersionMapper;
-    @Mock
-    private FileObjectMapper fileObjectMapper;
-    @Mock
     private RunEventMapper runEventMapper;
     @Mock
     private DomainEventMapper domainEventMapper;
@@ -49,7 +43,7 @@ class RepositoryContractTest {
 
     @Test
     void artifactCurrentVersionUpdateDelegatesToOptimisticMapperUpdate() {
-        ArtifactRepository repository = new ArtifactRepository(artifactMapper, artifactVersionMapper, fileObjectMapper);
+        ArtifactRepository repository = new ArtifactRepository(artifactMapper);
         ArtifactEntity artifact = new ArtifactEntity();
         artifact.setId(11L);
         artifact.setVersion(3L);

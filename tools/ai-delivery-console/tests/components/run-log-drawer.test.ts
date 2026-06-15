@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import RunLogDrawer from '../../src/components/RunLogDrawer.vue';
 
 describe('RunLogDrawer', () => {
-  it('展示长日志 chunk 引用', async () => {
+  it('展示长日志截断信息', async () => {
     const wrapper = mount(RunLogDrawer, {
       props: {
         events: [
@@ -14,7 +14,8 @@ describe('RunLogDrawer', () => {
             level: 'INFO',
             message: 'summary',
             data: {
-              textObjectId: 900
+              truncated: true,
+              originalLength: 900
             }
           }
         ]
@@ -39,6 +40,6 @@ describe('RunLogDrawer', () => {
     await nextTick();
 
     expect(wrapper.text()).toContain('summary');
-    expect(wrapper.text()).toContain('chunk 900');
+    expect(wrapper.text()).toContain('truncated 900');
   });
 });

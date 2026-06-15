@@ -24,7 +24,5 @@ public class RunEventCreateRequest {
     @NotNull
     private String message;
 
-    private Long textObjectId;
-
     private String payloadJson;
 }

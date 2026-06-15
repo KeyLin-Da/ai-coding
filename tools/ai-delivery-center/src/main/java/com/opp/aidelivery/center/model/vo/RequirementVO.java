@@ -18,4 +18,5 @@ public class RequirementVO {
     private Long version;
     private List<WorkflowStageVO> stages = new ArrayList<>();
     private List<String> projectNames = new ArrayList<>();
+    private List<ReviewVO> reviews = new ArrayList<>();
 }

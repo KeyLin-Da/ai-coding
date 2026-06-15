@@ -54,7 +54,17 @@ describe('agent-providers', () => {
     expect(providers.map((provider) => provider.id)).toEqual(expect.arrayContaining(['codex']));
     const codex = providers.find((provider) => provider.id === 'codex');
     expect(codex?.inputMode).toBe('STDIN');
-    expect(codex?.command).toEqual(['codex', 'exec', '--sandbox', 'workspace-write', '-C', '{workspaceRoot}', '{projectParentAddDirArgs}', '-']);
+    expect(codex?.command).toEqual([
+      'codex',
+      'exec',
+      '--sandbox',
+      'workspace-write',
+      '-C',
+      '{workspaceRoot}',
+      '{projectParentAddDirArgs}',
+      '{projectAddDirArgs}',
+      '-'
+    ]);
     expect(codex?.interactiveCommand).toEqual([
       'codex',
       '--sandbox',
@@ -62,6 +72,7 @@ describe('agent-providers', () => {
       '-C',
       '{workspaceRoot}',
       '{projectParentAddDirArgs}',
+      '{projectAddDirArgs}',
       '--no-alt-screen',
       '{prompt}'
     ]);
@@ -201,18 +212,34 @@ describe('agent-providers', () => {
     );
   });
 
-  it('Codex 终端命令将工程父目录追加为 add-dir', async () => {
+  it('Codex 终端命令将工程父目录和涉及工程追加为 add-dir', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-terminal-'));
     const projectParent = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-projects-'));
+    const projectRoot = path.join(projectParent, 'opp-api');
+    await fs.mkdir(projectRoot, { recursive: true });
     const provider: AgentProvider = {
       id: 'codex',
       name: 'Codex',
       inputMode: 'STDIN',
-      command: ['codex', 'exec', '--sandbox', 'workspace-write', '-C', '{workspaceRoot}', '{projectParentAddDirArgs}', '-'],
-      interactiveCommand: ['codex', '--sandbox', 'workspace-write', '-C', '{workspaceRoot}', '{projectParentAddDirArgs}', '--no-alt-screen', '{prompt}'],
+      command: ['codex', 'exec', '--sandbox', 'workspace-write', '-C', '{workspaceRoot}', '{projectParentAddDirArgs}', '{projectAddDirArgs}', '-'],
+      interactiveCommand: [
+        'codex',
+        '--sandbox',
+        'workspace-write',
+        '-C',
+        '{workspaceRoot}',
+        '{projectParentAddDirArgs}',
+        '{projectAddDirArgs}',
+        '--no-alt-screen',
+        '{prompt}'
+      ],
       available: true,
       supportsStreaming: true,
       supportsInteractive: true
+    };
+    const item = {
+      ...workflow(),
+      projects: [{ name: 'opp-api', path: 'opp-api' }]
     };
     const run = {
       ...runRecord('run-codex-script'),
@@ -220,24 +247,40 @@ describe('agent-providers', () => {
       executionMode: 'TERMINAL' as const
     };
 
-    const terminal = await createTerminalRunScript(root, workflow(), run, provider, '/coding-prd-analyzer id=172014', [projectParent]);
+    const terminal = await createTerminalRunScript(root, item, run, provider, '/coding-prd-analyzer id=172014', [projectParent]);
 
-    expect(terminal.commandLine).toContain(`'--sandbox' 'workspace-write' '-C' '${root}' '--add-dir' '${projectParent}'`);
+    expect(terminal.commandLine).toContain(`'--sandbox' 'workspace-write' '-C' '${root}' '--add-dir' '${projectParent}' '--add-dir' '${projectRoot}'`);
     expect(terminal.commandLine).toContain('"$(cat "$PROMPT_FILE")"');
   });
 
-  it('Codex 交互终端命令将工程父目录追加为 add-dir', async () => {
+  it('Codex 交互终端命令将工程父目录和涉及工程追加为 add-dir', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-terminal-'));
     const projectParent = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-projects-'));
+    const projectRoot = path.join(projectParent, 'opp-api');
+    await fs.mkdir(projectRoot, { recursive: true });
     const provider: AgentProvider = {
       id: 'codex',
       name: 'Codex',
       inputMode: 'STDIN',
-      command: ['codex', 'exec', '--sandbox', 'workspace-write', '-C', '{workspaceRoot}', '{projectParentAddDirArgs}', '-'],
-      interactiveCommand: ['codex', '--sandbox', 'workspace-write', '-C', '{workspaceRoot}', '{projectParentAddDirArgs}', '--no-alt-screen', '{prompt}'],
+      command: ['codex', 'exec', '--sandbox', 'workspace-write', '-C', '{workspaceRoot}', '{projectParentAddDirArgs}', '{projectAddDirArgs}', '-'],
+      interactiveCommand: [
+        'codex',
+        '--sandbox',
+        'workspace-write',
+        '-C',
+        '{workspaceRoot}',
+        '{projectParentAddDirArgs}',
+        '{projectAddDirArgs}',
+        '--no-alt-screen',
+        '{prompt}'
+      ],
       available: true,
       supportsStreaming: true,
       supportsInteractive: true
+    };
+    const item = {
+      ...workflow(),
+      projects: [{ name: 'opp-api', path: 'opp-api' }]
     };
     const run = {
       ...runRecord('run-codex-interactive-script'),
@@ -245,9 +288,11 @@ describe('agent-providers', () => {
       executionMode: 'INTERACTIVE_TERMINAL' as const
     };
 
-    const terminal = await createTerminalRunScript(root, workflow(), run, provider, '/coding-prd-analyzer id=172014', [projectParent]);
+    const terminal = await createTerminalRunScript(root, item, run, provider, '/coding-prd-analyzer id=172014', [projectParent]);
 
-    expect(terminal.commandLine).toContain(`'--sandbox' 'workspace-write' '-C' '${root}' '--add-dir' '${projectParent}' '--no-alt-screen'`);
+    expect(terminal.commandLine).toContain(
+      `'--sandbox' 'workspace-write' '-C' '${root}' '--add-dir' '${projectParent}' '--add-dir' '${projectRoot}' '--no-alt-screen'`
+    );
     expect(terminal.commandLine).toContain('AI Delivery Agent Task');
   });
 

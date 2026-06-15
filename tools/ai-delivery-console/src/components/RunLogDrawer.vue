@@ -19,7 +19,7 @@
         <span class="type">{{ event.type || event.level }}</span>
         <div class="log-message">
           <pre>{{ event.text || event.message }}</pre>
-          <small v-if="chunkRef(event)">chunk {{ chunkRef(event) }}</small>
+          <small v-if="truncatedRef(event)">truncated {{ truncatedRef(event) }}</small>
         </div>
       </div>
     </div>
@@ -49,9 +49,9 @@ function toggleFullscreen() {
   isFullscreen.value = !isFullscreen.value;
 }
 
-function chunkRef(event: RunEvent): string {
-  const data = event.data as { textObjectId?: string | number } | undefined;
-  return data?.textObjectId ? String(data.textObjectId) : '';
+function truncatedRef(event: RunEvent): string {
+  const data = event.data as { truncated?: boolean; originalLength?: string | number } | undefined;
+  return data?.truncated && data.originalLength ? String(data.originalLength) : '';
 }
 
 defineExpose({ open });

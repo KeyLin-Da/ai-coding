@@ -329,11 +329,11 @@ PRD 阶段的「澄清描述」会保存到 workflow 的 `prdClarification` 字�
 ### 默认 Codex 命令
 
 ```bash
-CODEX_COMMAND='codex exec --sandbox workspace-write -C {workspaceRoot} {projectParentAddDirArgs} -'
-CODEX_INTERACTIVE_COMMAND='codex --sandbox workspace-write -C {workspaceRoot} {projectParentAddDirArgs} --no-alt-screen {prompt}'
+CODEX_COMMAND='codex exec --sandbox workspace-write -C {workspaceRoot} {projectParentAddDirArgs} {projectAddDirArgs} -'
+CODEX_INTERACTIVE_COMMAND='codex --sandbox workspace-write -C {workspaceRoot} {projectParentAddDirArgs} {projectAddDirArgs} --no-alt-screen {prompt}'
 ```
 
-`workspaceRoot` 是项目 AI 产物仓；`projectParentAddDirArgs` 会把关联工程父目录展开为 `--add-dir <工程父目录>`。Codex 需要以 `workspace-write` 或更高权限运行，`--add-dir` 才会成为额外可写根。
+`workspaceRoot` 是项目 AI 产物仓；`projectParentAddDirArgs` 会把关联工程父目录展开为 `--add-dir <工程父目录>`，`projectAddDirArgs` 会把本次涉及工程展开为 `--add-dir <工程目录>`。Codex 需要以 `workspace-write` 或更高权限运行，`--add-dir` 才会成为额外可写根。
 
 ### 注册自定义 Agent
 

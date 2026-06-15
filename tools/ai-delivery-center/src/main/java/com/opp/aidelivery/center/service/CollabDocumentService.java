@@ -3,22 +3,20 @@ package com.opp.aidelivery.center.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.opp.aidelivery.center.common.error.AiDeliveryErrorCode;
 import com.opp.aidelivery.center.common.error.BusinessException;
+import com.opp.aidelivery.center.mapper.ArtifactGitVersionMapper;
 import com.opp.aidelivery.center.mapper.ArtifactMapper;
-import com.opp.aidelivery.center.mapper.ArtifactVersionMapper;
 import com.opp.aidelivery.center.mapper.CollabDocumentMapper;
 import com.opp.aidelivery.center.mapper.CollabOperationMapper;
 import com.opp.aidelivery.center.mapper.CollabSnapshotMapper;
-import com.opp.aidelivery.center.mapper.FileObjectMapper;
 import com.opp.aidelivery.center.mapper.RequirementMapper;
 import com.opp.aidelivery.center.model.dto.CollabDocumentOpenRequest;
 import com.opp.aidelivery.center.model.dto.CollabOperationCreateRequest;
 import com.opp.aidelivery.center.model.dto.CollabSnapshotCreateRequest;
 import com.opp.aidelivery.center.model.entity.ArtifactEntity;
-import com.opp.aidelivery.center.model.entity.ArtifactVersionEntity;
+import com.opp.aidelivery.center.model.entity.ArtifactGitVersionEntity;
 import com.opp.aidelivery.center.model.entity.CollabDocumentEntity;
 import com.opp.aidelivery.center.model.entity.CollabOperationEntity;
 import com.opp.aidelivery.center.model.entity.CollabSnapshotEntity;
-import com.opp.aidelivery.center.model.entity.FileObjectEntity;
 import com.opp.aidelivery.center.model.entity.RequirementEntity;
 import com.opp.aidelivery.center.model.vo.CollabDocumentVO;
 import com.opp.aidelivery.center.model.vo.CollabOperationVO;
@@ -34,8 +32,7 @@ public class CollabDocumentService {
 
     private final PermissionService permissionService;
     private final ArtifactMapper artifactMapper;
-    private final ArtifactVersionMapper artifactVersionMapper;
-    private final FileObjectMapper fileObjectMapper;
+    private final ArtifactGitVersionMapper artifactGitVersionMapper;
     private final RequirementMapper requirementMapper;
     private final CollabDocumentMapper collabDocumentMapper;
     private final CollabOperationMapper collabOperationMapper;
@@ -46,7 +43,7 @@ public class CollabDocumentService {
         ArtifactEntity artifact = loadArtifactAndCheckPermission(userId, request.getArtifactId());
         Long baseVersionId = request.getBaseVersionId() == null ? artifact.getCurrentVersionId() : request.getBaseVersionId();
         assertBaseVersionCurrent(artifact, baseVersionId);
-        ArtifactVersionEntity baseVersion = baseVersionId == null ? null : artifactVersionMapper.selectById(baseVersionId);
+        ArtifactGitVersionEntity baseVersion = loadGitBaseVersion(artifact, baseVersionId);
         String documentType = detectDocumentType(baseVersion);
         CollabDocumentEntity existing = collabDocumentMapper.selectOne(new LambdaQueryWrapper<CollabDocumentEntity>()
             .eq(CollabDocumentEntity::getArtifactId, artifact.getId())
@@ -132,19 +129,33 @@ public class CollabDocumentService {
         }
     }
 
-    private String detectDocumentType(ArtifactVersionEntity baseVersion) {
+    private ArtifactGitVersionEntity loadGitBaseVersion(ArtifactEntity artifact, Long baseVersionId) {
+        if (baseVersionId == null) {
+            return null;
+        }
+        ArtifactGitVersionEntity version = artifactGitVersionMapper.selectById(baseVersionId);
+        if (version == null || !artifact.getId().equals(version.getArtifactId())) {
+            throw new BusinessException(AiDeliveryErrorCode.RESOURCE_NOT_FOUND, "Git产物版本不存在");
+        }
+        return version;
+    }
+
+    private String detectDocumentType(ArtifactGitVersionEntity baseVersion) {
         if (baseVersion == null) {
             return "TEXT";
         }
-        FileObjectEntity fileObject = fileObjectMapper.selectById(baseVersion.getFileObjectId());
-        String contentType = fileObject == null ? "" : String.valueOf(fileObject.getContentType()).toLowerCase(Locale.ROOT);
-        if (contentType.startsWith("text/") || contentType.contains("markdown")) {
-            return contentType.contains("markdown") ? "MARKDOWN" : "TEXT";
+        String filePath = String.valueOf(baseVersion.getFilePath()).toLowerCase(Locale.ROOT);
+        if (filePath.endsWith(".md") || filePath.endsWith(".markdown")) {
+            return "MARKDOWN";
         }
-        if (contentType.contains("json")) {
+        if (filePath.endsWith(".json")) {
             return "JSON";
         }
-        if (contentType.contains("xml") || contentType.contains("html") || contentType.contains("yaml")) {
+        if (filePath.endsWith(".txt")
+            || filePath.endsWith(".xml")
+            || filePath.endsWith(".html")
+            || filePath.endsWith(".yaml")
+            || filePath.endsWith(".yml")) {
             return "TEXT";
         }
         throw new BusinessException(AiDeliveryErrorCode.VALIDATION_FAILED, "仅文本类产物支持协同编辑");

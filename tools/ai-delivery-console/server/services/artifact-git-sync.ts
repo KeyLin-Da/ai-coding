@@ -44,21 +44,22 @@ export interface ArtifactGitSyncPlan {
 }
 
 export interface ArtifactGitSyncConfirmResult {
-  commitSha: string;
+  commitSha?: string;
   pushed: boolean;
   centerResult: unknown;
 }
 
-function parsePorcelainStatus(output: string): Array<{ status: string; path: string }> {
+function parsePorcelainStatus(output: string): Array<{ status: string; path: string; indexStatus: string; worktreeStatus: string }> {
   return output
     .split('\n')
     .map((line) => line.trimEnd())
     .filter(Boolean)
     .map((line) => {
-      const status = line.slice(0, 2).trim() || line.slice(0, 2);
+      const rawStatus = line.slice(0, 2);
+      const status = rawStatus.trim() || rawStatus;
       const rawPath = line.slice(3);
       const filePath = rawPath.includes(' -> ') ? rawPath.split(' -> ').pop() || rawPath : rawPath;
-      return { status, path: filePath.replace(/\\/g, '/') };
+      return { status, indexStatus: rawStatus[0] || ' ', worktreeStatus: rawStatus[1] || ' ', path: filePath.replace(/\\/g, '/') };
     });
 }
 
@@ -181,6 +182,22 @@ async function selectedDiff(repoPath: string, files: Array<{ path: string; statu
   return [staged, unstaged, ...untracked].filter(Boolean).join('\n');
 }
 
+async function controlledChangedFiles(
+  repoPath: string,
+  workflow: RequirementWorkflow
+): Promise<Array<{ path: string; status: string; indexStatus: string; worktreeStatus: string }>> {
+  const status = await runGit(repoPath, ['status', '--porcelain', '--untracked-files=all']).catch(() => '');
+  return parsePorcelainStatus(status)
+    .filter((item) => {
+      try {
+        assertControlledArtifactPath(workflow, item.path);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+}
+
 export async function buildArtifactGitSyncPlan(
   context: LocalRequestContext,
   workflow: RequirementWorkflow,
@@ -199,16 +216,7 @@ export async function buildArtifactGitSyncPlan(
     blockers.push('项目产物仓状态异常，请先处理后重试');
   }
 
-  const status = await runGit(repoPath, ['status', '--porcelain', '--untracked-files=all']).catch(() => '');
-  const changed = parsePorcelainStatus(status)
-    .filter((item) => {
-      try {
-        assertControlledArtifactPath(workflow, item.path);
-        return true;
-      } catch {
-        return false;
-      }
-    });
+  const changed = await controlledChangedFiles(repoPath, workflow);
   const files = await Promise.all(
     changed.map(async (item) => ({
       path: item.path,
@@ -273,7 +281,9 @@ export async function confirmArtifactGitSync(
   input: ArtifactGitSyncConfirmInput
 ): Promise<ArtifactGitSyncConfirmResult> {
   const files = [...new Set((input.files || []).map((file) => assertControlledArtifactPath(workflow, file)))];
-  if (!files.length) {
+  const inputSyncType = syncType(input);
+  const isEmptyReviewApproval = !files.length && inputSyncType === 'REVIEW_APPROVAL' && Boolean(input.review);
+  if (!files.length && !isEmptyReviewApproval) {
     throw new Error('请至少选择一个需要同步的产物文件');
   }
   const repoState = await inspectProjectRepository(context);
@@ -291,7 +301,44 @@ export async function confirmArtifactGitSync(
   const privateKeyPath = await privateKeyPathForCredential(context, credential);
   const gitOptions = { privateKeyPath };
 
-  await runGit(repoPath, ['add', '--', ...files], gitOptions);
+  if (isEmptyReviewApproval) {
+    await assertRemoteNotAdvanced(repoPath, project.repository?.defaultBranch || 'master', gitOptions);
+    const changed = await controlledChangedFiles(repoPath, workflow);
+    if (changed.length) {
+      throw new Error('当前仍有待同步产物文件，请刷新同步计划后选择文件再提交审核');
+    }
+    const centerResult = await centerRequest(context, '/api/ai-delivery/reviews', {
+      method: 'POST',
+      body: JSON.stringify({
+        requirementPk: requirementPk(workflow, input),
+        requirementId: workflow.requirementId,
+        stage: input.stage,
+        decision: input.review?.decision,
+        comment: input.review?.comment || '',
+        implementationStep: input.review?.implementationStep
+      })
+    });
+    return {
+      pushed: false,
+      centerResult
+    };
+  }
+
+  const currentChanged = await controlledChangedFiles(repoPath, workflow);
+  const currentChangedByPath = new Map(currentChanged.map((file) => [file.path, file]));
+  const currentChangedPathSet = new Set(currentChangedByPath.keys());
+  const staleFiles = files.filter((file) => !currentChangedPathSet.has(file));
+  if (staleFiles.length) {
+    throw new Error(`同步计划已过期，请返回上一步重新生成同步计划后重试：${staleFiles.join('、')}`);
+  }
+
+  const filesToAdd = files.filter((file) => {
+    const changed = currentChangedByPath.get(file);
+    return !(changed?.indexStatus === 'D' && changed.worktreeStatus === ' ');
+  });
+  if (filesToAdd.length) {
+    await runGit(repoPath, ['add', '--', ...filesToAdd], gitOptions);
+  }
   const diffCheck = await runGit(repoPath, ['diff', '--cached', '--quiet', '--', ...files], gitOptions)
     .then(() => true)
     .catch(() => false);
@@ -313,7 +360,7 @@ export async function confirmArtifactGitSync(
     body: JSON.stringify({
       requirementPk: requirementPk(workflow, input),
       stage: input.stage,
-      syncType: syncType(input),
+      syncType: inputSyncType,
       commitSha,
       baseCommitSha: repoState.headCommit,
       files: filePayload,

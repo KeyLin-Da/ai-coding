@@ -23,7 +23,12 @@ import { bootstrapProjectArtifactWorkspace } from './services/skill-sync';
 import { deleteTechDesignQuestionRecord, type DeleteTechDesignQuestionInput } from './services/tech-design-questions';
 import { buildBootstrapImportPlan, importBootstrapPlan, type BootstrapImportConfig } from './services/bootstrap-importer';
 import { listCenterRequirementWorkflows, loadCachedCenterRequirementWorkflow, loadCenterRequirementWorkflow, mergeRequirementWorkflow } from './services/requirement-workflow-view';
-import { assertRequirementWorkspaceWritable, reportRequirementWorkspaceState, scheduleRequirementWorkspaceStateReport } from './services/requirement-workspace-state';
+import {
+  assertRequirementCollaborationWritable,
+  assertRequirementWorkspaceWritable,
+  reportRequirementWorkspaceState,
+  scheduleRequirementWorkspaceStateReport
+} from './services/requirement-workspace-state';
 import {
   assertAllowedPrdSourceFile,
   deletePrdSourceFileSnapshot,
@@ -301,6 +306,13 @@ export function createRouter(workspaceRoot: string) {
 
   async function assertWritableWorkflow(context: LocalRequestContext, workflow: RequirementWorkflow): Promise<void> {
     await assertRequirementWorkspaceWritable(context, workflow);
+  }
+
+  async function assertCollaborationWritableWorkflow(context: LocalRequestContext, workflow: RequirementWorkflow): Promise<void> {
+    if (!workflow.id) {
+      throw new Error('缺少中心需求主键，无法检查需求协作占用');
+    }
+    await assertRequirementCollaborationWritable(context, workflow.id);
   }
 
   function requirementIdFromArtifactPath(filePath: string): string | undefined {
@@ -606,7 +618,7 @@ export function createRouter(workspaceRoot: string) {
             send(response, 404, { message: '需求不存在' });
             return;
           }
-          await assertWritableWorkflow(requestContext, workflow);
+          await assertCollaborationWritableWorkflow(requestContext, workflow);
           files.forEach(assertAllowedPrdSourceFile);
           const snapshots: PrdSourceFile[] = [];
           for (const file of files) {
@@ -618,7 +630,6 @@ export function createRouter(workspaceRoot: string) {
             prdSourceFiles: [...(workflow.prdSourceFiles || []), ...snapshots],
             sources: [...sources]
           });
-          await reportRequirementWorkspaceState(requestContext, workflow).catch(() => undefined);
           send(response, 200, { data: workflow });
         } finally {
           await lock.release();
@@ -639,9 +650,8 @@ export function createRouter(workspaceRoot: string) {
             send(response, 404, { message: '需求不存在' });
             return;
           }
-          await assertWritableWorkflow(requestContext, workflow);
+          await assertCollaborationWritableWorkflow(requestContext, workflow);
           workflow = await repository.save(await deletePrdSourceFileSnapshot(root, workflow, fileId));
-          await reportRequirementWorkspaceState(requestContext, workflow).catch(() => undefined);
           send(response, 200, { data: workflow });
         } finally {
           await lock.release();
@@ -666,7 +676,7 @@ export function createRouter(workspaceRoot: string) {
             send(response, 404, { message: '需求不存在' });
             return;
           }
-          await assertWritableWorkflow(requestContext, workflow);
+          await assertCollaborationWritableWorkflow(requestContext, workflow);
           files.forEach(assertAllowedPrdSourceFile);
           const snapshots: TechDesignSourceFile[] = [];
           for (const file of files) {
@@ -677,7 +687,6 @@ export function createRouter(workspaceRoot: string) {
             techDesignSourceFiles: [...(workflow.techDesignSourceFiles || []), ...snapshots]
           };
           workflow = await saveWithArtifacts(root, repository, nextWorkflow);
-          await reportRequirementWorkspaceState(requestContext, workflow).catch(() => undefined);
           send(response, 200, { data: workflow });
         } finally {
           await lock.release();
@@ -698,10 +707,9 @@ export function createRouter(workspaceRoot: string) {
             send(response, 404, { message: '需求不存在' });
             return;
           }
-          await assertWritableWorkflow(requestContext, workflow);
+          await assertCollaborationWritableWorkflow(requestContext, workflow);
           const nextWorkflow = await deleteTechDesignSourceFileSnapshot(root, workflow, fileId);
           workflow = await saveWithArtifacts(root, repository, nextWorkflow);
-          await reportRequirementWorkspaceState(requestContext, workflow).catch(() => undefined);
           send(response, 200, { data: workflow });
         } finally {
           await lock.release();

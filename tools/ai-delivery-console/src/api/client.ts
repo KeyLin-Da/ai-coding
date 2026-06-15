@@ -210,7 +210,7 @@ export interface ArtifactGitSyncConfirmInput {
 }
 
 export interface ArtifactGitSyncConfirmResult {
-  commitSha: string;
+  commitSha?: string;
   pushed: boolean;
   centerResult: unknown;
 }
