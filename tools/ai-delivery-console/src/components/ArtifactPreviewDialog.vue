@@ -76,7 +76,7 @@ const artifact = ref<ArtifactRef>();
 const content = ref('');
 const eyeCareStorageKey = 'ai-delivery-preview-eye-care';
 const minZoomPercent = 60;
-const maxZoomPercent = 200;
+const maxZoomPercent = 400;
 const defaultZoomPercent = 100;
 const zoomStepPercent = 10;
 const zoomPercent = ref(defaultZoomPercent);
@@ -121,7 +121,7 @@ const artifactUrl = computed(() => (artifact.value ? artifactReadUrl(artifact.va
 const isMarkdown = computed(() => artifact.value?.kind === 'markdown' || ['.md', '.markdown'].includes(extension.value));
 const isHtml = computed(() => artifact.value?.kind === 'html' || extension.value === '.html');
 const isPdf = computed(() => extension.value === '.pdf');
-const isImage = computed(() => ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'].includes(extension.value));
+const isImage = computed(() => artifact.value?.kind === 'image' || ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'].includes(extension.value));
 const zoomScale = computed(() => zoomPercent.value / 100);
 const zoomStageStyle = computed<Record<string, string>>(() => ({
   '--preview-zoom-scale': String(zoomScale.value),

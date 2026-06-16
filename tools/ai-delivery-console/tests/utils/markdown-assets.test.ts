@@ -4,7 +4,13 @@ import { artifactReadUrl, resolveMarkdownAssetPath, rewriteMarkdownImageSources 
 
 describe('markdown-assets', () => {
   beforeEach(() => {
-    setApiRuntimeConfig({ runnerBaseUrl: 'http://runner.example.com' });
+    setApiRuntimeConfig({
+      runnerBaseUrl: 'http://runner.example.com',
+      centerBaseUrl: 'http://center.example.com',
+      userId: '',
+      projectId: '',
+      clientSessionId: ''
+    });
   });
 
   it('按 Markdown 文件所在目录解析相对图片路径', () => {
@@ -34,5 +40,18 @@ describe('markdown-assets', () => {
 
     expect(rewriteMarkdownImageSources(html, 'docs/141846/prd/analysis.md')).toBe(html);
     expect(artifactReadUrl('docs/141846/prd/analysis.md')).toBe('http://runner.example.com/api/artifacts/read?path=docs%2F141846%2Fprd%2Fanalysis.md');
+  });
+
+  it('产物读取 URL 携带项目运行时上下文以支持图片标签直连', () => {
+    setApiRuntimeConfig({
+      centerBaseUrl: 'http://center.example.com',
+      userId: '1',
+      projectId: '5',
+      clientSessionId: '16'
+    });
+
+    expect(artifactReadUrl('docs/141846/technical-design/file/screenshot.png')).toBe(
+      'http://runner.example.com/api/artifacts/read?path=docs%2F141846%2Ftechnical-design%2Ffile%2Fscreenshot.png&projectId=5&clientSessionId=16&userId=1&centerBaseUrl=http%3A%2F%2Fcenter.example.com'
+    );
   });
 });

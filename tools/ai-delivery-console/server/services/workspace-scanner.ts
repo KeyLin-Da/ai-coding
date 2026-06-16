@@ -77,6 +77,9 @@ function artifactKindForFile(filePath: string): ArtifactRef['kind'] {
   if (ext === '.json') {
     return 'json';
   }
+  if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'].includes(ext)) {
+    return 'image';
+  }
   return 'text';
 }
 

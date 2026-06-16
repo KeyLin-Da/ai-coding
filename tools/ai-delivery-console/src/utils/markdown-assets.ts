@@ -1,4 +1,4 @@
-import { resolveRunnerApiUrl } from '@/api/runtime';
+import { getApiRuntimeConfig, resolveRunnerApiUrl } from '@/api/runtime';
 
 const externalAssetPattern = /^(?:[a-z][a-z0-9+.-]*:|\/\/|#)/i;
 
@@ -23,7 +23,23 @@ function normalizeWorkspacePath(filePath: string): string {
 }
 
 export function artifactReadUrl(filePath: string): string {
-  return resolveRunnerApiUrl(`/api/artifacts/read?path=${encodeURIComponent(filePath)}`);
+  const runtime = getApiRuntimeConfig();
+  const params = new URLSearchParams({ path: filePath });
+  if (runtime.projectId || runtime.clientSessionId || runtime.userId) {
+    if (runtime.projectId) {
+      params.set('projectId', runtime.projectId);
+    }
+    if (runtime.clientSessionId) {
+      params.set('clientSessionId', runtime.clientSessionId);
+    }
+    if (runtime.userId) {
+      params.set('userId', runtime.userId);
+    }
+    if (runtime.centerBaseUrl) {
+      params.set('centerBaseUrl', runtime.centerBaseUrl);
+    }
+  }
+  return resolveRunnerApiUrl(`/api/artifacts/read?${params.toString()}`);
 }
 
 export function resolveMarkdownAssetPath(markdownPath: string, src: string): string {

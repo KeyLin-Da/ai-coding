@@ -58,7 +58,7 @@ export interface ArtifactRef {
   stage: WorkflowStage;
   label: string;
   path: string;
-  kind: 'markdown' | 'html' | 'json' | 'directory' | 'text';
+  kind: 'markdown' | 'html' | 'json' | 'directory' | 'image' | 'text';
   exists: boolean;
   hash?: string;
   updatedAt?: string;

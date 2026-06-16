@@ -2,6 +2,8 @@ import { mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { nextTick } from 'vue';
 import ArtifactPreviewDialog from '../../src/components/ArtifactPreviewDialog.vue';
+import { setApiRuntimeConfig } from '../../src/api/runtime';
+import { apiClient } from '@/api/client';
 
 vi.mock('@/api/client', () => ({
   apiClient: {
@@ -28,6 +30,14 @@ describe('ArtifactPreviewDialog', () => {
 
   beforeEach(() => {
     mockLocalStorage();
+    setApiRuntimeConfig({
+      runnerBaseUrl: 'http://127.0.0.1:8718',
+      centerBaseUrl: 'http://127.0.0.1:8728',
+      userId: '',
+      projectId: '',
+      clientSessionId: ''
+    });
+    vi.clearAllMocks();
   });
 
   it('打开已生成 Markdown 文件并展示全屏预览内容', async () => {
@@ -116,5 +126,32 @@ describe('ArtifactPreviewDialog', () => {
     await nextTick();
 
     expect(wrapper.find('.zoom-percent').text()).toBe('100%');
+  });
+
+  it('打开图片产物时直接展示图片预览', async () => {
+    setApiRuntimeConfig({
+      centerBaseUrl: 'http://center.example.com',
+      userId: '1',
+      projectId: '5',
+      clientSessionId: '16'
+    });
+    const wrapper = mount(ArtifactPreviewDialog);
+
+    await (wrapper.vm as any).open({
+      id: 'technical-design-source-1',
+      stage: 'TECH_DESIGN',
+      label: '补充截图',
+      path: 'docs/141846/technical-design/file/screenshot.png',
+      kind: 'image',
+      exists: true
+    });
+    await nextTick();
+
+    const image = wrapper.find('.artifact-image-wrap img');
+    expect(image.exists()).toBe(true);
+    expect(image.attributes('src')).toBe(
+      'http://127.0.0.1:8718/api/artifacts/read?path=docs%2F141846%2Ftechnical-design%2Ffile%2Fscreenshot.png&projectId=5&clientSessionId=16&userId=1&centerBaseUrl=http%3A%2F%2Fcenter.example.com'
+    );
+    expect(apiClient.readArtifact).not.toHaveBeenCalled();
   });
 });
