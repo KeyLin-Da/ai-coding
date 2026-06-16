@@ -9,6 +9,14 @@ import type {
   ReviewInput,
   RunEvent,
   RunRecord,
+  TechDesignAnnotationCreateInput,
+  TechDesignAnnotationDeleteInput,
+  TechDesignAnnotationList,
+  TechDesignAnnotationStatusInput,
+  TechDesignVersion,
+  TechDesignVersionContent,
+  TechDesignVersionDiff,
+  TechDesignVersionDiffInput,
   WorkflowProject
 } from '@shared/workflow';
 import { createEmptyStages } from '@shared/workflow';
@@ -586,6 +594,59 @@ export const apiClient = {
   readArtifact(path: string) {
     return runnerRequest<{ artifact: { hash?: string; updatedAt?: string; currentVersionId?: string | number; versionId?: string | number }; content: string }>(
       `/api/ai-delivery/artifacts?path=${encodeURIComponent(path)}`
+    );
+  },
+  listTechDesignVersions(requirementId: string) {
+    return runnerRequest<{ versions: TechDesignVersion[] }>(`/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/tech-design-versions`);
+  },
+  readTechDesignVersion(requirementId: string, versionId: string) {
+    return runnerRequest<TechDesignVersionContent>(
+      `/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/tech-design-versions/${encodeURIComponent(versionId)}`
+    );
+  },
+  diffTechDesignVersions(requirementId: string, input: TechDesignVersionDiffInput) {
+    return runnerRequest<TechDesignVersionDiff>(`/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/tech-design-versions/diff`, {
+      method: 'POST',
+      body: JSON.stringify(input)
+    });
+  },
+  listTechDesignAnnotations(requirementId: string, versionId?: string) {
+    const suffix = versionId ? `?versionId=${encodeURIComponent(versionId)}` : '';
+    return runnerRequest<TechDesignAnnotationList>(
+      `/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/tech-design-annotations${suffix}`
+    );
+  },
+  createTechDesignAnnotation(requirementId: string, input: TechDesignAnnotationCreateInput & { expectedHash?: string }) {
+    return runnerRequest<TechDesignAnnotationList>(`/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/tech-design-annotations`, {
+      method: 'POST',
+      body: JSON.stringify(input)
+    });
+  },
+  updateTechDesignAnnotationStatus(requirementId: string, annotationId: string, input: TechDesignAnnotationStatusInput & { expectedHash?: string }) {
+    return runnerRequest<TechDesignAnnotationList>(
+      `/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/tech-design-annotations/${encodeURIComponent(annotationId)}/status`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input)
+      }
+    );
+  },
+  deleteTechDesignAnnotation(requirementId: string, annotationId: string, input: TechDesignAnnotationDeleteInput = {}) {
+    return runnerRequest<TechDesignAnnotationList>(
+      `/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/tech-design-annotations/${encodeURIComponent(annotationId)}/delete`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input)
+      }
+    );
+  },
+  rebuildTechDesignAnnotationSummary(requirementId: string) {
+    return runnerRequest<TechDesignAnnotationList>(
+      `/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/tech-design-annotations/rebuild-summary`,
+      {
+        method: 'POST',
+        body: JSON.stringify({})
+      }
     );
   },
   saveArtifact(path: string, content: string, expectedHash?: string, baseVersionId?: string | number) {

@@ -137,6 +137,109 @@ export interface PrdSourceFile {
 
 export type TechDesignSourceFile = PrdSourceFile;
 
+export type TechDesignInputLedgerEntryType = 'QUESTION' | 'SOURCE_FILE' | 'CLARIFICATION';
+
+export interface TechDesignInputLedgerEntry {
+  id: string;
+  type: TechDesignInputLedgerEntryType;
+  path?: string;
+  contentHash?: string;
+  consumedAt: string;
+  consumedRunId: string;
+}
+
+export interface TechDesignInputLedger {
+  version: 1;
+  entries: TechDesignInputLedgerEntry[];
+}
+
+export type TechDesignVersionSource = 'PUBLISHED' | 'DRAFT_SNAPSHOT' | 'CURRENT_DRAFT';
+
+export interface TechDesignVersion {
+  id: string;
+  source: TechDesignVersionSource;
+  label: string;
+  artifactPath: string;
+  contentHash?: string;
+  versionNo?: number;
+  commitSha?: string;
+  createdAt?: string;
+  createdBy?: string | number;
+  sourceRunId?: string | number;
+  readable: boolean;
+  unreadableReason?: string;
+}
+
+export interface TechDesignVersionContent {
+  version: TechDesignVersion;
+  content: string;
+}
+
+export interface TechDesignVersionDiffInput {
+  leftVersionId: string;
+  rightVersionId: string;
+}
+
+export interface TechDesignVersionDiff {
+  left: TechDesignVersion;
+  right: TechDesignVersion;
+  diff: string;
+  truncated: boolean;
+}
+
+export type TechDesignAnnotationStatus = 'OPEN' | 'RESOLVED' | 'CARRIED_FORWARD' | 'STALE';
+
+export interface TechDesignAnnotationAnchor {
+  plainStart: number;
+  plainEnd: number;
+  prefixText: string;
+  suffixText: string;
+  headingPath: string[];
+  occurrence: number;
+}
+
+export interface TechDesignAnnotation {
+  id: string;
+  requirementId: string;
+  artifactPath: string;
+  versionId: string;
+  versionNo?: number;
+  versionSource: TechDesignVersionSource;
+  contentHash: string;
+  selectedText: string;
+  anchor: TechDesignAnnotationAnchor;
+  comment: string;
+  status: TechDesignAnnotationStatus;
+  includeInNextGeneration: boolean;
+  consumedAt?: string;
+  consumedRunId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TechDesignAnnotationCreateInput {
+  versionId: string;
+  selectedText: string;
+  anchor: TechDesignAnnotationAnchor;
+  comment: string;
+  includeInNextGeneration?: boolean;
+}
+
+export interface TechDesignAnnotationStatusInput {
+  status?: TechDesignAnnotationStatus;
+  includeInNextGeneration?: boolean;
+}
+
+export interface TechDesignAnnotationDeleteInput {
+  expectedHash?: string;
+}
+
+export interface TechDesignAnnotationList {
+  annotations: TechDesignAnnotation[];
+  hash: string;
+  summaryPath: string;
+}
+
 export interface WorkflowProject {
   name: string;
   path: string;
@@ -265,6 +368,7 @@ export interface RequirementWorkflow {
   prdClarification?: string;
   techDesignDocument?: string;
   techDesignClarification?: string;
+  techDesignConsumedQuestionPaths?: string[];
   prdSourceFiles?: PrdSourceFile[];
   techDesignSourceFiles?: TechDesignSourceFile[];
   sources: string[];
@@ -294,6 +398,7 @@ export interface RequirementInput {
   prdClarification?: string;
   techDesignDocument?: string;
   techDesignClarification?: string;
+  techDesignConsumedQuestionPaths?: string[];
   techDesignSourceFiles?: TechDesignSourceFile[];
   sources?: string[];
 }

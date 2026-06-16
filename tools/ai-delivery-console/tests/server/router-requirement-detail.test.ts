@@ -4,7 +4,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { applyPrdClarificationRun, createRouter } from '../../server/router';
+import { applyPrdClarificationRun, consumeTechDesignInputsAfterRun, createRouter } from '../../server/router';
+import {
+  createTechDesignAnnotation,
+  listTechDesignAnnotations,
+  techDesignAnnotationSummaryPath
+} from '../../server/services/tech-design-annotations';
+import { readTechDesignInputLedger, techDesignInputLedgerPath } from '../../server/services/tech-design-input-ledger';
 import type { RequirementWorkflow, RunRecord } from '../../shared/workflow';
 import { createEmptyStages } from '../../shared/workflow';
 
@@ -58,6 +64,113 @@ function centerResponse(data: unknown): Response {
     status: 200,
     json: async () => ({ data })
   } as Response;
+}
+
+async function prepareTechDesign(root: string): Promise<void> {
+  const filePath = path.join(root, 'docs', '172014', 'technical-design', 'design_review.md');
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, '# 技术方案\n\n需要补充缓存策略。', 'utf8');
+}
+
+function annotationInput() {
+  return {
+    versionId: 'current',
+    selectedText: '需要补充缓存策略',
+    comment: '这里要说明 Redis key 和过期时间。',
+    includeInNextGeneration: true,
+    anchor: {
+      plainStart: 7,
+      plainEnd: 15,
+      prefixText: '技术方案',
+      suffixText: '。',
+      headingPath: ['技术方案'],
+      occurrence: 1
+    }
+  };
+}
+
+function techDesignConsumptionWorkflow(): RequirementWorkflow {
+  const now = new Date().toISOString();
+  const stages = createEmptyStages();
+  return {
+    requirementId: '172014',
+    title: '定位菜单',
+    sources: [],
+    currentStage: 'TECH_DESIGN',
+    status: 'IN_PROGRESS',
+    createdAt: now,
+    updatedAt: now,
+    stages,
+    artifacts: [
+      {
+        id: 'technical-design',
+        stage: 'TECH_DESIGN',
+        label: '技术方案',
+        path: 'docs/172014/technical-design/design_review.md',
+        kind: 'markdown',
+        exists: true
+      },
+      {
+        id: 'technical-design-annotations',
+        stage: 'TECH_DESIGN',
+        label: '技术方案批注记录',
+        path: 'docs/172014/technical-design/annotations/comments.md',
+        kind: 'markdown',
+        exists: true
+      },
+      {
+        id: 'technical-design-question-old',
+        stage: 'TECH_DESIGN',
+        label: '已消费答疑',
+        path: 'docs/172014/technical-design/questions/20260604-173000-question.md',
+        kind: 'markdown',
+        exists: true
+      },
+      {
+        id: 'technical-design-question-new',
+        stage: 'TECH_DESIGN',
+        label: '新增答疑',
+        path: 'docs/172014/technical-design/questions/20260605-101500-question.md',
+        kind: 'markdown',
+        exists: true
+      }
+    ],
+    techDesignConsumedQuestionPaths: ['docs/172014/technical-design/questions/20260604-173000-question.md'],
+    techDesignSourceFiles: [
+      {
+        id: 'file-1',
+        name: '补充材料.md',
+        path: 'docs/172014/technical-design/file/file-1.md',
+        size: 100,
+        uploadedAt: now
+      }
+    ],
+    techDesignClarification: '补充异常场景',
+    runs: [],
+    reviews: [],
+    issues: []
+  };
+}
+
+function designGenerateRun(status: RunRecord['status']): RunRecord {
+  const now = new Date().toISOString();
+  return {
+    id: `run-design-${status.toLowerCase()}`,
+    requirementId: '172014',
+    actionType: 'DESIGN_GENERATE',
+    stage: 'TECH_DESIGN',
+    status,
+    startedAt: now,
+    finishedAt: now,
+    params: {
+      clarification: '补充异常场景',
+      sourceFiles: [
+        'docs/172014/technical-design/questions/20260604-173000-question.md',
+        'docs/172014/technical-design/questions/20260605-101500-question.md',
+        'docs/172014/technical-design/file/file-1.md'
+      ]
+    }
+  };
 }
 
 describe('router requirement detail', () => {
@@ -314,5 +427,45 @@ describe('router requirement detail', () => {
     expect(updated.stages.PRD.runId).toBe('run-prd-clarify');
     expect(updated.stages.TECH_DESIGN.status).toBe('APPROVED');
     expect(updated.artifacts.map((artifact) => artifact.path)).toContain('docs/172014/technical-design/design_review.md');
+  });
+
+  it('技术方案生成成功后消费增量输入并清空当前补充材料和说明', async () => {
+    const workspaceRoot = await tmpDir('ai-delivery-tech-design-consume-');
+    await prepareTechDesign(workspaceRoot);
+    await createTechDesignAnnotation(workspaceRoot, '172014', annotationInput());
+    const workflow = techDesignConsumptionWorkflow();
+
+    const updated = await consumeTechDesignInputsAfterRun(workspaceRoot, workflow, designGenerateRun('SUCCEEDED'));
+    const annotations = await listTechDesignAnnotations(workspaceRoot, '172014');
+    const ledger = await readTechDesignInputLedger(workspaceRoot, '172014');
+    const rawLedger = await fs.readFile(path.join(workspaceRoot, techDesignInputLedgerPath('172014')), 'utf8');
+
+    expect(updated.techDesignClarification).toBe('');
+    expect(updated.techDesignSourceFiles).toEqual([]);
+    expect(updated.techDesignConsumedQuestionPaths).toEqual([
+      'docs/172014/technical-design/questions/20260604-173000-question.md',
+      'docs/172014/technical-design/questions/20260605-101500-question.md'
+    ]);
+    expect(ledger.entries.map((entry) => entry.type)).toEqual(expect.arrayContaining(['QUESTION', 'SOURCE_FILE', 'CLARIFICATION']));
+    expect(rawLedger).toContain('docs/172014/technical-design/questions/20260605-101500-question.md');
+    expect(annotations.annotations[0].consumedRunId).toBe('run-design-succeeded');
+    await expect(fs.readFile(path.join(workspaceRoot, techDesignAnnotationSummaryPath('172014')), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('技术方案生成失败时保留待消费输入和批注摘要', async () => {
+    const workspaceRoot = await tmpDir('ai-delivery-tech-design-failed-');
+    await prepareTechDesign(workspaceRoot);
+    await createTechDesignAnnotation(workspaceRoot, '172014', annotationInput());
+    const workflow = techDesignConsumptionWorkflow();
+
+    const updated = await consumeTechDesignInputsAfterRun(workspaceRoot, workflow, designGenerateRun('FAILED'));
+    const annotations = await listTechDesignAnnotations(workspaceRoot, '172014');
+    const summary = await fs.readFile(path.join(workspaceRoot, techDesignAnnotationSummaryPath('172014')), 'utf8');
+
+    expect(updated.techDesignClarification).toBe('补充异常场景');
+    expect(updated.techDesignSourceFiles).toHaveLength(1);
+    expect(updated.techDesignConsumedQuestionPaths).toEqual(['docs/172014/technical-design/questions/20260604-173000-question.md']);
+    expect(annotations.annotations[0].consumedAt).toBeUndefined();
+    expect(summary).toContain('Redis key');
   });
 });

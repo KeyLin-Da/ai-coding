@@ -21,6 +21,20 @@ import { generateLocalGitCredential, regenerateLocalGitCredential, type LocalGit
 import { cloneProjectRepository, commitAndPushProjectRepository, inspectProjectRepository, readProjectRepositoryStatus, resolveProjectRepoPath, syncProjectRepository } from './services/project-repository';
 import { bootstrapProjectArtifactWorkspace } from './services/skill-sync';
 import { deleteTechDesignQuestionRecord, type DeleteTechDesignQuestionInput } from './services/tech-design-questions';
+import {
+  createTechDesignAnnotation,
+  consumeTechDesignAnnotations,
+  deleteTechDesignAnnotation,
+  listTechDesignAnnotations,
+  rebuildTechDesignAnnotationSummary,
+  updateTechDesignAnnotationStatus
+} from './services/tech-design-annotations';
+import {
+  consumeTechDesignInputLedger,
+  consumedQuestionPathsFromLedger,
+  mergeTechDesignInputLedgerIntoWorkflow
+} from './services/tech-design-input-ledger';
+import { createTechDesignDraftSnapshot, diffTechDesignVersions, listTechDesignVersions, readTechDesignVersionContent } from './services/tech-design-versions';
 import { buildBootstrapImportPlan, importBootstrapPlan, type BootstrapImportConfig } from './services/bootstrap-importer';
 import { listCenterRequirementWorkflows, loadCachedCenterRequirementWorkflow, loadCenterRequirementWorkflow, mergeRequirementWorkflow } from './services/requirement-workflow-view';
 import {
@@ -78,6 +92,70 @@ function designDocumentPath(workflow: RequirementWorkflow, params: Record<string
   }
   const prdArtifactPath = workflow.artifacts.find((artifact) => artifact.stage === 'PRD' && artifact.exists && artifact.kind !== 'directory')?.path;
   return prdArtifactPath || workflow.stages.PRD.artifactPath || `docs/${workflow.requirementId}/prd/analysis.md`;
+}
+
+function normalizeArtifactPath(filePath = ''): string {
+  return filePath.trim().replace(/\\/g, '/');
+}
+
+function techDesignQuestionPathPrefix(requirementId: string): string {
+  return `docs/${requirementId}/technical-design/questions/`;
+}
+
+function legacyTechDesignQuestionPath(requirementId: string): string {
+  return `docs/${requirementId}/technical-design/questions.md`;
+}
+
+function isTechDesignQuestionPath(requirementId: string, filePath: string): boolean {
+  const normalized = normalizeArtifactPath(filePath);
+  return normalized === legacyTechDesignQuestionPath(requirementId) || normalized.startsWith(techDesignQuestionPathPrefix(requirementId));
+}
+
+function pendingTechDesignQuestionPaths(workflow: RequirementWorkflow, params: Record<string, unknown>): string[] {
+  const requirementId = workflow.requirementId;
+  const consumed = new Set((workflow.techDesignConsumedQuestionPaths || []).map(normalizeArtifactPath));
+  const paths = new Set<string>();
+  for (const artifact of workflow.artifacts) {
+    const normalized = normalizeArtifactPath(artifact.path);
+    if (artifact.exists && artifact.kind !== 'directory' && isTechDesignQuestionPath(requirementId, normalized) && !consumed.has(normalized)) {
+      paths.add(normalized);
+    }
+  }
+  const sourceFiles = Array.isArray(params.sourceFiles) ? params.sourceFiles : [];
+  for (const source of sourceFiles) {
+    if (typeof source !== 'string') {
+      continue;
+    }
+    const normalized = normalizeArtifactPath(source);
+    if (isTechDesignQuestionPath(requirementId, normalized) && !consumed.has(normalized)) {
+      paths.add(normalized);
+    }
+  }
+  return [...paths].sort((left, right) => left.localeCompare(right));
+}
+
+export async function consumeTechDesignInputsAfterRun(root: string, workflow: RequirementWorkflow, run: RunRecord): Promise<RequirementWorkflow> {
+  if (run.actionType !== 'DESIGN_GENERATE' || !['SUCCEEDED', 'COMPLETED'].includes(run.status)) {
+    return workflow;
+  }
+  const params = run.params || {};
+  const consumedQuestionPaths = pendingTechDesignQuestionPaths(workflow, params);
+  const consumedSourceFilePaths = (workflow.techDesignSourceFiles || []).map((file) => file.path).filter(Boolean);
+  const clarification = typeof params.clarification === 'string' ? params.clarification : workflow.techDesignClarification || '';
+  const ledger = await consumeTechDesignInputLedger(root, workflow.requirementId, {
+    questionPaths: consumedQuestionPaths,
+    sourceFilePaths: consumedSourceFilePaths,
+    clarification,
+    runId: run.id
+  });
+  await consumeTechDesignAnnotations(root, workflow.requirementId, run.id);
+  const ledgerQuestionPaths = consumedQuestionPathsFromLedger(ledger);
+  return {
+    ...workflow,
+    techDesignClarification: '',
+    techDesignSourceFiles: [],
+    techDesignConsumedQuestionPaths: [...new Set([...(workflow.techDesignConsumedQuestionPaths || []), ...ledgerQuestionPaths])]
+  };
 }
 
 function implementationStatusForRun(run: RunRecord): WorkflowStatus {
@@ -246,7 +324,7 @@ export function createRouter(workspaceRoot: string) {
     const workflow = centerWorkflow ? mergeRequirementWorkflow(centerWorkflow, localWorkflow) : localWorkflow;
     return {
       ...store,
-      workflow
+      workflow: workflow ? await mergeTechDesignInputLedgerIntoWorkflow(store.root, workflow) : workflow
     };
   }
 
@@ -463,7 +541,7 @@ export function createRouter(workspaceRoot: string) {
           const centerWorkflows = await listCenterRequirementWorkflows(requestContext);
           workflows = await Promise.all(centerWorkflows.map(async (centerWorkflow) => {
             const localWorkflow = await repository.load(centerWorkflow.requirementId);
-            const merged = mergeRequirementWorkflow(centerWorkflow, localWorkflow);
+            const merged = await mergeTechDesignInputLedgerIntoWorkflow(root, mergeRequirementWorkflow(centerWorkflow, localWorkflow));
             if (!localWorkflow) {
               return merged;
             }
@@ -471,7 +549,7 @@ export function createRouter(workspaceRoot: string) {
             return saveWithArtifacts(root, repository, refreshed.workflow);
           }));
         } catch {
-          workflows = await repository.list();
+          workflows = await Promise.all((await repository.list()).map((workflow) => mergeTechDesignInputLedgerIntoWorkflow(root, workflow)));
         }
         send(response, 200, { data: workflows });
         return;
@@ -500,6 +578,7 @@ export function createRouter(workspaceRoot: string) {
           send(response, 404, { message: '需求不存在' });
           return;
         }
+        workflow = await mergeTechDesignInputLedgerIntoWorkflow(store.root, workflow);
         const refreshed = await refreshTerminalRunStatuses(store.root, workflow);
         workflow = refreshed.workflow;
         if (refreshed.changed) {
@@ -741,6 +820,151 @@ export function createRouter(workspaceRoot: string) {
         return;
       }
 
+      const techDesignVersionDiffMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/tech-design-versions\/diff$/);
+      if (request.method === 'POST' && techDesignVersionDiffMatch) {
+        const requirementId = techDesignVersionDiffMatch[1];
+        const { root, workflow } = await loadMergedWorkflow(requestContext, requirementId, true);
+        if (!workflow) {
+          send(response, 404, { message: '需求不存在' });
+          return;
+        }
+        const input = await parseBody<{ leftVersionId: string; rightVersionId: string }>(request);
+        send(response, 200, { data: await diffTechDesignVersions(root, requirementId, input) });
+        return;
+      }
+
+      const techDesignVersionContentMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/tech-design-versions\/([^/]+)$/);
+      if (request.method === 'GET' && techDesignVersionContentMatch) {
+        const requirementId = techDesignVersionContentMatch[1];
+        const versionId = decodeURIComponent(techDesignVersionContentMatch[2]);
+        const { root, workflow } = await loadMergedWorkflow(requestContext, requirementId, true);
+        if (!workflow) {
+          send(response, 404, { message: '需求不存在' });
+          return;
+        }
+        send(response, 200, { data: await readTechDesignVersionContent(root, requirementId, versionId) });
+        return;
+      }
+
+      const techDesignVersionsMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/tech-design-versions$/);
+      if (request.method === 'GET' && techDesignVersionsMatch) {
+        const requirementId = techDesignVersionsMatch[1];
+        const { root, workflow } = await loadMergedWorkflow(requestContext, requirementId, true);
+        if (!workflow) {
+          send(response, 404, { message: '需求不存在' });
+          return;
+        }
+        send(response, 200, { data: { versions: await listTechDesignVersions(root, requirementId) } });
+        return;
+      }
+
+      const techDesignAnnotationStatusMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/tech-design-annotations\/([^/]+)\/status$/);
+      if (request.method === 'POST' && techDesignAnnotationStatusMatch) {
+        const requirementId = techDesignAnnotationStatusMatch[1];
+        const annotationId = decodeURIComponent(techDesignAnnotationStatusMatch[2]);
+        const input = await parseBody<{ status?: any; includeInNextGeneration?: boolean; expectedHash?: string }>(request);
+        const { root, repository } = await resolveWorkflowStore(requestContext, true);
+        const lock = new WorkflowLock(root, requirementId);
+        await lock.acquire();
+        try {
+          let workflow = (await loadMergedWorkflow(requestContext, requirementId, true)).workflow;
+          if (!workflow) {
+            send(response, 404, { message: '需求不存在' });
+            return;
+          }
+          await assertWritableWorkflow(requestContext, workflow);
+          const result = await updateTechDesignAnnotationStatus(root, requirementId, annotationId, input);
+          workflow = await saveWithArtifacts(root, repository, workflow);
+          await reportRequirementWorkspaceState(requestContext, workflow).catch(() => undefined);
+          send(response, 200, { data: result });
+        } finally {
+          await lock.release();
+        }
+        return;
+      }
+
+      const techDesignAnnotationDeleteMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/tech-design-annotations\/([^/]+)\/delete$/);
+      if (request.method === 'POST' && techDesignAnnotationDeleteMatch) {
+        const requirementId = techDesignAnnotationDeleteMatch[1];
+        const annotationId = decodeURIComponent(techDesignAnnotationDeleteMatch[2]);
+        const input = await parseBody<{ expectedHash?: string }>(request);
+        const { root, repository } = await resolveWorkflowStore(requestContext, true);
+        const lock = new WorkflowLock(root, requirementId);
+        await lock.acquire();
+        try {
+          let workflow = (await loadMergedWorkflow(requestContext, requirementId, true)).workflow;
+          if (!workflow) {
+            send(response, 404, { message: '需求不存在' });
+            return;
+          }
+          await assertWritableWorkflow(requestContext, workflow);
+          const result = await deleteTechDesignAnnotation(root, requirementId, annotationId, input);
+          workflow = await saveWithArtifacts(root, repository, workflow);
+          await reportRequirementWorkspaceState(requestContext, workflow).catch(() => undefined);
+          send(response, 200, { data: result });
+        } finally {
+          await lock.release();
+        }
+        return;
+      }
+
+      const techDesignAnnotationRebuildMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/tech-design-annotations\/rebuild-summary$/);
+      if (request.method === 'POST' && techDesignAnnotationRebuildMatch) {
+        const requirementId = techDesignAnnotationRebuildMatch[1];
+        const { root, repository } = await resolveWorkflowStore(requestContext, true);
+        const lock = new WorkflowLock(root, requirementId);
+        await lock.acquire();
+        try {
+          let workflow = (await loadMergedWorkflow(requestContext, requirementId, true)).workflow;
+          if (!workflow) {
+            send(response, 404, { message: '需求不存在' });
+            return;
+          }
+          await assertWritableWorkflow(requestContext, workflow);
+          const result = await rebuildTechDesignAnnotationSummary(root, requirementId);
+          workflow = await saveWithArtifacts(root, repository, workflow);
+          await reportRequirementWorkspaceState(requestContext, workflow).catch(() => undefined);
+          send(response, 200, { data: result });
+        } finally {
+          await lock.release();
+        }
+        return;
+      }
+
+      const techDesignAnnotationsMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/tech-design-annotations$/);
+      if (request.method === 'GET' && techDesignAnnotationsMatch) {
+        const requirementId = techDesignAnnotationsMatch[1];
+        const { root, workflow } = await loadMergedWorkflow(requestContext, requirementId, true);
+        if (!workflow) {
+          send(response, 404, { message: '需求不存在' });
+          return;
+        }
+        send(response, 200, { data: await listTechDesignAnnotations(root, requirementId) });
+        return;
+      }
+      if (request.method === 'POST' && techDesignAnnotationsMatch) {
+        const requirementId = techDesignAnnotationsMatch[1];
+        const input = await parseBody<any>(request);
+        const { root, repository } = await resolveWorkflowStore(requestContext, true);
+        const lock = new WorkflowLock(root, requirementId);
+        await lock.acquire();
+        try {
+          let workflow = (await loadMergedWorkflow(requestContext, requirementId, true)).workflow;
+          if (!workflow) {
+            send(response, 404, { message: '需求不存在' });
+            return;
+          }
+          await assertWritableWorkflow(requestContext, workflow);
+          const result = await createTechDesignAnnotation(root, requirementId, input);
+          workflow = await saveWithArtifacts(root, repository, workflow);
+          await reportRequirementWorkspaceState(requestContext, workflow).catch(() => undefined);
+          send(response, 200, { data: result });
+        } finally {
+          await lock.release();
+        }
+        return;
+      }
+
       const actionMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/actions$/);
       if (request.method === 'POST' && actionMatch) {
         const requirementId = actionMatch[1];
@@ -781,6 +1005,7 @@ export function createRouter(workspaceRoot: string) {
           if (action.actionType === 'DESIGN_GENERATE') {
             const params = action.params || {};
             const documentPath = designDocumentPath(workflow, params);
+            await createTechDesignDraftSnapshot(root, workflow.requirementId).catch(() => undefined);
             workflow = {
               ...workflow,
               techDesignDocument: documentPath,
@@ -834,6 +1059,7 @@ export function createRouter(workspaceRoot: string) {
           }
           workflow.runs.unshift(run);
           workflow = applyImplementationRun(workflow, run);
+          workflow = await consumeTechDesignInputsAfterRun(root, workflow, run);
           if (action.actionType === 'REFRESH_ARTIFACTS') {
             workflow.artifacts = await scanRequirementArtifacts(
               root,

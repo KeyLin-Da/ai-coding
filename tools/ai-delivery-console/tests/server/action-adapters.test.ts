@@ -225,6 +225,100 @@ describe('action-adapters', () => {
     );
   });
 
+  it('普通需求再次生成技术方案命令时将批注摘要放在答疑记录之前', () => {
+    const item = {
+      ...workflow(),
+      artifacts: [
+        {
+          id: 'technical-design',
+          stage: 'TECH_DESIGN' as const,
+          label: '技术方案评审文档',
+          path: 'docs/172014/technical-design/design_review.md',
+          kind: 'markdown' as const,
+          exists: true
+        },
+        {
+          id: 'technical-design-annotations',
+          stage: 'TECH_DESIGN' as const,
+          label: '技术方案批注记录',
+          path: 'docs/172014/technical-design/annotations/comments.md',
+          kind: 'markdown' as const,
+          exists: true
+        },
+        {
+          id: 'technical-design-questions',
+          stage: 'TECH_DESIGN' as const,
+          label: '技术方案答疑记录',
+          path: 'docs/172014/technical-design/questions.md',
+          kind: 'markdown' as const,
+          exists: true
+        }
+      ],
+      techDesignSourceFiles: [
+        {
+          id: 'source-1',
+          name: '补充图.png',
+          path: 'docs/172014/technical-design/files/source-1.png',
+          size: 100,
+          uploadedAt: new Date().toISOString()
+        }
+      ]
+    };
+
+    expect(internalForTests.buildSkillCommand(item, { actionType: 'DESIGN_GENERATE', params: {} })).toBe(
+      '/coding-design d=docs/172014/prd/analysis.md,docs/172014/technical-design/design_review.md,docs/172014/technical-design/annotations/comments.md,docs/172014/technical-design/questions.md,docs/172014/technical-design/files/source-1.png r=172014'
+    );
+  });
+
+  it('普通需求再次生成技术方案命令时过滤已消费答疑记录', () => {
+    const item = {
+      ...workflow(),
+      techDesignConsumedQuestionPaths: ['docs/172014/technical-design/questions/20260604-173000-question.md'],
+      artifacts: [
+        {
+          id: 'technical-design',
+          stage: 'TECH_DESIGN' as const,
+          label: '技术方案评审文档',
+          path: 'docs/172014/technical-design/design_review.md',
+          kind: 'markdown' as const,
+          exists: true
+        },
+        {
+          id: 'technical-design-question-1',
+          stage: 'TECH_DESIGN' as const,
+          label: '已消费答疑',
+          path: 'docs/172014/technical-design/questions/20260604-173000-question.md',
+          kind: 'markdown' as const,
+          exists: true
+        },
+        {
+          id: 'technical-design-question-2',
+          stage: 'TECH_DESIGN' as const,
+          label: '新增答疑',
+          path: 'docs/172014/technical-design/questions/20260605-101500-question.md',
+          kind: 'markdown' as const,
+          exists: true
+        }
+      ]
+    };
+
+    const command = internalForTests.buildSkillCommand(item, {
+      actionType: 'DESIGN_GENERATE',
+      params: {
+        sourceFiles: [
+          'docs/172014/technical-design/questions/20260604-173000-question.md',
+          'docs/172014/technical-design/questions/20260605-101500-question.md',
+          'docs/172014/technical-design/files/source-1.png'
+        ]
+      }
+    });
+
+    expect(command).toBe(
+      '/coding-design d=docs/172014/prd/analysis.md,docs/172014/technical-design/design_review.md,docs/172014/technical-design/questions/20260605-101500-question.md,docs/172014/technical-design/files/source-1.png r=172014'
+    );
+    expect(command).not.toContain('20260604-173000-question.md');
+  });
+
   it('生成技术方案答疑命令并默认使用独立输出路径', () => {
     const item = {
       ...workflow(),
@@ -345,6 +439,59 @@ describe('action-adapters', () => {
 
     expect(command).toBe(
       '/coding-design d=邀请好友积分异常,后台配置为 1，实际奖励 10,docs/172014/technical-design/design_review.md,docs/172014/technical-design/files/source-1.png r=172014'
+    );
+    expect(command).not.toContain('/prd/');
+  });
+
+  it('缺陷再次生成技术方案命令时将批注摘要放在答疑记录之前', () => {
+    const item = {
+      ...workflow(),
+      title: '邀请好友积分异常',
+      requirementType: 'DEFECT' as const,
+      currentStage: 'TECH_DESIGN' as const,
+      stages: createEmptyStages('DEFECT'),
+      artifacts: [
+        {
+          id: 'technical-design',
+          stage: 'TECH_DESIGN' as const,
+          label: '技术方案评审文档',
+          path: 'docs/172014/technical-design/design_review.md',
+          kind: 'markdown' as const,
+          exists: true
+        },
+        {
+          id: 'technical-design-annotations',
+          stage: 'TECH_DESIGN' as const,
+          label: '技术方案批注记录',
+          path: 'docs/172014/technical-design/annotations/comments.md',
+          kind: 'markdown' as const,
+          exists: true
+        },
+        {
+          id: 'technical-design-questions',
+          stage: 'TECH_DESIGN' as const,
+          label: '技术方案答疑记录',
+          path: 'docs/172014/technical-design/questions.md',
+          kind: 'markdown' as const,
+          exists: true
+        }
+      ],
+      techDesignClarification: '后台配置为 1，实际奖励 10',
+      techDesignSourceFiles: [
+        {
+          id: 'source-1',
+          name: '配置截图.png',
+          path: 'docs/172014/technical-design/files/source-1.png',
+          size: 100,
+          uploadedAt: new Date().toISOString()
+        }
+      ]
+    };
+
+    const command = internalForTests.buildSkillCommand(item, { actionType: 'DESIGN_GENERATE', params: {} });
+
+    expect(command).toBe(
+      '/coding-design d=邀请好友积分异常,后台配置为 1，实际奖励 10,docs/172014/technical-design/design_review.md,docs/172014/technical-design/annotations/comments.md,docs/172014/technical-design/questions.md,docs/172014/technical-design/files/source-1.png r=172014'
     );
     expect(command).not.toContain('/prd/');
   });

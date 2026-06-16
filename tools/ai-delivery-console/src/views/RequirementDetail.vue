@@ -106,7 +106,7 @@
                   <div class="design-input-heading">
                     <div>
                       <strong>补充材料</strong>
-                      <p class="muted">支持 PDF、图片、Markdown；上传后作为技术方案生成输入。</p>
+                      <p class="muted">支持 PDF、图片、Markdown；仅作为下一次技术方案生成的增量输入。</p>
                     </div>
                     <input
                       ref="techDesignFileInput"
@@ -129,17 +129,17 @@
                       <el-button type="danger" link :icon="Delete" @click="deleteTechDesignFile(file.id)">删除</el-button>
                     </div>
                   </div>
-                  <div v-if="techDesignQuestionArtifacts.length" class="design-question-context">
-                    <span class="context-badge">答疑记录</span>
-                    <span>{{ techDesignQuestionContextText }}</span>
-                    <small>自动纳入生成上下文</small>
+                  <div v-if="pendingTechDesignQuestionContextPaths.length" class="design-question-context">
+                    <span class="context-badge">新增答疑</span>
+                    <span>{{ pendingTechDesignQuestionContextText }}</span>
+                    <small>将纳入下一次生成</small>
                   </div>
                 </div>
                 <div class="design-input-block">
                   <div class="design-input-heading">
                     <div>
                       <strong>补充说明</strong>
-                      <p class="muted">用于补充约束、评审意见或二次修改说明。</p>
+                      <p class="muted">用于补充约束、评审意见或二次修改说明；成功生成后会清空。</p>
                     </div>
                   </div>
                   <el-input
@@ -153,7 +153,7 @@
                   />
                 </div>
                 <div class="design-run-footer">
-                  <span class="muted">生成时会读取补充材料和补充说明。</span>
+                  <span class="muted">仅新增答疑、批注、补充材料和补充说明会纳入下一次生成，成功生成后自动清空当前增量输入。</span>
                   <div class="design-run-actions">
                     <el-button class="design-question-entry-button" :icon="ChatLineSquare" @click="openDesignQuestionDialog">
                       {{ techDesignQuestionButtonText }}
@@ -651,17 +651,23 @@ const techDesignQuestionContextPaths = computed(() => {
   }
   return [...paths].sort((left, right) => left.localeCompare(right));
 });
-const techDesignQuestionContextText = computed(() => {
-  if (!techDesignQuestionContextPaths.value.length) {
+const consumedTechDesignQuestionPathSet = computed(() => {
+  return new Set((workflow.value?.techDesignConsumedQuestionPaths || []).map((path) => normalizeTechDesignQuestionPath(path)).filter(Boolean));
+});
+const pendingTechDesignQuestionContextPaths = computed(() => {
+  return techDesignQuestionContextPaths.value.filter((path) => !consumedTechDesignQuestionPathSet.value.has(normalizeTechDesignQuestionPath(path)));
+});
+const pendingTechDesignQuestionContextText = computed(() => {
+  if (!pendingTechDesignQuestionContextPaths.value.length) {
     return '';
   }
-  if (techDesignQuestionContextPaths.value.length === 1) {
-    return techDesignQuestionContextPaths.value[0];
+  if (pendingTechDesignQuestionContextPaths.value.length === 1) {
+    return pendingTechDesignQuestionContextPaths.value[0];
   }
-  return `${techDesignQuestionContextPaths.value.length} 条答疑记录`;
+  return `${pendingTechDesignQuestionContextPaths.value.length} 条新增答疑记录`;
 });
 const techDesignGenerationSourcePaths = computed(() => {
-  const paths = [...techDesignQuestionContextPaths.value, ...techDesignSourceFiles.value.map((file) => file.path)].filter(
+  const paths = [...pendingTechDesignQuestionContextPaths.value, ...techDesignSourceFiles.value.map((file) => file.path)].filter(
     (item): item is string => Boolean(item)
   );
   return [...new Set(paths)];

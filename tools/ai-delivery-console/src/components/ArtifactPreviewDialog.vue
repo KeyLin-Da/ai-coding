@@ -8,6 +8,24 @@
           <p v-if="versionText" class="muted version-summary">{{ versionText }}</p>
         </div>
         <div class="preview-header-actions">
+          <TechDesignVersionSelector
+            v-if="isTechDesignMarkdown"
+            v-model="selectedVersionId"
+            :versions="techDesignVersions"
+            :loading="loadingVersions"
+            @compare="openVersionDiff"
+          />
+          <el-button v-if="isTechDesignMarkdown" :icon="ChatLineSquare" @click="toggleAnnotationPanel">
+            批注 {{ selectedVersionAnnotations.length }}
+          </el-button>
+          <el-button
+            v-if="isTechDesignMarkdown"
+            :disabled="!selectionDraft"
+            :icon="EditPen"
+            @click="createAnnotationFromSelection"
+          >
+            新增批注
+          </el-button>
           <div class="preview-zoom-controls" aria-label="预览缩放">
             <el-button
               class="zoom-out-button"
@@ -48,8 +66,30 @@
     </template>
 
     <div v-loading="loading" class="preview-dialog-body" :class="{ 'eye-care': eyeCareMode }">
-      <div class="preview-zoom-stage" :style="zoomStageStyle">
-        <article v-if="isMarkdown" class="markdown-preview artifact-markdown" v-html="previewHtml"></article>
+      <div v-if="isMarkdown && isTechDesignMarkdown" class="tech-design-preview-layout" :class="{ 'annotation-panel-collapsed': !annotationPanelVisible }">
+        <div class="tech-design-preview-scroll">
+          <div class="preview-zoom-stage" :style="zoomStageStyle">
+            <article
+              ref="markdownPreviewRef"
+              class="markdown-preview artifact-markdown"
+              v-html="previewHtml"
+              @mouseup="captureSelection"
+              @keyup="captureSelection"
+            ></article>
+          </div>
+        </div>
+        <TechDesignAnnotationPanel
+          v-if="annotationPanelVisible"
+          :annotations="selectedVersionAnnotations"
+          @collapse="annotationPanelVisible = false"
+          @delete="deleteAnnotation"
+          @locate="locateAnnotation"
+          @resolve="resolveAnnotation"
+          @toggle-include="toggleAnnotationInclude"
+        />
+      </div>
+      <div v-else class="preview-zoom-stage" :style="zoomStageStyle">
+        <article v-if="isMarkdown" ref="markdownPreviewRef" class="markdown-preview artifact-markdown" v-html="previewHtml"></article>
         <iframe v-else-if="isHtml || isPdf" class="artifact-frame" :src="artifactUrl" title="产物预览"></iframe>
         <div v-else-if="isImage" class="artifact-image-wrap">
           <img :src="artifactUrl" :alt="artifact?.label || '产物图片'" />
@@ -57,6 +97,7 @@
         <pre v-else class="artifact-code"><code>{{ formattedContent }}</code></pre>
       </div>
     </div>
+    <ArtifactVersionDiffDialog ref="versionDiffDialog" />
   </el-dialog>
 </template>
 
@@ -64,21 +105,38 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import MarkdownIt from 'markdown-it';
 import mermaid from 'mermaid';
-import { CopyDocument, Download, Minus, Plus, Refresh } from '@element-plus/icons-vue';
-import { ElMessage } from 'element-plus';
-import type { ArtifactRef } from '@shared/workflow';
+import { ChatLineSquare, CopyDocument, Download, EditPen, Minus, Plus, Refresh } from '@element-plus/icons-vue';
+import { ElMessage, ElMessageBox } from 'element-plus';
+import type { ArtifactRef, TechDesignAnnotation, TechDesignVersion } from '@shared/workflow';
 import { apiClient } from '@/api/client';
+import ArtifactVersionDiffDialog from '@/components/ArtifactVersionDiffDialog.vue';
+import TechDesignAnnotationPanel from '@/components/TechDesignAnnotationPanel.vue';
+import TechDesignVersionSelector from '@/components/TechDesignVersionSelector.vue';
 import { artifactReadUrl, rewriteMarkdownImageSources } from '@/utils/markdown-assets';
+import { applyAnnotationHighlights, createAnnotationAnchor } from '@/utils/tech-design-annotations';
 
 const visible = ref(false);
 const loading = ref(false);
 const artifact = ref<ArtifactRef>();
 const content = ref('');
+const markdownPreviewRef = ref<HTMLElement>();
+const versionDiffDialog = ref<InstanceType<typeof ArtifactVersionDiffDialog>>();
+const techDesignVersions = ref<TechDesignVersion[]>([]);
+const selectedVersionId = ref('current');
+const selectedVersion = ref<TechDesignVersion>();
+const techDesignAnnotations = ref<TechDesignAnnotation[]>([]);
+const annotationHash = ref('');
+const loadingVersions = ref(false);
+const selectionDraft = ref<ReturnType<typeof createAnnotationAnchor>>();
+const annotationPanelVisible = ref(true);
 const eyeCareStorageKey = 'ai-delivery-preview-eye-care';
 const minZoomPercent = 60;
 const maxZoomPercent = 400;
 const defaultZoomPercent = 100;
 const zoomStepPercent = 10;
+const sequenceReadableZoomThreshold = 130;
+const sequenceReadableScale = 0.1;
+const sequenceReadableMinWidth = 2300;
 const zoomPercent = ref(defaultZoomPercent);
 
 function readEyeCareMode() {
@@ -102,7 +160,10 @@ const mermaidPlugin = (md: MarkdownIt) => {
   md.renderer.rules.fence = (tokens, idx, options, env, self) => {
     const token = tokens[idx];
     if (token.info.trim() === 'mermaid') {
-      return `<div class="mermaid">${md.utils.escapeHtml(token.content.trim())}</div>`;
+      const code = token.content.trim();
+      const diagramType = detectMermaidDiagramType(code);
+      const sequenceClass = diagramType === 'sequence' ? ' mermaid-sequence-diagram' : '';
+      return `<div class="mermaid mermaid-diagram${sequenceClass}" data-mermaid-type="${diagramType}">${md.utils.escapeHtml(code)}</div>`;
     }
     return defaultFence(tokens, idx, options, env, self);
   };
@@ -122,6 +183,10 @@ const isMarkdown = computed(() => artifact.value?.kind === 'markdown' || ['.md',
 const isHtml = computed(() => artifact.value?.kind === 'html' || extension.value === '.html');
 const isPdf = computed(() => extension.value === '.pdf');
 const isImage = computed(() => artifact.value?.kind === 'image' || ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'].includes(extension.value));
+const requirementId = computed(() => artifact.value?.path.match(/^docs\/([^/]+)\//)?.[1] || '');
+const isTechDesignMarkdown = computed(() =>
+  Boolean(isMarkdown.value && artifact.value?.path.replace(/\\/g, '/').match(/^docs\/[^/]+\/technical-design\/design_review\.md$/))
+);
 const zoomScale = computed(() => zoomPercent.value / 100);
 const zoomStageStyle = computed<Record<string, string>>(() => ({
   '--preview-zoom-scale': String(zoomScale.value),
@@ -164,16 +229,39 @@ const versionText = computed(() => {
   return segments.join(' · ');
 });
 
+function annotationMatchesSelectedVersion(annotation: TechDesignAnnotation): boolean {
+  const version = selectedVersion.value || techDesignVersions.value.find((item) => item.id === selectedVersionId.value);
+  if (!version) {
+    return annotation.versionId === selectedVersionId.value;
+  }
+  if (version.contentHash && annotation.contentHash) {
+    return version.contentHash === annotation.contentHash;
+  }
+  return annotation.versionId === version.id;
+}
+
+const selectedVersionAnnotations = computed(() => techDesignAnnotations.value.filter(annotationMatchesSelectedVersion));
+
 watch(previewHtml, async () => {
   if (!visible.value || !isMarkdown.value) {
     return;
   }
   await nextTick();
   try {
-    await mermaid.run();
+    const mermaidNodes = markdownPreviewRef.value ? Array.from(markdownPreviewRef.value.querySelectorAll<HTMLElement>('.mermaid')) : [];
+    await mermaid.run(mermaidNodes.length ? { nodes: mermaidNodes } : undefined);
+    enhanceMermaidDiagrams();
   } catch (error) {
     console.error('Mermaid rendering error:', error);
   }
+  applyAnnotationMarks();
+});
+
+watch(selectedVersionId, async () => {
+  if (!visible.value || !isTechDesignMarkdown.value || !selectedVersionId.value) {
+    return;
+  }
+  await loadSelectedTechDesignVersion();
 });
 
 watch(eyeCareMode, (value) => {
@@ -190,6 +278,7 @@ function clampZoom(value: number) {
 
 function setZoom(value: number) {
   zoomPercent.value = clampZoom(value);
+  void nextTick().then(enhanceMermaidDiagrams);
 }
 
 function zoomIn() {
@@ -202,6 +291,64 @@ function zoomOut() {
 
 function resetZoom() {
   setZoom(defaultZoomPercent);
+}
+
+function detectMermaidDiagramType(code: string) {
+  const firstDiagramLine = code
+    .split('\n')
+    .map((line) => line.trim())
+    .find((line) => line && !line.startsWith('%%'));
+  return firstDiagramLine?.toLowerCase().startsWith('sequencediagram') ? 'sequence' : 'default';
+}
+
+function readSvgNumericValue(value: string | null | undefined) {
+  if (!value) {
+    return 0;
+  }
+  const match = value.match(/([\d.]+)/);
+  return match ? Number(match[1]) : 0;
+}
+
+function readSvgNaturalWidth(svg: SVGElement) {
+  const cachedWidth = readSvgNumericValue(svg.getAttribute('data-natural-width'));
+  if (cachedWidth > 0) {
+    return cachedWidth;
+  }
+  const viewBox = svg.getAttribute('viewBox')?.trim().split(/\s+/).map(Number);
+  const viewBoxWidth = viewBox?.length === 4 ? viewBox[2] : 0;
+  const width = readSvgNumericValue(svg.getAttribute('width'));
+  const maxWidth = readSvgNumericValue(svg.style.maxWidth);
+  const naturalWidth = Math.max(viewBoxWidth || 0, width || 0, maxWidth || 0);
+  if (naturalWidth > 0) {
+    svg.setAttribute('data-natural-width', String(naturalWidth));
+  }
+  return naturalWidth;
+}
+
+function enhanceMermaidDiagrams() {
+  if (!markdownPreviewRef.value) {
+    return;
+  }
+  markdownPreviewRef.value.querySelectorAll<HTMLElement>('.mermaid-diagram').forEach((diagram) => {
+    const svg = diagram.querySelector<SVGElement>('svg');
+    if (!svg) {
+      return;
+    }
+    const shouldUseReadableSequenceSize = diagram.dataset.mermaidType === 'sequence' && zoomPercent.value >= sequenceReadableZoomThreshold;
+    if (shouldUseReadableSequenceSize) {
+      const naturalWidth = readSvgNaturalWidth(svg);
+      const targetWidth = Math.ceil(Math.max(naturalWidth * sequenceReadableScale, sequenceReadableMinWidth));
+      svg.style.width = `${targetWidth}px`;
+      svg.style.minWidth = `${targetWidth}px`;
+      svg.style.maxWidth = 'none';
+      svg.style.height = 'auto';
+      return;
+    }
+    svg.style.width = '';
+    svg.style.minWidth = '';
+    svg.style.maxWidth = '100%';
+    svg.style.height = 'auto';
+  });
 }
 
 function handleZoomShortcut(event: KeyboardEvent) {
@@ -235,6 +382,13 @@ onUnmounted(() => {
 async function open(nextArtifact: ArtifactRef) {
   artifact.value = nextArtifact;
   content.value = '';
+  techDesignVersions.value = [];
+  techDesignAnnotations.value = [];
+  annotationHash.value = '';
+  selectionDraft.value = undefined;
+  selectedVersion.value = undefined;
+  selectedVersionId.value = 'current';
+  annotationPanelVisible.value = true;
   resetZoom();
   if (!nextArtifact.exists) {
     ElMessage.warning('文件尚未生成');
@@ -242,6 +396,10 @@ async function open(nextArtifact: ArtifactRef) {
   }
   visible.value = true;
   if (isImage.value || isPdf.value || isHtml.value) {
+    return;
+  }
+  if (isTechDesignMarkdown.value) {
+    await loadTechDesignPreviewContext();
     return;
   }
   loading.value = true;
@@ -253,6 +411,181 @@ async function open(nextArtifact: ArtifactRef) {
   } finally {
     loading.value = false;
   }
+}
+
+async function loadTechDesignPreviewContext() {
+  if (!requirementId.value) {
+    return;
+  }
+  loading.value = true;
+  loadingVersions.value = true;
+  try {
+    const [versionResult, annotationResult] = await Promise.all([
+      apiClient.listTechDesignVersions(requirementId.value),
+      apiClient.listTechDesignAnnotations(requirementId.value)
+    ]);
+    techDesignVersions.value = versionResult.versions;
+    techDesignAnnotations.value = annotationResult.annotations;
+    annotationHash.value = annotationResult.hash;
+    const preferred = techDesignVersions.value.find((version) => version.id === 'current' && version.readable) || techDesignVersions.value.find((version) => version.readable);
+    selectedVersionId.value = preferred?.id || 'current';
+    await loadSelectedTechDesignVersion();
+  } catch (error: any) {
+    ElMessage.error(error.message || '读取技术方案版本失败');
+  } finally {
+    loading.value = false;
+    loadingVersions.value = false;
+  }
+}
+
+async function loadSelectedTechDesignVersion() {
+  if (!requirementId.value || !selectedVersionId.value) {
+    return;
+  }
+  loading.value = true;
+  try {
+    const result = await apiClient.readTechDesignVersion(requirementId.value, selectedVersionId.value);
+    content.value = result.content;
+    selectedVersion.value = result.version;
+    const index = techDesignVersions.value.findIndex((version) => version.id === result.version.id);
+    if (index >= 0) {
+      techDesignVersions.value[index] = {
+        ...techDesignVersions.value[index],
+        ...result.version
+      };
+    }
+  } catch (error: any) {
+    ElMessage.error(error.message || '读取技术方案版本失败');
+  } finally {
+    loading.value = false;
+  }
+}
+
+function captureSelection() {
+  if (!isTechDesignMarkdown.value || !markdownPreviewRef.value) {
+    selectionDraft.value = undefined;
+    return;
+  }
+  selectionDraft.value = createAnnotationAnchor(markdownPreviewRef.value);
+}
+
+async function createAnnotationFromSelection() {
+  if (!requirementId.value || !selectionDraft.value) {
+    return;
+  }
+  try {
+    const result = await ElMessageBox.prompt('记录针对所选文案的批注意见', '新增技术方案批注', {
+      inputType: 'textarea',
+      inputPlaceholder: '请输入批注意见',
+      confirmButtonText: '保存',
+      cancelButtonText: '取消'
+    });
+    const comment = String(result.value || '').trim();
+    if (!comment) {
+      ElMessage.warning('请输入批注意见');
+      return;
+    }
+    const response = await apiClient.createTechDesignAnnotation(requirementId.value, {
+      versionId: selectedVersionId.value,
+      selectedText: selectionDraft.value.selectedText,
+      anchor: selectionDraft.value.anchor,
+      comment,
+      includeInNextGeneration: true,
+      expectedHash: annotationHash.value
+    });
+    techDesignAnnotations.value = response.annotations;
+    annotationHash.value = response.hash;
+    window.getSelection()?.removeAllRanges();
+    selectionDraft.value = undefined;
+    annotationPanelVisible.value = true;
+    await nextTick();
+    applyAnnotationMarks();
+    ElMessage.success('批注已保存');
+  } catch (error: any) {
+    if (error === 'cancel' || error?.message === 'cancel') {
+      return;
+    }
+    ElMessage.error(error.message || '保存批注失败');
+  }
+}
+
+async function resolveAnnotation(annotation: TechDesignAnnotation) {
+  await updateAnnotation(annotation, { status: 'RESOLVED', includeInNextGeneration: false });
+}
+
+async function toggleAnnotationInclude(annotation: TechDesignAnnotation, include: boolean) {
+  await updateAnnotation(annotation, { includeInNextGeneration: include });
+}
+
+function toggleAnnotationPanel() {
+  annotationPanelVisible.value = !annotationPanelVisible.value;
+}
+
+async function updateAnnotation(annotation: TechDesignAnnotation, input: { status?: TechDesignAnnotation['status']; includeInNextGeneration?: boolean }) {
+  if (!requirementId.value) {
+    return;
+  }
+  try {
+    const response = await apiClient.updateTechDesignAnnotationStatus(requirementId.value, annotation.id, {
+      ...input,
+      expectedHash: annotationHash.value
+    });
+    techDesignAnnotations.value = response.annotations;
+    annotationHash.value = response.hash;
+    await nextTick();
+    applyAnnotationMarks();
+  } catch (error: any) {
+    ElMessage.error(error.message || '更新批注失败');
+  }
+}
+
+async function deleteAnnotation(annotation: TechDesignAnnotation) {
+  if (!requirementId.value) {
+    return;
+  }
+  try {
+    await ElMessageBox.confirm('删除后该批注不会再显示，也不会进入下一次技术方案生成。确认删除吗？', '删除技术方案批注', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning'
+    });
+    const response = await apiClient.deleteTechDesignAnnotation(requirementId.value, annotation.id, {
+      expectedHash: annotationHash.value
+    });
+    techDesignAnnotations.value = response.annotations;
+    annotationHash.value = response.hash;
+    await nextTick();
+    applyAnnotationMarks();
+    ElMessage.success('批注已删除');
+  } catch (error: any) {
+    if (error === 'cancel' || error === 'close' || error?.message === 'cancel' || error?.message === 'close') {
+      return;
+    }
+    ElMessage.error(error.message || '删除批注失败');
+  }
+}
+
+function applyAnnotationMarks() {
+  if (!isTechDesignMarkdown.value || !markdownPreviewRef.value) {
+    return;
+  }
+  applyAnnotationHighlights(markdownPreviewRef.value, selectedVersionAnnotations.value, selectedVersion.value?.contentHash);
+}
+
+function locateAnnotation(annotation: TechDesignAnnotation) {
+  const target = markdownPreviewRef.value?.querySelector(`[data-annotation-id="${annotation.id}"]`);
+  if (!target) {
+    ElMessage.warning('当前版本未定位到该批注文案');
+    return;
+  }
+  target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
+function openVersionDiff() {
+  if (!requirementId.value) {
+    return;
+  }
+  versionDiffDialog.value?.open(requirementId.value, techDesignVersions.value, selectedVersionId.value);
 }
 
 async function copyPath() {
@@ -383,6 +716,23 @@ defineExpose({ open });
   background: #f4eddd;
 }
 
+.tech-design-preview-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(320px, 22vw, 420px);
+  height: 100%;
+  min-height: 0;
+}
+
+.tech-design-preview-layout.annotation-panel-collapsed {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.tech-design-preview-scroll {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
 .preview-zoom-stage {
   width: 100%;
   height: 100%;
@@ -391,9 +741,11 @@ defineExpose({ open });
 }
 
 .artifact-markdown {
-  max-width: 980px;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: none;
   min-height: 100%;
-  margin: 0 auto;
+  margin: 0;
   padding: 28px;
   background: #ffffff;
 }
@@ -420,6 +772,35 @@ defineExpose({ open });
 .preview-dialog-body.eye-care .artifact-markdown :deep(table) {
   border-color: #d4c3a5;
   background: #f1e7d1;
+}
+
+.artifact-markdown :deep(.mermaid-diagram) {
+  width: 100%;
+  margin: 24px 0 28px;
+  padding: 8px 0 14px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.artifact-markdown :deep(.mermaid-diagram svg) {
+  display: block;
+  max-width: 100% !important;
+  height: auto;
+}
+
+.artifact-markdown :deep(.mermaid-sequence-diagram) {
+  scrollbar-gutter: stable;
+}
+
+.preview-dialog-body.eye-care .artifact-markdown :deep(.mermaid-diagram) {
+  color: #26362f;
+}
+
+.artifact-markdown :deep(.tech-design-annotation-highlight) {
+  padding: 1px 2px;
+  border-radius: 3px;
+  background: #fef08a;
+  box-shadow: inset 0 -1px 0 #f59e0b;
 }
 
 .artifact-frame {
@@ -495,6 +876,10 @@ defineExpose({ open });
 
   .preview-zoom-controls .el-button {
     flex: 0 0 auto;
+  }
+
+  .tech-design-preview-layout {
+    grid-template-columns: 1fr;
   }
 
   .artifact-markdown {

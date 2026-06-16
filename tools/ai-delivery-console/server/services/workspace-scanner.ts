@@ -108,6 +108,28 @@ export async function scanRequirementArtifacts(
   if (techDesignQuestions) {
     artifacts.push(techDesignQuestions);
   }
+  const techDesignAnnotations = await existingFileArtifact(
+    workspaceRoot,
+    'technical-design-annotations',
+    'TECH_DESIGN',
+    '技术方案批注记录',
+    `docs/${id}/technical-design/annotations/comments.md`,
+    'markdown'
+  );
+  if (techDesignAnnotations) {
+    artifacts.push(techDesignAnnotations);
+  }
+  const techDesignInputLedger = await existingFileArtifact(
+    workspaceRoot,
+    'technical-design-input-ledger',
+    'TECH_DESIGN',
+    '技术方案输入消费台账',
+    `docs/${id}/technical-design/input-ledger.json`,
+    'json'
+  );
+  if (techDesignInputLedger) {
+    artifacts.push(techDesignInputLedger);
+  }
   const techDesignQuestionFiles = await listFiles(path.join(workspaceRoot, 'docs', id, 'technical-design', 'questions'), 2);
   for (const file of techDesignQuestionFiles.filter((item) => /\.md$/i.test(item))) {
     const relative = path.relative(workspaceRoot, file);

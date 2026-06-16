@@ -709,7 +709,7 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     );
   });
 
-  it('答疑记录存在时展示自动纳入提示并作为技术方案生成补充项', async () => {
+  it('新增答疑记录存在时展示增量提示并作为技术方案生成补充项', async () => {
     const current = techDesignWorkflow([
       artifact('PRD', 'docs/172014/prd/analysis.md'),
       artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md', {
@@ -730,7 +730,8 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     ];
     const wrapper = await mountDetail(current);
 
-    expect(wrapper.text()).toContain('自动纳入生成上下文');
+    expect(wrapper.text()).toContain('新增答疑');
+    expect(wrapper.text()).toContain('将纳入下一次生成');
     await designButton(wrapper).trigger('click');
     await flushPromises();
 
@@ -740,6 +741,43 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
         actionType: 'DESIGN_GENERATE',
         params: expect.objectContaining({
           sourceFiles: ['docs/172014/technical-design/questions.md', 'docs/172014/technical-design/file/old-design.md']
+        })
+      })
+    );
+  });
+
+  it('已消费答疑记录不在技术方案生成输入区展示和提交', async () => {
+    const current = techDesignWorkflow([
+      artifact('PRD', 'docs/172014/prd/analysis.md'),
+      artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md', {
+        id: 'technical-design'
+      }),
+      artifact('TECH_DESIGN', 'docs/172014/technical-design/questions/20260604-173000-question.md', {
+        id: 'technical-design-question-1'
+      })
+    ]);
+    current.techDesignConsumedQuestionPaths = ['docs/172014/technical-design/questions/20260604-173000-question.md'];
+    current.techDesignSourceFiles = [
+      {
+        id: 'file-1',
+        name: 'new-design.md',
+        path: 'docs/172014/technical-design/file/new-design.md',
+        size: 100,
+        uploadedAt: new Date().toISOString()
+      }
+    ];
+    const wrapper = await mountDetail(current);
+
+    expect(wrapper.find('.design-question-context').exists()).toBe(false);
+    await designButton(wrapper).trigger('click');
+    await flushPromises();
+
+    expect(apiClient.runAction).toHaveBeenCalledWith(
+      '172014',
+      expect.objectContaining({
+        actionType: 'DESIGN_GENERATE',
+        params: expect.objectContaining({
+          sourceFiles: ['docs/172014/technical-design/file/new-design.md']
         })
       })
     );

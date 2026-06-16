@@ -118,6 +118,10 @@ function legacyTechDesignQuestionPath(requirementId: string): string {
   return `docs/${normalizeRequirementId(requirementId)}/technical-design/questions.md`;
 }
 
+function techDesignAnnotationSummaryPath(requirementId: string): string {
+  return `docs/${normalizeRequirementId(requirementId)}/technical-design/annotations/comments.md`;
+}
+
 function isTechnicalDesignSourcePath(filePath: string): boolean {
   return filePath.replace(/\\/g, '/').includes('/technical-design/file/');
 }
@@ -127,15 +131,25 @@ function isTechnicalDesignQuestionPath(workflow: RequirementWorkflow, filePath: 
   return normalized === legacyTechDesignQuestionPath(workflow.requirementId) || normalized.startsWith(`docs/${normalizeRequirementId(workflow.requirementId)}/technical-design/questions/`);
 }
 
+function consumedTechDesignQuestionPathSet(workflow: RequirementWorkflow): Set<string> {
+  return new Set((workflow.techDesignConsumedQuestionPaths || []).map((item) => item.replace(/\\/g, '/')));
+}
+
+function isConsumedTechDesignQuestionPath(workflow: RequirementWorkflow, filePath: string): boolean {
+  return consumedTechDesignQuestionPathSet(workflow).has(filePath.replace(/\\/g, '/'));
+}
+
 function existingTechDesignQuestionPaths(workflow: RequirementWorkflow): string[] {
   const legacyPath = legacyTechDesignQuestionPath(workflow.requirementId);
   const questionPrefix = `docs/${normalizeRequirementId(workflow.requirementId)}/technical-design/questions/`;
+  const consumedQuestionPaths = consumedTechDesignQuestionPathSet(workflow);
   return workflow.artifacts
     .filter(
       (item) =>
         item.exists &&
         item.kind !== 'directory' &&
-        (item.id === 'technical-design-questions' || item.path === legacyPath || item.path.replace(/\\/g, '/').startsWith(questionPrefix))
+        (item.id === 'technical-design-questions' || item.path === legacyPath || item.path.replace(/\\/g, '/').startsWith(questionPrefix)) &&
+        !consumedQuestionPaths.has(item.path.replace(/\\/g, '/'))
     )
     .map((item) => item.path)
     .sort((left, right) => {
@@ -148,13 +162,22 @@ function existingTechDesignQuestionPaths(workflow: RequirementWorkflow): string[
     });
 }
 
+function existingTechDesignAnnotationPaths(workflow: RequirementWorkflow): string[] {
+  const summaryPath = techDesignAnnotationSummaryPath(workflow.requirementId);
+  return workflow.artifacts
+    .filter((item) => item.exists && item.kind !== 'directory' && (item.id === 'technical-design-annotations' || item.path === summaryPath))
+    .map((item) => item.path)
+    .sort((left, right) => left.localeCompare(right));
+}
+
 function techDesignSourcePaths(workflow: RequirementWorkflow, params: Record<string, unknown>): string[] {
-  const explicitPaths = asStringArray(params.sourceFiles);
+  const explicitPaths = asStringArray(params.sourceFiles).filter((filePath) => !isTechnicalDesignQuestionPath(workflow, filePath) || !isConsumedTechDesignQuestionPath(workflow, filePath));
+  const annotationPaths = existingTechDesignAnnotationPaths(workflow);
   const questionPaths = existingTechDesignQuestionPaths(workflow);
   if (explicitPaths.length) {
-    return uniqueNonEmpty([...questionPaths, ...explicitPaths]);
+    return uniqueNonEmpty([...annotationPaths, ...questionPaths, ...explicitPaths]);
   }
-  return uniqueNonEmpty([...questionPaths, ...(workflow.techDesignSourceFiles || []).map((file) => file.path).filter(Boolean)]);
+  return uniqueNonEmpty([...annotationPaths, ...questionPaths, ...(workflow.techDesignSourceFiles || []).map((file) => file.path).filter(Boolean)]);
 }
 
 function uniqueNonEmpty(values: string[]): string[] {
@@ -579,6 +602,8 @@ export async function executeAction(
 
 export const internalForTests = {
   buildSkillCommand,
+  existingTechDesignQuestionPaths,
+  isTechnicalDesignQuestionPath,
   isAgentAction,
   runCli
 };

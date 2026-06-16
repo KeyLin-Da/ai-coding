@@ -102,6 +102,9 @@ export class WorkflowRepository {
       const techDesignClarification = hasInputField(input, 'techDesignClarification')
         ? input.techDesignClarification
         : existing.techDesignClarification;
+      const techDesignConsumedQuestionPaths = hasInputField(input, 'techDesignConsumedQuestionPaths')
+        ? input.techDesignConsumedQuestionPaths || []
+        : existing.techDesignConsumedQuestionPaths || [];
       const techDesignSourceFiles = hasInputField(input, 'techDesignSourceFiles')
         ? input.techDesignSourceFiles || []
         : existing.techDesignSourceFiles || [];
@@ -119,6 +122,7 @@ export class WorkflowRepository {
         prdClarification,
         techDesignDocument,
         techDesignClarification,
+        techDesignConsumedQuestionPaths,
         techDesignSourceFiles,
         sources: input.sources?.length ? input.sources : existing.sources
       });
@@ -137,6 +141,7 @@ export class WorkflowRepository {
       prdClarification: normalizePrdClarification(input.prdClarification),
       techDesignDocument: input.techDesignDocument,
       techDesignClarification: input.techDesignClarification,
+      techDesignConsumedQuestionPaths: input.techDesignConsumedQuestionPaths || [],
       prdSourceFiles: [],
       techDesignSourceFiles: input.techDesignSourceFiles || [],
       sources: input.sources || [],
