@@ -25,7 +25,7 @@ interface CenterRunEvent {
   runId: number;
   seq: number;
   level: RunEvent['level'];
-  type: 'stdout' | 'stderr' | 'exit' | 'cancelled';
+  type: string;
   message: string;
   payloadJson?: string;
   createdAt?: string;
@@ -351,11 +351,20 @@ function isEventPage(value: unknown): value is RealtimeEventPage {
 }
 
 function centerRunEventToRunEvent(item: CenterRunEvent): RunEvent {
-  const typeMap: Record<CenterRunEvent['type'], RunEvent['type']> = {
+  const typeMap: Record<string, RunEvent['type']> = {
     stdout: 'STDOUT',
     stderr: 'STDERR',
     exit: 'EXIT',
-    cancelled: 'CANCELLED'
+    cancelled: 'CANCELLED',
+    START: 'START',
+    STDOUT: 'STDOUT',
+    STDERR: 'STDERR',
+    INFO: 'INFO',
+    WARN: 'WARN',
+    ERROR: 'ERROR',
+    ARTIFACT: 'ARTIFACT',
+    EXIT: 'EXIT',
+    CANCELLED: 'CANCELLED'
   };
   return {
     time: item.createdAt || new Date().toISOString(),

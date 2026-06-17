@@ -1,6 +1,6 @@
 import type { RequirementWorkflow } from '../../shared/workflow';
 import type { LocalRequestContext } from './local-request-context';
-import { centerRequest } from './center-client';
+import { centerRequest, isCenterEndpointUnavailableError } from './center-client';
 import { inspectProjectRepository, resolveProjectRepoPath, runGit } from './project-repository';
 
 export interface RequirementWorkspaceState {
@@ -155,10 +155,17 @@ export async function listRequirementWorkspaceStates(
   workflow: RequirementWorkflow
 ): Promise<RequirementWorkspaceState[]> {
   const requirementPk = requireRequirementPk(workflow);
-  return centerRequest<RequirementWorkspaceState[]>(
-    context,
-    `/api/ai-delivery/requirements/${encodeURIComponent(String(requirementPk))}/workspace-states`
-  );
+  try {
+    return await centerRequest<RequirementWorkspaceState[]>(
+      context,
+      `/api/ai-delivery/requirements/${encodeURIComponent(String(requirementPk))}/workspace-states`
+    );
+  } catch (error) {
+    if (isCenterEndpointUnavailableError(error)) {
+      return [];
+    }
+    throw error;
+  }
 }
 
 export async function assertRequirementWorkspaceWritable(
@@ -174,14 +181,21 @@ export async function assertRequirementCollaborationWritable(
   context: LocalRequestContext,
   requirementPk: string | number
 ): Promise<void> {
-  await centerRequest<RequirementWorkspaceState[]>(
-    context,
-    `/api/ai-delivery/requirements/${encodeURIComponent(String(requirementPk))}/workspace-states/assert-writable`,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        clientSessionId: Number(context.clientSessionId || 0)
-      })
+  try {
+    await centerRequest<RequirementWorkspaceState[]>(
+      context,
+      `/api/ai-delivery/requirements/${encodeURIComponent(String(requirementPk))}/workspace-states/assert-writable`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          clientSessionId: Number(context.clientSessionId || 0)
+        })
+      }
+    );
+  } catch (error) {
+    if (isCenterEndpointUnavailableError(error)) {
+      return;
     }
-  );
+    throw error;
+  }
 }

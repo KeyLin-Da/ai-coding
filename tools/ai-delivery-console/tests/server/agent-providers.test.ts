@@ -15,7 +15,7 @@ import {
   terminalCommandLine
 } from '../../server/services/agent-providers';
 import { readRunEvents } from '../../server/services/run-log';
-import { resolveWorkspaceOrRuntimePath } from '../../server/services/runtime-paths';
+import { getRunnerRuntimeRoot, resolveWorkspaceOrRuntimePath } from '../../server/services/runtime-paths';
 
 function workflow(): RequirementWorkflow {
   const now = new Date().toISOString();
@@ -49,9 +49,10 @@ function runRecord(id: string): RunRecord {
 }
 
 describe('agent-providers', () => {
-  it('默认提供 codex Provider', async () => {
+  it('默认提供 AI Agent Provider 列表', async () => {
     const providers = await listAgentProviders();
-    expect(providers.map((provider) => provider.id)).toEqual(expect.arrayContaining(['codex']));
+    expect(providers.map((provider) => provider.id)).toEqual(expect.arrayContaining(['codex', 'codebuddy', 'qoder', 'qwen']));
+    expect(providers.map((provider) => provider.id)).not.toEqual(expect.arrayContaining(['openspec', 'git', 'node']));
     const codex = providers.find((provider) => provider.id === 'codex');
     expect(codex?.inputMode).toBe('STDIN');
     expect(codex?.command).toEqual([
@@ -102,6 +103,12 @@ describe('agent-providers', () => {
       'bypassPermissions',
       '{prompt}'
     ]);
+    const qoder = providers.find((provider) => provider.id === 'qoder');
+    expect(qoder?.inputMode).toBe('STDIN');
+    expect(qoder?.command).toEqual(['qcode', '-w', '{workspaceRoot}', '-']);
+    const qwen = providers.find((provider) => provider.id === 'qwen');
+    expect(qwen?.inputMode).toBe('STDIN');
+    expect(qwen?.command).toEqual(['qwen', '-']);
   });
 
   it('生成 Prompt Envelope 并包含技能调用文本', async () => {
@@ -289,9 +296,10 @@ describe('agent-providers', () => {
     };
 
     const terminal = await createTerminalRunScript(root, item, run, provider, '/coding-prd-analyzer id=172014', [projectParent]);
+    const runtimeRoot = getRunnerRuntimeRoot(root);
 
     expect(terminal.commandLine).toContain(
-      `'--sandbox' 'workspace-write' '-C' '${root}' '--add-dir' '${projectParent}' '--add-dir' '${projectRoot}' '--no-alt-screen'`
+      `'--sandbox' 'workspace-write' '-C' '${root}' '--add-dir' '${projectParent}' '--add-dir' '${projectRoot}' '--add-dir' '${runtimeRoot}' '--no-alt-screen'`
     );
     expect(terminal.commandLine).toContain('AI Delivery Agent Task');
   });

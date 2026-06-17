@@ -183,6 +183,7 @@ function repoStatusText(status?: ProjectRepoSyncStatus): string {
 
 async function notifyRepoStatus(projectId: string | number) {
   try {
+    await settings.requireClientSessionId();
     const state = await apiClient.getProjectRepositoryStatus(projectId);
     if (state.syncStatus === 'READY' || state.syncStatus === 'PUSHED') {
       return;

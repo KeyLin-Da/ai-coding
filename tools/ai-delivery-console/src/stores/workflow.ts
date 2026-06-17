@@ -4,7 +4,6 @@ import type { ActionInput, AgentProvider, RequirementInput, RequirementWorkflow,
 import { apiClient, type DeleteTechDesignQuestionInput } from '@/api/client';
 import { getApiRuntimeConfig } from '@/api/runtime';
 import { RealtimeClient, type RealtimeDomainEvent } from '@/services/realtime-client';
-import { useSettingsStore } from '@/stores/settings';
 
 let requirementsLoadInFlight: Promise<RequirementWorkflow[]> | undefined;
 const requirementLoadInFlight = new Map<string, Promise<RequirementWorkflow>>();
@@ -39,18 +38,7 @@ export const useWorkflowStore = defineStore('workflow', {
   }),
   actions: {
     async loadAgents() {
-      const settings = useSettingsStore();
-      this.agents = settings.desktopConfig.agentProviders.map((provider) => ({
-        id: provider.id.toLowerCase(),
-        name: provider.id,
-        description: `本机命令：${provider.command}`,
-        inputMode: 'STDIN',
-        command: [provider.command],
-        interactiveCommand: [provider.command],
-        available: provider.enabled,
-        supportsStreaming: true,
-        supportsInteractive: true
-      }));
+      this.agents = await apiClient.listAgents();
     },
     async loadRequirements() {
       if (requirementsLoadInFlight) {
@@ -130,22 +118,11 @@ export const useWorkflowStore = defineStore('workflow', {
       }
       this.stopRunStream();
       this.activeRunId = runId;
-      const source = apiClient.openRunEventStream(this.current.requirementId, runId);
-      this.runEventSource = source;
-      source.onmessage = (event) => {
-        if (this.activeRunId !== runId) {
-          return;
-        }
-        const runEvent = JSON.parse(event.data) as RunEvent;
-        this.runEvents.push(runEvent);
-        this.runEventSeqs[runId] = this.runEvents.length;
-      };
-      source.onerror = () => {
-        source.close();
-        if (this.runEventSource === source) {
-          this.runEventSource = undefined;
-        }
-      };
+      void this.ensureRealtimeClient()
+        .then((client) => client.subscribeRun(runId, this.runEventSeqs[runId] || 0))
+        .catch(() => {
+          this.realtimeStatus = 'ERROR';
+        });
     },
     stopRunStream() {
       this.runEventSource?.close();
@@ -273,6 +250,19 @@ export const useWorkflowStore = defineStore('workflow', {
       if (event.eventType === 'artifact.git-sync.blocked') {
         ElMessage.warning(String(payload.errorMessage || '产物Git同步被阻断'));
       }
+      if (event.eventType === 'tech-design.annotation.changed') {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent('ai-delivery:tech-design-annotation-changed', {
+              detail: {
+                ...payload,
+                eventId: event.eventId,
+                eventType: event.eventType
+              }
+            })
+          );
+        }
+      }
       if (event.eventType === 'project.repo.pull-required') {
         const targetUserIds = Array.isArray(payload.targetUserIds) ? payload.targetUserIds.map((item) => String(item)) : [];
         if (!targetUserIds.length || targetUserIds.includes(String(runtime.userId))) {
@@ -309,7 +299,8 @@ interface RealtimeRefreshPlan {
 const REALTIME_REFRESH_PLANS: Record<string, RealtimeRefreshPlan> = {
   'artifact.version.created': { current: true, list: true },
   'artifact.git-sync.completed': { current: true, list: true },
-  'workflow.stage.reviewed': { current: true, list: true }
+  'workflow.stage.reviewed': { current: true, list: true },
+  'tech-design.annotation.changed': { current: false, list: false }
 };
 
 function getRealtimeRefreshPlan(event: RealtimeDomainEvent): RealtimeRefreshPlan {

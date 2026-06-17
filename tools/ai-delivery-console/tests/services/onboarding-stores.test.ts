@@ -30,7 +30,7 @@ describe('onboarding stores', () => {
         clear: () => values.clear()
       }
     });
-    setApiRuntimeConfig({ centerBaseUrl: 'http://127.0.0.1:8728', accessToken: '', userId: '', clientSessionId: '', projectId: '' });
+    setApiRuntimeConfig({ centerBaseUrl: 'http://127.0.0.1:8728', runnerBaseUrl: 'http://127.0.0.1:8718', accessToken: '', userId: '', clientSessionId: '', projectId: '' });
     vi.clearAllMocks();
   });
 

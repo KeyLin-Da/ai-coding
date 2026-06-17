@@ -133,8 +133,8 @@ describe('artifact-git-sync', () => {
     const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
       const parsed = new URL(String(url));
       centerCalls.push(parsed.pathname);
-      if (parsed.pathname === '/api/ai-delivery/users/me/delivery-workspace') {
-        return jsonResponse({ id: 1, clientSessionId: 9, localPath: deliveryRoot, status: 'ACTIVE' });
+      if (parsed.pathname === '/api/ai-delivery/projects/1/delivery-workspace') {
+        return jsonResponse({ id: 1, projectId: 1, localPath: deliveryRoot, status: 'ACTIVE' });
       }
       if (parsed.pathname === '/api/ai-delivery/users/me/git-credentials') {
         return jsonResponse([{ id: 1, platform: 'PROJECT_GIT', fingerprint: 'fp', publicKey: 'ssh-ed25519 AAAA', status: 'ACTIVE' }]);
@@ -475,8 +475,8 @@ describe('artifact-git-sync', () => {
     const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
       const parsed = new URL(String(url));
       centerCalls.push(parsed.pathname);
-      if (parsed.pathname === '/api/ai-delivery/users/me/delivery-workspace') {
-        return jsonResponse({ id: 1, clientSessionId: 9, localPath: deliveryRoot, status: 'ACTIVE' });
+      if (parsed.pathname === '/api/ai-delivery/projects/1/delivery-workspace') {
+        return jsonResponse({ id: 1, projectId: 1, localPath: deliveryRoot, status: 'ACTIVE' });
       }
       if (parsed.pathname === '/api/ai-delivery/users/me/git-credentials') {
         return jsonResponse([{ id: 1, platform: 'PROJECT_GIT', fingerprint: 'fp', publicKey: 'ssh-ed25519 AAAA', status: 'ACTIVE' }]);
@@ -569,8 +569,8 @@ describe('artifact-git-sync', () => {
 
     const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
       const parsed = new URL(String(url));
-      if (parsed.pathname === '/api/ai-delivery/users/me/delivery-workspace') {
-        return jsonResponse({ id: 1, clientSessionId: 9, localPath: deliveryRoot, status: 'ACTIVE' });
+      if (parsed.pathname === '/api/ai-delivery/projects/1/delivery-workspace') {
+        return jsonResponse({ id: 1, projectId: 1, localPath: deliveryRoot, status: 'ACTIVE' });
       }
       if (parsed.pathname === '/api/ai-delivery/users/me/git-credentials') {
         return jsonResponse([{ id: 1, platform: 'PROJECT_GIT', fingerprint: 'fp', publicKey: 'ssh-ed25519 AAAA', status: 'ACTIVE' }]);
@@ -640,8 +640,8 @@ describe('artifact-git-sync', () => {
     const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
       const parsed = new URL(String(url));
       centerCalls.push(`${init?.method || 'GET'} ${parsed.pathname}`);
-      if (parsed.pathname === '/api/ai-delivery/users/me/delivery-workspace') {
-        return jsonResponse({ id: 1, clientSessionId: 9, localPath: deliveryRoot, status: 'ACTIVE' });
+      if (parsed.pathname === '/api/ai-delivery/projects/1/delivery-workspace') {
+        return jsonResponse({ id: 1, projectId: 1, localPath: deliveryRoot, status: 'ACTIVE' });
       }
       if (parsed.pathname === '/api/ai-delivery/users/me/git-credentials') {
         return jsonResponse([{ id: 1, platform: 'PROJECT_GIT', fingerprint: 'fp', publicKey: 'ssh-ed25519 AAAA', status: 'ACTIVE' }]);
@@ -719,8 +719,8 @@ describe('artifact-git-sync', () => {
     const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
       const parsed = new URL(String(url));
       centerCalls.push(`${init?.method || 'GET'} ${parsed.pathname}`);
-      if (parsed.pathname === '/api/ai-delivery/users/me/delivery-workspace') {
-        return jsonResponse({ id: 1, clientSessionId: 9, localPath: deliveryRoot, status: 'ACTIVE' });
+      if (parsed.pathname === '/api/ai-delivery/projects/1/delivery-workspace') {
+        return jsonResponse({ id: 1, projectId: 1, localPath: deliveryRoot, status: 'ACTIVE' });
       }
       if (parsed.pathname === '/api/ai-delivery/users/me/git-credentials') {
         return jsonResponse([{ id: 1, platform: 'PROJECT_GIT', fingerprint: 'fp', publicKey: 'ssh-ed25519 AAAA', status: 'ACTIVE' }]);
@@ -795,8 +795,8 @@ describe('artifact-git-sync', () => {
     const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
       const parsed = new URL(String(url));
       centerCalls.push(`${init?.method || 'GET'} ${parsed.pathname}`);
-      if (parsed.pathname === '/api/ai-delivery/users/me/delivery-workspace') {
-        return jsonResponse({ id: 1, clientSessionId: 9, localPath: deliveryRoot, status: 'ACTIVE' });
+      if (parsed.pathname === '/api/ai-delivery/projects/1/delivery-workspace') {
+        return jsonResponse({ id: 1, projectId: 1, localPath: deliveryRoot, status: 'ACTIVE' });
       }
       if (parsed.pathname === '/api/ai-delivery/users/me/git-credentials') {
         return jsonResponse([{ id: 1, platform: 'PROJECT_GIT', fingerprint: 'fp', publicKey: 'ssh-ed25519 AAAA', status: 'ACTIVE' }]);
@@ -1055,8 +1055,8 @@ function jsonResponse(data: unknown, status = 200): Response {
 function projectRepoFetchImpl(deliveryRoot: string, remoteRepo: string) {
   return async (url: string | URL | Request, init?: RequestInit) => {
     const parsed = new URL(String(url));
-    if (parsed.pathname === '/api/ai-delivery/users/me/delivery-workspace') {
-      return jsonResponse({ id: 1, clientSessionId: 9, localPath: deliveryRoot, status: 'ACTIVE' });
+    if (parsed.pathname === '/api/ai-delivery/projects/1/delivery-workspace') {
+      return jsonResponse({ id: 1, projectId: 1, localPath: deliveryRoot, status: 'ACTIVE' });
     }
     if (parsed.pathname === '/api/ai-delivery/users/me/git-credentials') {
       return jsonResponse([{ id: 1, platform: 'PROJECT_GIT', fingerprint: 'fp', publicKey: 'ssh-ed25519 AAAA', status: 'ACTIVE' }]);

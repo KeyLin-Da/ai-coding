@@ -6,7 +6,7 @@ import { serverConfig } from '../config';
 import { appendRunEvent } from './run-log';
 import { normalizeRequirementId } from './workspace';
 import { normalizeProjectBasePaths, resolveWorkflowProjects } from './project-resolver';
-import { getPromptRuntimeDir, getRunRuntimeDir, getScriptRuntimeDir, resolveWorkspaceOrRuntimePath, toRuntimePathRef } from './runtime-paths';
+import { getPromptRuntimeDir, getRunRuntimeDir, getRunnerRuntimeRoot, getScriptRuntimeDir, resolveWorkspaceOrRuntimePath, toRuntimePathRef } from './runtime-paths';
 
 const activeProcesses = new Map<string, ChildProcessWithoutNullStreams>();
 const cancelledRunIds = new Set<string>();
@@ -60,28 +60,28 @@ function defaultProviders(): AgentProvider[] {
       supportsStreaming: true,
       supportsInteractive: Boolean(serverConfig.codebuddyInteractiveCommand)
     },
-//     {
-//       id: 'qoder',
-//       name: 'Qoder CLI CN',
-//       description: '使用本机 qoderclicn CLI 执行技能 Prompt。',
-//       inputMode: 'STDIN',
-//       command: splitCommand(serverConfig.qoderCommand),
-//       interactiveCommand: splitCommand(serverConfig.qoderInteractiveCommand),
-//       available: isCliAvailable('qoderclicn'),
-//       supportsStreaming: false,
-//       supportsInteractive: Boolean(serverConfig.qoderInteractiveCommand)
-//     },
-//     {
-//       id: 'qwen',
-//       name: 'Qwen',
-//       description: qwenNodeOk ? '使用本机 Qwen CLI 执行技能 Prompt。' : '需要 Node.js ≥ 20，当前版本不满足。',
-//       inputMode: 'STDIN',
-//       command: splitCommand(serverConfig.qwenCommand),
-//       interactiveCommand: splitCommand(serverConfig.qwenInteractiveCommand),
-//       available: qwenNodeOk && isCliAvailable('qwen'),
-//       supportsStreaming: false,
-//       supportsInteractive: qwenNodeOk && Boolean(serverConfig.qwenInteractiveCommand)
-//     }
+    {
+      id: 'qoder',
+      name: 'Qoder',
+      description: '使用本机 qcode CLI 执行技能 Prompt。',
+      inputMode: 'STDIN',
+      command: splitCommand(serverConfig.qoderCommand),
+      interactiveCommand: splitCommand(serverConfig.qoderInteractiveCommand),
+      available: isCliAvailable('qcode'),
+      supportsStreaming: false,
+      supportsInteractive: Boolean(serverConfig.qoderInteractiveCommand)
+    },
+    {
+      id: 'qwen',
+      name: 'Qwen',
+      description: '使用本机 Qwen CLI 执行技能 Prompt。',
+      inputMode: 'STDIN',
+      command: splitCommand(serverConfig.qwenCommand),
+      interactiveCommand: splitCommand(serverConfig.qwenInteractiveCommand),
+      available: isCliAvailable('qwen'),
+      supportsStreaming: false,
+      supportsInteractive: Boolean(serverConfig.qwenInteractiveCommand)
+    }
   ];
 }
 
@@ -125,6 +125,10 @@ async function selectedProjectRoots(workspaceRoot: string, workflow: Requirement
 
 function projectAddDirArgs(projectRoots: string[]): string[] {
   return projectRoots.flatMap((projectRoot) => ['--add-dir', projectRoot]);
+}
+
+function agentReadableProjectRoots(workspaceRoot: string, projectRoots: string[]): string[] {
+  return [...projectRoots, getRunnerRuntimeRoot(workspaceRoot)];
 }
 
 function projectParentAddDirArgs(projectPaths: string[] = []): string[] {
@@ -272,7 +276,7 @@ export async function createTerminalRunScript(
   if (!commandTemplate.length) {
     throw new Error(`${terminalExecutionModeLabel(run)}未配置可执行命令: ${provider.name}`);
   }
-  const projectRoots = await selectedProjectRoots(workspaceRoot, workflow, projectPaths);
+  const projectRoots = agentReadableProjectRoots(workspaceRoot, await selectedProjectRoots(workspaceRoot, workflow, projectPaths));
   const rendered = renderCommand(commandTemplate, {
     workspaceRoot,
     promptFile: absolutePromptPath,
@@ -504,7 +508,7 @@ export async function startAgentProcess(
   run.commandText = commandText;
 
   const promptContent = await fs.readFile(absolutePromptPath, 'utf8');
-  const projectRoots = await selectedProjectRoots(workspaceRoot, workflow, projectPaths);
+  const projectRoots = agentReadableProjectRoots(workspaceRoot, await selectedProjectRoots(workspaceRoot, workflow, projectPaths));
   const rendered = renderCommand(provider.command, {
     workspaceRoot,
     promptFile: absolutePromptPath,

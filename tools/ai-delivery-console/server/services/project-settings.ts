@@ -44,7 +44,7 @@ export async function loadPrivateProjectSettings(context: ProjectSettingsLookupC
   }
   const headers = authHeaders(context);
   const fetcher = context.fetchImpl || fetch;
-  const baseUrl = (context.centerBaseUrl || process.env.AI_DELIVERY_CENTER_BASE_URL || 'http://127.0.0.1:8728').replace(/\/+$/, '');
+  const baseUrl = (context.centerBaseUrl || process.env.VITE_AI_DELIVERY_CENTER_BASE_URL || 'http://127.0.0.1:8728').replace(/\/+$/, '');
   const response = await fetcher(`${baseUrl}/api/ai-delivery/projects/${encodeURIComponent(projectId)}/workspace-mappings`, {
     method: 'GET',
     headers

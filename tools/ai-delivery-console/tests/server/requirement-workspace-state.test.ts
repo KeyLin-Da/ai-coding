@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createEmptyStages, type RequirementWorkflow } from '../../shared/workflow';
-import { scheduleRequirementWorkspaceStateReport } from '../../server/services/requirement-workspace-state';
+import {
+  assertRequirementCollaborationWritable,
+  listRequirementWorkspaceStates,
+  scheduleRequirementWorkspaceStateReport
+} from '../../server/services/requirement-workspace-state';
 
 function workflow(id: number): RequirementWorkflow {
   return {
@@ -121,5 +125,16 @@ describe('requirement workspace state async report', () => {
     expect(scheduleRequirementWorkspaceStateReport({ ...context(), clientSessionId: '' }, workflow(1004), { reporter })).toBe(false);
     await flushPromises();
     expect(reporter).not.toHaveBeenCalled();
+  });
+
+  it('中心协作占用接口不存在时降级跳过', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: false,
+      status: 404,
+      json: async () => ({ message: 'not found' })
+    } as Response));
+
+    await expect(assertRequirementCollaborationWritable({ ...context(), fetchImpl }, 1005)).resolves.toBeUndefined();
+    await expect(listRequirementWorkspaceStates({ ...context(), fetchImpl }, workflow(1005))).resolves.toEqual([]);
   });
 });

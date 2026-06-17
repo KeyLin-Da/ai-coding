@@ -141,6 +141,35 @@ describe('workflow realtime hints', () => {
     expect(loadRequirements).not.toHaveBeenCalled();
   });
 
+  it('技术方案批注事件只分发局部刷新事件', async () => {
+    const store = useWorkflowStore();
+    store.requirements = [workflow()];
+    store.current = workflow();
+    const loadRequirement = vi.spyOn(store, 'loadRequirement').mockImplementation(async () => undefined);
+    const loadRequirements = vi.spyOn(store, 'loadRequirements').mockImplementation(async () => undefined);
+    const annotationChanged = vi.fn();
+    window.addEventListener('ai-delivery:tech-design-annotation-changed', annotationChanged);
+
+    await store.handleRealtimeDomainEvent({
+      projectId: 1,
+      eventId: 17,
+      eventType: 'tech-design.annotation.changed',
+      aggregateType: 'REQUIREMENT',
+      aggregateId: 100,
+      payloadJson: '{"requirementPk":100,"requirementId":"172014","annotationId":"annotation-1","operation":"CREATED"}'
+    });
+
+    expect(annotationChanged).toHaveBeenCalledTimes(1);
+    expect((annotationChanged.mock.calls[0][0] as CustomEvent).detail).toMatchObject({
+      requirementId: '172014',
+      annotationId: 'annotation-1',
+      operation: 'CREATED'
+    });
+    expect(loadRequirement).not.toHaveBeenCalled();
+    expect(loadRequirements).not.toHaveBeenCalled();
+    window.removeEventListener('ai-delivery:tech-design-annotation-changed', annotationChanged);
+  });
+
   it('Git 同步完成事件仍会刷新当前需求和列表', async () => {
     const store = useWorkflowStore();
     store.requirements = [workflow()];
@@ -160,5 +189,21 @@ describe('workflow realtime hints', () => {
     expect(loadRequirement).toHaveBeenCalledWith('172014');
     expect(loadRequirements).toHaveBeenCalledTimes(1);
     expect(ElMessage.success).toHaveBeenCalledWith('产物已推送：abcdef1');
+  });
+
+  it('运行日志实时订阅走中心 WebSocket 客户端，不再创建本地 SSE', async () => {
+    const store = useWorkflowStore();
+    store.current = workflow();
+    store.runEventSeqs['100'] = 2;
+    const subscribeRun = vi.fn().mockResolvedValue(undefined);
+    store.ensureRealtimeClient = vi.fn().mockResolvedValue({ subscribeRun } as any);
+    const eventSource = vi.fn();
+    vi.stubGlobal('EventSource', eventSource);
+
+    store.streamRunEvents('100');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(subscribeRun).toHaveBeenCalledWith('100', 2);
+    expect(eventSource).not.toHaveBeenCalled();
   });
 });

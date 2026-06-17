@@ -36,44 +36,24 @@ export function buildTerminalCommand(osType: DesktopOsType, command: string, cwd
 }
 
 export function createDesktopDiagnostics(config: DesktopLocalConfig, osType: DesktopOsType): DesktopDiagnosticItem[] {
-  const agentProviders = config.agentProviders.filter((item) => item.enabled);
-  const enabledCommands = new Set(agentProviders.map((item) => item.command.trim()).filter(Boolean));
   return [
+    {
+      key: 'center-service',
+      label: '中心服务',
+      status: config.centerBaseUrl ? 'OK' : 'WARN',
+      detail: config.centerBaseUrl || '-'
+    },
+    {
+      key: 'runner-service',
+      label: 'Runner',
+      status: config.runnerBaseUrl ? 'OK' : 'WARN',
+      detail: config.runnerBaseUrl || '-'
+    },
     {
       key: 'workspace-mapping',
       label: '工作区映射',
       status: config.workspaceMappings.length ? 'OK' : 'WARN',
       detail: String(config.workspaceMappings.length)
-    },
-    {
-      key: 'agent-provider',
-      label: 'Agent Provider',
-      status: agentProviders.length ? 'OK' : 'WARN',
-      detail: agentProviders.map((item) => item.id).join(',') || '-'
-    },
-    {
-      key: 'git',
-      label: 'Git',
-      status: enabledCommands.has('git') ? 'OK' : 'WARN',
-      detail: enabledCommands.has('git') ? 'git' : '-'
-    },
-    {
-      key: 'openspec',
-      label: 'OpenSpec',
-      status: enabledCommands.has('openspec') ? 'OK' : 'WARN',
-      detail: enabledCommands.has('openspec') ? 'openspec' : '-'
-    },
-    {
-      key: 'node',
-      label: 'Node',
-      status: enabledCommands.has('node') ? 'OK' : 'WARN',
-      detail: enabledCommands.has('node') ? 'node' : '-'
-    },
-    {
-      key: 'codex',
-      label: 'Codex',
-      status: enabledCommands.has('codex') ? 'OK' : 'WARN',
-      detail: enabledCommands.has('codex') ? 'codex' : '-'
     },
     {
       key: 'terminal',

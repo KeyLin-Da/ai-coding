@@ -51,9 +51,9 @@ export const useSettingsStore = defineStore('settings', {
       }
     },
     /** 用户认证后调用，确保 clientSessionId 已注册到中心服务 */
-    async ensureClientSessionId() {
+    async ensureClientSessionId(): Promise<string | undefined> {
       if (this.desktopConfig.clientSessionId) {
-        return;
+        return this.desktopConfig.clientSessionId;
       }
       try {
         const sessionId = await registerClientSession();
@@ -66,6 +66,14 @@ export const useSettingsStore = defineStore('settings', {
       } catch (e) {
         console.warn('[Settings] 注册客户端会话失败:', e);
       }
+      return this.desktopConfig.clientSessionId || undefined;
+    },
+    async requireClientSessionId(): Promise<string> {
+      const sessionId = await this.ensureClientSessionId();
+      if (!sessionId) {
+        throw new Error('缺少客户端会话ID，请重新登录或刷新页面');
+      }
+      return sessionId;
     },
     async save(projectPaths: string[]) {
       this.loading = true;

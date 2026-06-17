@@ -16,21 +16,24 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class DeliveryWorkspaceService {
 
+    private final PermissionService permissionService;
     private final UserDeliveryWorkspaceMapper workspaceMapper;
 
-    public DeliveryWorkspaceVO get(Long userId, Long clientSessionId) {
-        UserDeliveryWorkspaceEntity entity = load(userId, clientSessionId);
+    public DeliveryWorkspaceVO get(Long userId, Long projectId) {
+        permissionService.assertProjectMember(userId, projectId);
+        UserDeliveryWorkspaceEntity entity = load(userId, projectId);
         return entity == null ? null : toVO(entity);
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public DeliveryWorkspaceVO save(Long userId, DeliveryWorkspaceSaveRequest request) {
+    public DeliveryWorkspaceVO save(Long userId, Long projectId, DeliveryWorkspaceSaveRequest request) {
+        permissionService.assertProjectMember(userId, projectId);
         String localPath = normalizeLocalPath(request.getLocalPath());
-        UserDeliveryWorkspaceEntity entity = load(userId, request.getClientSessionId());
+        UserDeliveryWorkspaceEntity entity = load(userId, projectId);
         if (entity == null) {
             entity = new UserDeliveryWorkspaceEntity();
             entity.setUserId(userId);
-            entity.setClientSessionId(request.getClientSessionId());
+            entity.setProjectId(projectId);
         }
         entity.setLocalPath(localPath);
         entity.setStatus(AiDeliveryConstants.STATUS_ACTIVE);
@@ -42,13 +45,13 @@ public class DeliveryWorkspaceService {
         return toVO(entity);
     }
 
-    private UserDeliveryWorkspaceEntity load(Long userId, Long clientSessionId) {
-        if (clientSessionId == null) {
-            throw new BusinessException(AiDeliveryErrorCode.VALIDATION_FAILED, "缺少客户端会话ID");
+    private UserDeliveryWorkspaceEntity load(Long userId, Long projectId) {
+        if (projectId == null) {
+            throw new BusinessException(AiDeliveryErrorCode.VALIDATION_FAILED, "缺少项目ID");
         }
         return workspaceMapper.selectOne(new LambdaQueryWrapper<UserDeliveryWorkspaceEntity>()
             .eq(UserDeliveryWorkspaceEntity::getUserId, userId)
-            .eq(UserDeliveryWorkspaceEntity::getClientSessionId, clientSessionId)
+            .eq(UserDeliveryWorkspaceEntity::getProjectId, projectId)
             .eq(UserDeliveryWorkspaceEntity::getStatus, AiDeliveryConstants.STATUS_ACTIVE)
             .last("LIMIT 1"));
     }
@@ -70,6 +73,7 @@ public class DeliveryWorkspaceService {
     private DeliveryWorkspaceVO toVO(UserDeliveryWorkspaceEntity entity) {
         DeliveryWorkspaceVO vo = new DeliveryWorkspaceVO();
         vo.setId(entity.getId());
+        vo.setProjectId(entity.getProjectId());
         vo.setClientSessionId(entity.getClientSessionId());
         vo.setLocalPath(entity.getLocalPath());
         vo.setStatus(entity.getStatus());

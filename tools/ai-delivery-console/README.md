@@ -2,9 +2,9 @@
 
 **OpenSpec + 自定义技能可视化交付台**
 
-> **当前版本：** v0.1.0 | **最后更新：** 2026-05-26
+> **当前版本：** v0.1.0 | **最后更新：** 2026-06-17
 
-面向 Git-backed AI 交付工作区的可视化工具，用于按需求号聚合 PRD、技术方案、OpenSpec 实施验证、单元测试报告和代码评审报告。让 AI 辅助编程的整个流程清晰可见、可控可追溯。
+面向 Git-backed AI 交付工作区的可视化工具。网页版和桌面端都以中心服务为唯一共享事实源，用于按需求号聚合 PRD、技术方案、OpenSpec 实施验证、单元测试报告和代码评审报告。Local Runner 只负责本机 Git、OpenSpec 和 Agent CLI 执行，不再承载独立 workflow 数据源。
 
 ## 🎯 解决的核心痛点
 
@@ -36,7 +36,7 @@
 **痛点：** 手动执行多个技能命令容易遗漏步骤，分支切换、产物检查、状态同步全靠人工记忆。
 
 **解决方案：**
-- ✅ **可视化工作流引擎**：5 个阶段（PRD → 设计 → 验证 → 测试 → 评审）状态一目了然
+- ✅ **可视化工作流引擎**：4 个阶段（PRD → 技术方案 → 实施验证 → 代码评审）状态一目了然
 - ✅ **一键式操作**：点击按钮即可触发对应的 Skill 执行，无需记忆复杂命令
 - ✅ **并发安全控制**：需求级锁文件机制，避免多人同时修改同一需求导致冲突
 - ✅ **自动产物刷新**：执行完成后自动重新索引文件，实时展示最新内容
@@ -57,7 +57,7 @@
 
 - 🎯 **一站式管理**：一个界面掌控从需求到代码的全链路交付
 - 📊 **可视化工作流**：直观展示每个阶段的进度和状态
-- 🔄 **实时反馈**：本地 SSE 展示 Agent 执行日志，远程模式通过 WebSocket 同步流程、产物和运行事件
+- 🔄 **实时反馈**：中心 WebSocket 同步流程、产物和运行事件，HTTP 补偿接口支持断线恢复
 - 🔒 **安全可靠**：工作区路径限制、锁文件机制、hash 校验三重保障
 - ⚡ **灵活集成**：支持 Codex CLI 自动化或自定义 Agent Provider
 - 📈 **产物聚合**：自动索引所有相关文档和报告
@@ -74,18 +74,54 @@ npm run server:dev
 npm run dev
 ```
 
-默认 Runner 地址为 `http://127.0.0.1:8718`，前端开发服务为 `http://127.0.0.1:5178`。如果需要指定工作区根目录：
+默认中心服务地址为 `http://127.0.0.1:8728`，Local Runner 地址为 `http://127.0.0.1:8718`，前端开发服务为 `http://127.0.0.1:5178`。网页版和桌面端读取需求、阶段、产物索引、审核、问题和运行日志时都请求中心服务；Runner 只提供本机桥接、Agent 执行、Git 同步和 bootstrap import。
+
+### 环境 Profile
+
+控制台内置 local、dev、prd 三套 env profile：
+
+```text
+.env.local   # 本机开发，中心服务和 Runner 默认都在 127.0.0.1
+.env.dev     # 联调环境，中心服务指向 dev，Runner 仍默认使用本机
+.env.prd     # 生产构建默认值
+.env.example # 变量模板
+```
+
+常用脚本：
+
+```bash
+npm run dev:local
+npm run dev:dev
+npm run dev:prd
+
+npm run server:dev:local
+npm run server:dev:dev
+npm run server:dev:prd
+
+npm run desktop:dev:local
+npm run desktop:dev:dev
+npm run desktop:dev:prd
+
+npm run build:local
+npm run build:dev
+npm run build:prd
+```
+
+兼容入口仍然可用：`npm run dev`、`npm run server:dev`、`npm run desktop:dev` 默认走 local，`npm run build` 默认走 prd。`VITE_AI_DELIVERY_*` 用于前端默认值，`AI_DELIVERY_*` 用于 Runner、Electron 和 CLI。若个人中心已经保存了中心服务或 Runner 地址，本机保存值优先于 env 默认值。
+
+如果需要指定 Runner 使用的工作区根目录：
 
 ```bash
 AI_DELIVERY_WORKSPACE_ROOT=/Users/key.lin/work/Projects/ai-coding npm run server:dev
 ```
 
-## 🖥️ 桌面客户端与协作模式
+## 🖥️ Remote-only 协作模式
 
-控制台现在支持两种运行模式：
+控制台当前采用 remote-only 架构：
 
-- **本地 Runner 模式**：本机 Node Runner 负责 Git、OpenSpec 和 Agent CLI 执行。
-- **远程协作模式**：桌面客户端连接 Spring Boot 中心服务，需求流程、审核、问题、运行日志和事件流由中心服务共享；AI 交付产物以项目 Git 仓 commit/blob/hash 为事实源。
+- **中心服务**：保存需求流程、阶段状态、审核、问题、Job、运行日志、实时事件和 Git 产物版本索引。
+- **Local Runner**：负责本机 Git clone/pull/push、OpenSpec、Agent CLI、终端执行和 bootstrap import，不提供独立 workflow CRUD。
+- **网页端和桌面端一致**：两端都读取中心服务；本机配置只影响当前客户端如何执行和同步，不影响其他用户看到的共享事实。
 
 ### Git-backed 产物仓
 
@@ -126,19 +162,19 @@ npm run desktop:build
 
 ### 连接中心服务
 
-进入「设置 / 个人中心」，在「团队身份」中选择：
+中心服务、Runner 和 Agent CLI 命令通过 env profile 或启动环境变量配置：
 
-- `apiMode`: `remote`
-- `centerBaseUrl`: 例如 `http://127.0.0.1:8728`
-- `userId`、`projectId`、`clientSessionId`: 当前用户、项目和桌面客户端会话身份
+- `VITE_AI_DELIVERY_CENTER_BASE_URL` / `AI_DELIVERY_CENTER_BASE_URL`: 中心服务地址，例如 `http://127.0.0.1:8728`
+- `VITE_AI_DELIVERY_RUNNER_BASE_URL` / `AI_DELIVERY_RUNNER_URL`: Local Runner 地址，例如 `http://127.0.0.1:8718`
+- `CODEX_COMMAND`、`CODEBUDDY_COMMAND`、`QODER_COMMAND`、`QWEN_COMMAND`: 覆盖默认 Agent CLI 命令
+- `AGENT_PROVIDERS_JSON` / `AGENT_PROVIDERS_PATH`: 高级场景下整体覆盖或扩展后端 Provider 列表
 
-在「本机环境」中维护个人配置：
+个人中心只保留用户会日常维护的配置：
 
-- `workspaceMappings`: 中心项目到本机目录的映射
-- `agentProviders`: 本机 Agent Provider 命令和能力
-- `terminalPreference`: macOS Terminal/zsh 或 Windows Terminal/PowerShell
+- 「交付工作区」：用户本机全局交付产物仓目录、项目产物仓状态、Git SSH 凭证。
+- 「工程目录」：当前项目可访问的本机工程父目录。
 
-这些配置通过 Electron `safeStorage` 保存到本机。中心服务只接收 OS、能力摘要、在线心跳等非敏感信息，不保存本机绝对路径、Agent token 或终端命令密钥。
+本机配置通过 Electron `safeStorage` 或浏览器本地存储保存到当前客户端。中心服务只接收必要的客户端会话、OS 和能力摘要，不保存 Agent token 或终端命令密钥。
 
 ### 远程协作数据流
 
@@ -151,19 +187,32 @@ npm run desktop:build
 
 WebSocket 连接失败时，远程模式仍可通过 HTTP 读取列表、详情和补偿事件；页面会显示实时连接异常，运行日志和在线状态不会实时追加，用户可手动刷新恢复最新状态。
 
-### 本地数据迁移
+### Bootstrap 导入旧产物
 
-本地 Runner 提供迁移预览接口。Git-backed 模式下，既有 `docs/{需求号}`、`openspec/changes`、`docs/code_review` 产物应先进入项目产物仓并完成公开同步，再由中心记录 Git 版本索引：
+本地 Runner 提供 bootstrap importer，用于把已有 `docs/{需求号}`、`openspec/changes`、`docs/code_review` 和 workflow run log 导入中心索引。Git-backed 模式下，导入会先把受控产物复制到项目 AI 产物仓，执行 Git 同步，再向中心写入 import session、metadata 和 Git version 索引。
 
 ```bash
-curl "http://127.0.0.1:8718/api/ai-delivery/migration/plan?centerBaseUrl=http://127.0.0.1:8728&projectId=1"
+npm run bootstrap:plan -- \
+  --workspaceRoot /path/to/old-workspace \
+  --centerBaseUrl http://127.0.0.1:8728 \
+  --projectId 1 \
+  --userId 1
 
-curl -X POST "http://127.0.0.1:8718/api/ai-delivery/migration/import" \
-  -H "Content-Type: application/json" \
-  -d '{"centerBaseUrl":"http://127.0.0.1:8728","projectId":"1","userId":"1","dryRun":true}'
+npm run bootstrap:import -- \
+  --workspaceRoot /path/to/old-workspace \
+  --centerBaseUrl http://127.0.0.1:8728 \
+  --projectId 1 \
+  --userId 1 \
+  --clientSessionId 16
 ```
 
-先使用 `dryRun=true` 检查导入计划。旧 COS 产物仅作为 `LEGACY_COS` 历史只读版本保留；新流程不得再把 COS 作为产物事实源。
+先运行 `bootstrap:plan` 做 dry-run。导入计划会输出 requirement、stage、artifact、skipped、conflicts 和 `estimatedUploadBytes`，并过滤源码、依赖目录、本地 token、绝对路径和私密配置。正式导入必须提供 `clientSessionId`，用于定位当前客户端项目仓和 Git 同步状态。旧 COS 产物仅作为 `LEGACY_COS` 历史只读兼容；新流程不得再把 COS 作为产物事实源。
+
+常见处理：
+
+- `缺少 --clientSessionId`: 正式导入无法定位当前客户端交付工作区，先在桌面端完成项目仓初始化。
+- `不受控产物路径`: 文件不属于受控产物目录或疑似敏感材料，需手动确认后放入受控目录。
+- `Git sync failed`: 中心 metadata 会继续保留导入结果，失败 artifact 会记录到 manifest，可修复 Git 仓后重新执行 import resume。
 
 ## 📸 界面展示
 
@@ -195,7 +244,7 @@ curl -X POST "http://127.0.0.1:8718/api/ai-delivery/migration/import" \
 
 ![实施验证阶段](screenshots/04-implementation-verify.png)
 
-> 💡 **功能亮点**：任务清单可视化、测试覆盖率统计、运行日志实时展示（本地 SSE / 远程 WebSocket）。
+> 💡 **功能亮点**：任务清单可视化、测试覆盖率统计、运行日志通过中心 WebSocket 实时展示。
 
 ---
 
@@ -324,6 +373,9 @@ PRD 阶段的「澄清描述」会保存到 workflow 的 `prdClarification` 字�
 `coding-prd-analyzer`、`coding-design`、`coding-junit`、`coding-review` 不是普通 CLI。Runner 支持选择 Agent Provider 执行技能，默认包含：
 
 - **`codex`**：使用 `CODEX_COMMAND` 配置的 Codex CLI 命令执行 Prompt Envelope（默认选中）。
+- **`codebuddy`**：使用 `CODEBUDDY_COMMAND` 配置的 CodeBuddy CLI 命令执行 Prompt Envelope。
+- **`qoder`**：使用 `QODER_COMMAND` 配置的 Qoder CLI 命令，默认可执行名为 `qcode`。
+- **`qwen`**：使用 `QWEN_COMMAND` 配置的 Qwen CLI 命令。
 - **自定义 Agent**：可通过配置文件注册其他 Agent Provider。
 
 ### 默认 Codex 命令
@@ -356,7 +408,7 @@ CODEX_INTERACTIVE_COMMAND='codex --sandbox workspace-write -C {workspaceRoot} {p
 
 1. Runner 会把技能动作包装成 runtime 下的 `prompts/{runId}.md`
 2. 将 stdout/stderr 写入 runtime 下的 `runs/{runId}.jsonl`
-3. 本地模式通过 SSE 实时展示终端输出，远程中心模式通过 WebSocket run event 追加日志
+3. Agent 输出上传为中心 run event，并通过 WebSocket run 订阅追加到页面日志
 4. 用户可以复制生成的命令文本交给 Agent 执行；执行完成后在页面点击「刷新产物」重新索引文件。
 
 ### 本地终端执行
@@ -377,7 +429,7 @@ CODEX_INTERACTIVE_COMMAND='codex --sandbox workspace-write -C {workspaceRoot} {p
 
 - ✅ **路径限制**：Runner 只允许读写当前工作区内的文件路径。
 - ✅ **参数化执行**：OpenSpec 命令使用参数数组执行，不使用 shell 字符串拼接，防止注入攻击。
-- ✅ **显式配置**：Agent Provider 只能来自本地显式配置，页面不能直接传入任意命令。
+- ✅ **显式配置**：Agent Provider 只能来自 Runner 后端默认配置、env 或显式 Provider 配置文件，页面不能直接传入任意命令。
 - ✅ **并发控制**：修改型动作使用需求级锁文件，避免同一需求并发写入。
 - ✅ **Hash 校验**：Markdown 保存会比较文件 hash，发现外部修改时阻止覆盖，防止数据丢失。
 - ✅ **本地配置隔离**：桌面端 workspace 映射、Agent token、终端偏好只保存在本机安全存储。
@@ -390,7 +442,7 @@ CODEX_INTERACTIVE_COMMAND='codex --sandbox workspace-write -C {workspaceRoot} {p
 - **前端框架**：Vue 3 + TypeScript + Vite
 - **状态管理**：Pinia
 - **UI 组件**：Element Plus
-- **实时通信**：本地 Server-Sent Events (SSE)，远程 WebSocket/STOMP
+- **实时通信**：中心 WebSocket/STOMP，HTTP 补偿接口用于断线恢复
 - **后端服务**：Node.js + Express
 - **代码高亮**：highlight.js
 - **Markdown 渲染**：markdown-it + mermaid
@@ -410,10 +462,10 @@ CODEX_INTERACTIVE_COMMAND='codex --sandbox workspace-write -C {workspaceRoot} {p
 ## 💬 常见问题
 
 ### Q: 如何查看 Agent 执行的详细日志？
-A: 在每个需求详情页，点击「运行日志」按钮，会打开抽屉展示实时终端日志。本地模式使用 SSE，远程中心模式使用 WebSocket run event，断线后会通过补偿接口补齐。
+A: 在每个需求详情页点击「运行日志」按钮，会打开抽屉展示实时终端日志。日志来自中心 WebSocket run event，断线后会通过补偿接口补齐。
 
 ### Q: 支持哪些 Agent Provider？
-A: 默认支持 `codex`（Codex CLI）。可通过配置文件注册其他自定义 Agent。下拉框默认选中 Codex，简化了用户操作流程。
+A: 默认支持 `codex`、`codebuddy`、`qoder`、`qwen`。命令模板通过 env 变量配置，也可通过 `AGENT_PROVIDERS_JSON` 或 `AGENT_PROVIDERS_PATH` 扩展。
 
 ### Q: 如何处理并发冲突？
 A: 系统会自动使用需求级锁文件，当某个需求正在执行修改操作时，其他操作会被阻塞，直到锁释放。

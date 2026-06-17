@@ -82,6 +82,32 @@ vi.mock('@/api/client', () => ({
 }));
 
 describe('ArtifactPreviewDialog', () => {
+  function readBlobText(blob: Blob) {
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(blob);
+    });
+  }
+
+  function mockDownloadLink() {
+    const clickedAnchors: HTMLAnchorElement[] = [];
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function click(this: HTMLAnchorElement) {
+      clickedAnchors.push(this);
+    });
+    const createObjectURL = vi.fn(() => 'blob:artifact-download');
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { value: createObjectURL, configurable: true });
+    Object.defineProperty(URL, 'revokeObjectURL', { value: revokeObjectURL, configurable: true });
+    return {
+      clickSpy,
+      createObjectURL,
+      revokeObjectURL,
+      clickedAnchor: () => clickedAnchors[clickedAnchors.length - 1]
+    };
+  }
+
   function mockLocalStorage() {
     const values = new Map<string, string>();
     const storage = {
@@ -97,6 +123,7 @@ describe('ArtifactPreviewDialog', () => {
 
   beforeEach(() => {
     mockLocalStorage();
+    vi.useRealTimers();
     setApiRuntimeConfig({
       runnerBaseUrl: 'http://127.0.0.1:8718',
       centerBaseUrl: 'http://127.0.0.1:8728',
@@ -268,6 +295,112 @@ sequenceDiagram
     expect(width).toBeGreaterThan(1200);
     expect(minWidth).toBe(width);
     expect(svgStyle).toContain('max-width: none');
+  });
+
+  it('下载 Markdown 使用需求编号和时间戳命名，并导出当前正文', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 5, 16, 8, 9, 10));
+    const downloadMock = mockDownloadLink();
+    const wrapper = mount(ArtifactPreviewDialog);
+
+    await (wrapper.vm as any).open({
+      id: 'prd-analysis',
+      stage: 'PRD',
+      label: 'PRD 分析文档',
+      path: 'docs/172014/prd/analysis.md',
+      kind: 'markdown',
+      exists: true
+    });
+    await nextTick();
+
+    await (wrapper.vm as any).downloadMarkdownArtifact('markdown');
+
+    expect(downloadMock.clickedAnchor()?.download).toBe('172014_20260616080910_PRD_分析文档.md');
+    const blob = downloadMock.createObjectURL.mock.calls[0][0] as Blob;
+    vi.useRealTimers();
+    await expect(readBlobText(blob)).resolves.toContain('# PRD');
+  });
+
+  it('下载 HTML 使用已渲染预览内容保留 Mermaid SVG', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 5, 16, 8, 9, 10));
+    const downloadMock = mockDownloadLink();
+    vi.mocked(apiClient.readArtifact).mockResolvedValueOnce({
+      artifact: { hash: 'hash' },
+      content: `# 技术方案
+
+\`\`\`mermaid
+sequenceDiagram
+    A->>B: 请求
+\`\`\`
+`
+    });
+    const wrapper = mount(ArtifactPreviewDialog);
+
+    await (wrapper.vm as any).open({
+      id: 'technical-design',
+      stage: 'TECH_DESIGN',
+      label: '技术方案评审文档',
+      path: 'docs/172014/prd/analysis.md',
+      kind: 'markdown',
+      exists: true
+    });
+    await nextTick();
+    await flushPromises();
+
+    await (wrapper.vm as any).downloadMarkdownArtifact('html');
+
+    expect(downloadMock.clickedAnchor()?.download).toBe('172014_20260616080910_技术方案评审文档.html');
+    const blob = downloadMock.createObjectURL.mock.calls[0][0] as Blob;
+    vi.useRealTimers();
+    const html = await readBlobText(blob);
+    expect(html).toContain('<svg');
+    expect(html).not.toContain('sequenceDiagram');
+  });
+
+  it('下载 PDF 打开含渲染内容的打印窗口', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 5, 16, 8, 9, 10));
+    vi.mocked(apiClient.readArtifact).mockResolvedValueOnce({
+      artifact: { hash: 'hash' },
+      content: `# 技术方案
+
+\`\`\`mermaid
+sequenceDiagram
+    A->>B: 请求
+\`\`\`
+`
+    });
+    const write = vi.fn();
+    const printWindow = {
+      document: {
+        open: vi.fn(),
+        write,
+        close: vi.fn()
+      },
+      focus: vi.fn(),
+      print: vi.fn()
+    };
+    vi.spyOn(window, 'open').mockReturnValue(printWindow as unknown as Window);
+    const wrapper = mount(ArtifactPreviewDialog);
+
+    await (wrapper.vm as any).open({
+      id: 'technical-design',
+      stage: 'TECH_DESIGN',
+      label: '技术方案评审文档',
+      path: 'docs/172014/prd/analysis.md',
+      kind: 'markdown',
+      exists: true
+    });
+    await nextTick();
+    await flushPromises();
+
+    await (wrapper.vm as any).downloadMarkdownArtifact('pdf');
+
+    const html = write.mock.calls[0][0] as string;
+    expect(html).toContain('<title>172014_20260616080910_技术方案评审文档</title>');
+    expect(html).toContain('<svg');
+    expect(printWindow.print).toHaveBeenCalled();
   });
 
   it('打开图片产物时直接展示图片预览', async () => {

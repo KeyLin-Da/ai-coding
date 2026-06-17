@@ -1,11 +1,12 @@
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createEmptyStages, type RequirementWorkflow } from '../../shared/workflow';
+import { createEmptyStages, type AgentProvider, type RequirementWorkflow } from '../../shared/workflow';
 import { useWorkflowStore } from '@/stores/workflow';
 import { apiClient } from '@/api/client';
 
 vi.mock('@/api/client', () => ({
   apiClient: {
+    listAgents: vi.fn(),
     listRequirements: vi.fn(),
     getRequirement: vi.fn()
   }
@@ -51,6 +52,32 @@ describe('workflow store loading', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
+  });
+
+  it('从后端 API 加载 Agent Provider', async () => {
+    const agents: AgentProvider[] = [
+      {
+        id: 'codex',
+        name: 'Codex',
+        inputMode: 'STDIN',
+        available: true,
+        supportsStreaming: true
+      },
+      {
+        id: 'codebuddy',
+        name: 'CodeBuddy',
+        inputMode: 'STDIN',
+        available: true,
+        supportsStreaming: true
+      }
+    ];
+    vi.mocked(apiClient.listAgents).mockResolvedValue(agents);
+    const store = useWorkflowStore();
+
+    await store.loadAgents();
+
+    expect(apiClient.listAgents).toHaveBeenCalledTimes(1);
+    expect(store.agents).toEqual(agents);
   });
 
   it('同一个需求详情请求进行中时复用同一个 Promise 并记录 lastEventId', async () => {

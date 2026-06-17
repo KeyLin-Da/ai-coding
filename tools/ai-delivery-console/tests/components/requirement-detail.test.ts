@@ -364,7 +364,7 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     });
     vi.mocked(apiClient.getDeliveryWorkspace).mockResolvedValue({
       id: 1,
-      clientSessionId: 20,
+      projectId: 10,
       localPath: '/tmp/ai-delivery',
       status: 'ACTIVE'
     });

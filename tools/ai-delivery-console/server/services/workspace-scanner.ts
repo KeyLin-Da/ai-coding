@@ -108,17 +108,6 @@ export async function scanRequirementArtifacts(
   if (techDesignQuestions) {
     artifacts.push(techDesignQuestions);
   }
-  const techDesignAnnotations = await existingFileArtifact(
-    workspaceRoot,
-    'technical-design-annotations',
-    'TECH_DESIGN',
-    '技术方案批注记录',
-    `docs/${id}/technical-design/annotations/comments.md`,
-    'markdown'
-  );
-  if (techDesignAnnotations) {
-    artifacts.push(techDesignAnnotations);
-  }
   const techDesignInputLedger = await existingFileArtifact(
     workspaceRoot,
     'technical-design-input-ledger',
@@ -139,6 +128,20 @@ export async function scanRequirementArtifacts(
         `technical-design-question-${artifacts.length}`,
         'TECH_DESIGN',
         `技术方案答疑 ${path.basename(file, path.extname(file))}`,
+        relative,
+        'markdown'
+      )
+    );
+  }
+  const techDesignAnnotationSnapshots = await listFiles(path.join(workspaceRoot, 'docs', id, 'technical-design', 'annotation-snapshots'), 1);
+  for (const file of techDesignAnnotationSnapshots.filter((item) => /\.md$/i.test(item))) {
+    const relative = path.relative(workspaceRoot, file);
+    artifacts.push(
+      await fileArtifact(
+        workspaceRoot,
+        `technical-design-annotation-snapshot-${artifacts.length}`,
+        'TECH_DESIGN',
+        `技术方案批注消费快照 ${path.basename(file, path.extname(file))}`,
         relative,
         'markdown'
       )

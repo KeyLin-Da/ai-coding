@@ -225,7 +225,7 @@ describe('action-adapters', () => {
     );
   });
 
-  it('普通需求再次生成技术方案命令时将批注摘要放在答疑记录之前', () => {
+  it('普通需求再次生成技术方案命令时不再自动携带本地批注摘要', () => {
     const item = {
       ...workflow(),
       artifacts: [
@@ -266,7 +266,7 @@ describe('action-adapters', () => {
     };
 
     expect(internalForTests.buildSkillCommand(item, { actionType: 'DESIGN_GENERATE', params: {} })).toBe(
-      '/coding-design d=docs/172014/prd/analysis.md,docs/172014/technical-design/design_review.md,docs/172014/technical-design/annotations/comments.md,docs/172014/technical-design/questions.md,docs/172014/technical-design/files/source-1.png r=172014'
+      '/coding-design d=docs/172014/prd/analysis.md,docs/172014/technical-design/design_review.md,docs/172014/technical-design/questions.md,docs/172014/technical-design/files/source-1.png r=172014'
     );
   });
 
@@ -443,7 +443,7 @@ describe('action-adapters', () => {
     expect(command).not.toContain('/prd/');
   });
 
-  it('缺陷再次生成技术方案命令时将批注摘要放在答疑记录之前', () => {
+  it('缺陷再次生成技术方案命令时不再自动携带本地批注摘要', () => {
     const item = {
       ...workflow(),
       title: '邀请好友积分异常',
@@ -491,7 +491,7 @@ describe('action-adapters', () => {
     const command = internalForTests.buildSkillCommand(item, { actionType: 'DESIGN_GENERATE', params: {} });
 
     expect(command).toBe(
-      '/coding-design d=邀请好友积分异常,后台配置为 1，实际奖励 10,docs/172014/technical-design/design_review.md,docs/172014/technical-design/annotations/comments.md,docs/172014/technical-design/questions.md,docs/172014/technical-design/files/source-1.png r=172014'
+      '/coding-design d=邀请好友积分异常,后台配置为 1，实际奖励 10,docs/172014/technical-design/design_review.md,docs/172014/technical-design/questions.md,docs/172014/technical-design/files/source-1.png r=172014'
     );
     expect(command).not.toContain('/prd/');
   });

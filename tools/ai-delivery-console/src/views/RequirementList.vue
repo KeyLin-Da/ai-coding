@@ -169,11 +169,13 @@ import type { RequirementInput, RequirementType, RequirementWorkflow, RunRecord,
 import { actionTypeLabels, defaultBranchName, requirementTypeLabels, shouldSyncBranchName, stageLabels, statusLabels } from '@shared/workflow';
 import { useWorkflowStore } from '@/stores/workflow';
 import { useProjectStore } from '@/stores/project';
+import { useSettingsStore } from '@/stores/settings';
 import { apiClient, type ProjectRepoStateVO, type ProjectRepoSyncStatus } from '@/api/client';
 import type { Subdirectory } from '@/services/desktop-local-config';
 
 const store = useWorkflowStore();
 const projectStore = useProjectStore();
+const settings = useSettingsStore();
 const router = useRouter();
 const dialogVisible = ref(false);
 const form = reactive<RequirementInput>({
@@ -428,6 +430,7 @@ async function loadRepoReadiness() {
     return;
   }
   try {
+    await settings.requireClientSessionId();
     projectRepoState.value = await apiClient.getProjectRepositoryStatus(projectStore.current.id);
   } catch {
     projectRepoState.value = undefined;

@@ -4,10 +4,13 @@ const fs = require('node:fs/promises');
 const http = require('node:http');
 const https = require('node:https');
 const path = require('node:path');
+const { loadProfileEnv, resolveEnvProfile } = require('../scripts/env-loader.cjs');
 
 const isDev = !app.isPackaged;
 let devServerProcess;
 let runnerServerProcess;
+
+loadProfileEnv(path.join(__dirname, '..'));
 
 function configPath() {
   return path.join(app.getPath('userData'), 'local-config.bin');
@@ -68,7 +71,7 @@ async function ensureDevServer(devUrl) {
   }
 
   const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  devServerProcess = spawn(npmCommand, ['run', 'dev'], {
+  devServerProcess = spawn(npmCommand, ['run', `dev:${resolveEnvProfile()}`], {
     cwd: path.join(__dirname, '..'),
     env: process.env,
     stdio: 'inherit'
@@ -87,7 +90,7 @@ async function ensureRunnerServer(runnerUrl) {
   }
 
   const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  runnerServerProcess = spawn(npmCommand, ['run', 'server:dev'], {
+  runnerServerProcess = spawn(npmCommand, ['run', `server:dev:${resolveEnvProfile()}`], {
     cwd: path.join(__dirname, '..'),
     env: { ...process.env, FORCE_COLOR: '1' },
     stdio: 'inherit',
@@ -141,8 +144,9 @@ async function createWindow() {
     }
   });
 
-  const devUrl = process.env.AI_DELIVERY_DESKTOP_URL || 'http://127.0.0.1:5178';
-  const runnerUrl = process.env.AI_DELIVERY_RUNNER_URL || 'http://127.0.0.1:8718';
+  const devPort = process.env.VITE_AI_DELIVERY_DEV_PORT || '5178';
+  const devUrl = `http://127.0.0.1:${devPort}`;
+  const runnerUrl = process.env.VITE_AI_DELIVERY_RUNNER_BASE_URL || 'http://127.0.0.1:8718';
 
   // 开发模式和生产模式都启动 Runner 后端
   await ensureRunnerServer(`${runnerUrl}/api/ai-delivery/health`);

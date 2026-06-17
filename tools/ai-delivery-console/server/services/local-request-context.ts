@@ -27,7 +27,7 @@ export function parseLocalRequestContext(request: IncomingMessage, url: URL): Lo
       headerValue(request, 'x-center-base-url') ||
       headerValue(request, 'x-ai-delivery-center-base-url') ||
       url.searchParams.get('centerBaseUrl') ||
-      process.env.AI_DELIVERY_CENTER_BASE_URL ||
+      process.env.VITE_AI_DELIVERY_CENTER_BASE_URL ||
       ''
   };
 }

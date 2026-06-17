@@ -5,12 +5,6 @@ export interface WorkspaceMapping {
   localPath: string;
 }
 
-export interface LocalAgentProviderConfig {
-  id: string;
-  command: string;
-  enabled: boolean;
-}
-
 export interface DesktopLocalConfig {
   centerBaseUrl: string;
   runnerBaseUrl: string;
@@ -20,7 +14,6 @@ export interface DesktopLocalConfig {
   projectId: string;
   terminalPreference: string;
   workspaceMappings: WorkspaceMapping[];
-  agentProviders: LocalAgentProviderConfig[];
 }
 
 export interface Subdirectory {
@@ -47,22 +40,20 @@ declare global {
 
 const LOCAL_STORAGE_KEY = 'ai-delivery.desktop.local-config';
 
+function envDefault(value: string | undefined, fallback: string): string {
+  return value && value.trim() ? value.trim() : fallback;
+}
+
 export function defaultDesktopLocalConfig(): DesktopLocalConfig {
   return {
-    centerBaseUrl: 'http://127.0.0.1:8728',
-    runnerBaseUrl: 'http://127.0.0.1:8718',
+    centerBaseUrl: envDefault(import.meta.env.VITE_AI_DELIVERY_CENTER_BASE_URL, 'http://127.0.0.1:8728'),
+    runnerBaseUrl: envDefault(import.meta.env.VITE_AI_DELIVERY_RUNNER_BASE_URL, 'http://127.0.0.1:8718'),
     userId: '',
     clientSessionId: '',
     teamId: '',
     projectId: '',
     terminalPreference: defaultTerminalPreference(detectDesktopOs()),
-    workspaceMappings: [],
-    agentProviders: [
-      { id: 'CODEX', command: 'codex', enabled: true },
-      { id: 'OPENSPEC', command: 'openspec', enabled: true },
-      { id: 'GIT', command: 'git', enabled: true },
-      { id: 'NODE', command: 'node', enabled: true }
-    ]
+    workspaceMappings: []
   };
 }
 
@@ -127,9 +118,13 @@ function defaultTerminalPreference(osType: DesktopOsType): string {
 function mergeConfig(value: Partial<DesktopLocalConfig>): DesktopLocalConfig {
   const defaults = defaultDesktopLocalConfig();
   return {
-    ...defaults,
-    ...value,
-    workspaceMappings: Array.isArray(value.workspaceMappings) ? value.workspaceMappings : defaults.workspaceMappings,
-    agentProviders: Array.isArray(value.agentProviders) ? value.agentProviders : defaults.agentProviders
+    centerBaseUrl: defaults.centerBaseUrl,
+    runnerBaseUrl: defaults.runnerBaseUrl,
+    userId: value.userId || defaults.userId,
+    clientSessionId: value.clientSessionId || defaults.clientSessionId,
+    teamId: value.teamId || defaults.teamId,
+    projectId: value.projectId || defaults.projectId,
+    terminalPreference: value.terminalPreference || defaults.terminalPreference,
+    workspaceMappings: Array.isArray(value.workspaceMappings) ? value.workspaceMappings : defaults.workspaceMappings
   };
 }

@@ -185,10 +185,10 @@ describe('router requirement detail', () => {
 
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(String(input));
-      if (url.pathname === '/api/ai-delivery/users/me/delivery-workspace') {
+      if (url.pathname === '/api/ai-delivery/projects/5/delivery-workspace') {
         return centerResponse({
           id: 1,
-          clientSessionId: 99,
+          projectId: 5,
           localPath: deliveryRoot,
           status: 'ACTIVE'
         });
@@ -267,10 +267,10 @@ describe('router requirement detail', () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(String(input));
       calledPaths.push(url.pathname);
-      if (url.pathname === '/api/ai-delivery/users/me/delivery-workspace') {
+      if (url.pathname === '/api/ai-delivery/projects/5/delivery-workspace') {
         return centerResponse({
           id: 1,
-          clientSessionId: 99,
+          projectId: 5,
           localPath: deliveryRoot,
           status: 'ACTIVE'
         });
@@ -370,6 +370,87 @@ describe('router requirement detail', () => {
     expect(calledPaths).not.toContain(`/api/ai-delivery/requirements/${requirementId}/workspace-states/report`);
   });
 
+  it('流程动作遇到旧中心缺少协作占用接口时降级执行', async () => {
+    const requirementId = '141848';
+    const workspaceRoot = await tmpDir('ai-delivery-router-workspace-');
+    const deliveryRoot = await tmpDir('ai-delivery-router-delivery-');
+    await fs.mkdir(path.join(deliveryRoot, 'opp-artifacts'), { recursive: true });
+    const calledPaths: string[] = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      calledPaths.push(url.pathname);
+      if (url.pathname === '/api/ai-delivery/projects/5/delivery-workspace') {
+        return centerResponse({
+          id: 1,
+          projectId: 5,
+          localPath: deliveryRoot,
+          status: 'ACTIVE'
+        });
+      }
+      if (url.pathname === '/api/ai-delivery/projects/my') {
+        return centerResponse([
+          {
+            id: 5,
+            name: 'OPP',
+            code: 'opp',
+            repository: {
+              id: 10,
+              projectId: 5,
+              provider: 'GITLAB',
+              repoUrl: 'git@git.example.com:opp/ai-delivery-artifacts.git',
+              defaultBranch: 'main',
+              repoCode: 'opp-artifacts',
+              status: 'ACTIVE'
+            }
+          }
+        ]);
+      }
+      if (url.pathname === `/api/ai-delivery/requirements/${requirementId}`) {
+        return centerResponse({
+          id: Number(requirementId),
+          projectId: 5,
+          requirementId,
+          title: '门店定位菜单优化',
+          requirementType: 'REQUIREMENT',
+          status: 'DRAFT',
+          currentStage: 'PRD'
+        });
+      }
+      if (url.pathname === `/api/ai-delivery/requirements/${requirementId}/workspace-states/assert-writable`) {
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({ message: 'not found' })
+        } as Response;
+      }
+      return centerResponse({});
+    });
+    vi.stubGlobal('fetch', fetchImpl);
+
+    const router = createRouter(workspaceRoot);
+    const result = response();
+    await router(
+      requestWithBody(
+        'POST',
+        `/api/ai-delivery/requirements/${requirementId}/actions`,
+        {
+          'content-type': 'application/json',
+          'x-user-id': '1',
+          'x-project-id': '5',
+          'x-client-session-id': '99',
+          'x-center-base-url': 'http://center.local'
+        },
+        Buffer.from(JSON.stringify({ actionType: 'REFRESH_ARTIFACTS' }))
+      ),
+      result.response
+    );
+    const { status, body } = await result.done;
+
+    expect(status).toBe(200);
+    expect(body.data.run.status).toBe('SUCCEEDED');
+    expect(calledPaths).toContain(`/api/ai-delivery/requirements/${requirementId}/workspace-states/assert-writable`);
+  });
+
   it('PRD 澄清成功后回到待审核并保留下游产物', () => {
     const now = new Date().toISOString();
     const stages = createEmptyStages();
@@ -467,5 +548,25 @@ describe('router requirement detail', () => {
     expect(updated.techDesignConsumedQuestionPaths).toEqual(['docs/172014/technical-design/questions/20260604-173000-question.md']);
     expect(annotations.annotations[0].consumedAt).toBeUndefined();
     expect(summary).toContain('Redis key');
+  });
+
+  it('中心批注在技术方案生成失败时不会被消费', async () => {
+    const workspaceRoot = await tmpDir('ai-delivery-tech-design-center-failed-');
+    const fetchImpl = vi.fn(async () => centerResponse([]));
+    const workflow = {
+      ...techDesignConsumptionWorkflow(),
+      id: 100
+    };
+
+    const updated = await consumeTechDesignInputsAfterRun(
+      workspaceRoot,
+      workflow,
+      designGenerateRun('FAILED'),
+      { userId: 1, fetchImpl }
+    );
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(updated.techDesignClarification).toBe('补充异常场景');
+    expect(updated.techDesignSourceFiles).toHaveLength(1);
   });
 });

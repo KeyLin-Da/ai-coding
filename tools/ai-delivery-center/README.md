@@ -1,6 +1,6 @@
 # AI Delivery Center
 
-Spring Boot 协作中心服务，负责 AI 需求交付的团队、需求流程、Git 产物版本索引、Job、运行日志和实时事件。客户端仍在本机执行 Git、OpenSpec 和 Agent CLI；中心服务只保存共享事实和非敏感能力摘要，不保存用户 Git 私钥。
+Spring Boot 协作中心服务，负责 AI 需求交付的团队、需求流程、Git 产物版本索引、Job、运行日志、实时事件、bootstrap import 和上线前预检。客户端仍在本机执行 Git、OpenSpec 和 Agent CLI；中心服务只保存共享事实和非敏感能力摘要，不保存用户 Git 私钥、本机绝对路径或 Agent token。
 
 ## Git-backed 产物事实源
 
@@ -10,6 +10,23 @@ Spring Boot 协作中心服务，负责 AI 需求交付的团队、需求流程�
 - 产物同步成功后，中心写入 `ad_artifact_sync` 和 `ad_artifact_git_version`，`ad_artifact.current_version_id` 指向 Git 版本索引。
 - 旧 `ad_artifact_version` / COS 版本仅作为 `LEGACY_COS` 历史只读兼容，不再作为新产物事实源。
 - WebSocket 事件包括 `project.repo.state-changed`、`project.repo.pull-required`、`artifact.git-sync.blocked`、`artifact.git-sync.completed`。
+
+## Bootstrap Import
+
+Local Runner 通过中心导入 API 把旧工作区产物迁入 Git-backed 项目仓：
+
+- `POST /api/ai-delivery/import-sessions`: 创建导入会话，记录 project、operator、manifest hash 和 dry-run 标记。
+- `POST /api/ai-delivery/import-sessions/{sessionId}/records`: 幂等导入 requirement、stage、review、issue、run、run event、artifact 和 Git version metadata。
+- `GET /api/ai-delivery/import-sessions/{sessionId}`: 查询导入进度和 imported、skipped、failed、duplicated、conflicted 计数。
+- `POST /api/ai-delivery/import-sessions/{sessionId}/complete`: 完成导入会话。
+
+导入 API 会校验项目成员权限，拒绝本地绝对路径和敏感字段。重复的 `logicalPath + sha256` source key 会返回 `DUPLICATED`，不会重复写入 Git artifact version。
+
+## Preflight
+
+`POST /api/ai-delivery/preflight` 用于上线前检查中心服务、项目权限、DB schema、Redis runtime namespace 和 WebSocket 配置。默认检查项为 `CENTER`、`PROJECT_PERMISSION`、`DB`、`REDIS`、`WEBSOCKET`，返回 `PASS`、`WARN` 或 `FAIL`。
+
+当前产物事实源为 Git-only，预检不再要求 COS 上传链路。单实例本地调试时 Redis 不可用会降级为 `WARN`；多实例部署或 `AI_DELIVERY_CENTER_WEBSOCKET_BROKER=redis` 时 Redis 不可用会返回 `FAIL`。
 
 ## 分层约定
 
@@ -21,13 +38,13 @@ Spring Boot 协作中心服务，负责 AI 需求交付的团队、需求流程�
 - `model/vo`: 响应视图对象。
 - `common/api`: 统一响应、分页等接口基础结构。
 - `common/error`: 错误码、业务异常和全局异常处理。
-- `config`: Spring、Security、COS、Redis、MyBatis-Plus 等配置。
+- `config`: Spring、Security、Redis、WebSocket、Bootstrap Import、MyBatis-Plus 等配置。
 
 ## MapStruct 约定
 
 - 转换器放在 `converter` 包，命名为 `{Domain}Converter`。
 - entity 与 VO/DTO 的简单字段直接映射，枚举值保持英文大写。
-- 涉及 JSON、COS URL、权限字段的转换由 service 显式处理，避免 converter 隐式访问外部依赖。
+- 涉及 JSON、Git version、权限字段的转换由 service 显式处理，避免 converter 隐式访问外部依赖。
 
 ## 本地启动
 
@@ -36,7 +53,7 @@ cd tools/ai-delivery-center
 mvn spring-boot:run
 ```
 
-默认端口为 `8728`。MySQL、Redis、COS、JWT 和 WebSocket 配置均可通过 `AI_DELIVERY_CENTER_*` 环境变量覆盖，也可由 Nacos 提供同名配置。
+默认端口为 `8728`。MySQL、Redis、JWT、WebSocket、Bootstrap Import 和 Nacos 配置均可通过 `AI_DELIVERY_CENTER_*` 环境变量覆盖，也可由 Nacos 提供同名配置。
 
 ## WebSocket 实时通道
 

@@ -1,6 +1,6 @@
 # AI Delivery Center 部署文档
 
-`ai-delivery-center` 是 AI 需求交付桌面协作模式的共享事实源。它保存团队、用户、项目、需求流程、审核、issue、Job、运行日志索引、领域事件和产物业务版本；产物文件内容存放在腾讯云 COS，客户端本机路径和 Agent 密钥不进入中心库。
+`ai-delivery-center` 是 AI 需求交付 remote-only 协作模式的共享事实源。它保存团队、用户、项目、需求流程、审核、issue、Job、运行日志索引、领域事件、bootstrap import 记录和 Git 产物版本索引；产物文件内容以项目 AI 产物 Git 仓 commit/blob/hash 为准，客户端本机路径和 Agent 密钥不进入中心库。
 
 ## 运行依赖
 
@@ -8,7 +8,6 @@
 - Maven 3.8+
 - MySQL 8.x
 - Redis 6.x+
-- 腾讯云 COS Bucket，建议开启 Bucket Versioning
 - Nacos 可选，用于 OPP 微服务体系内统一配置和服务发现
 
 ## 数据库
@@ -18,7 +17,8 @@
 关键表：
 
 - `ad_requirement`、`ad_workflow_stage`、`ad_review`、`ad_issue`: 共享流程、阶段、审核和问题
-- `ad_artifact`、`ad_artifact_version`、`ad_file_object`: 逻辑产物、业务版本和 COS 对象元数据
+- `ad_artifact`、`ad_artifact_git_version`、`ad_artifact_sync`: 逻辑产物、Git 版本索引和公开同步记录
+- `ad_import_session`、`ad_import_item`: bootstrap import 会话和逐项导入结果
 - `ad_job`、`ad_run`、`ad_run_event`: Local Runner Job 和共享运行日志
 - `ad_domain_event`、`ad_client_session`、`ad_ws_session`: 实时协作事件、桌面客户端和 WebSocket 在线会话
 - `ad_execution_lock`: 人工阶段动作占用
@@ -36,7 +36,7 @@
 | `AI_DELIVERY_CENTER_DATASOURCE_URL` | MySQL JDBC URL | `jdbc:mysql://127.0.0.1:3306/ai_delivery_center...` |
 | `AI_DELIVERY_CENTER_DATASOURCE_USERNAME` | MySQL 用户名 | `root` |
 | `AI_DELIVERY_CENTER_DATASOURCE_PASSWORD` | MySQL 密码 | 空 |
-| `AI_DELIVERY_CENTER_FLYWAY_ENABLED` | 是否启用 Flyway migration | `true` |
+| `AI_DELIVERY_CENTER_FLYWAY_ENABLED` | 是否启用 Flyway migration | `false` |
 | `AI_DELIVERY_CENTER_FLYWAY_BASELINE_ON_MIGRATE` | 非空 schema 无历史表时是否自动 baseline | `true` |
 | `AI_DELIVERY_CENTER_FLYWAY_BASELINE_VERSION` | baseline 版本，设为 0 后仍会执行 V1 | `0` |
 | `AI_DELIVERY_CENTER_REDIS_HOST` | Redis host | `127.0.0.1` |
@@ -44,12 +44,6 @@
 | `AI_DELIVERY_CENTER_REDIS_PASSWORD` | Redis 密码 | 空 |
 | `AI_DELIVERY_CENTER_REDIS_DATABASE` | Redis database | `0` |
 | `AI_DELIVERY_CENTER_REDIS_KEY_PREFIX` | Redis key 前缀 | `ai-delivery` |
-| `AI_DELIVERY_CENTER_COS_BUCKET` | COS Bucket | 空 |
-| `AI_DELIVERY_CENTER_COS_REGION` | COS Region | `ap-guangzhou` |
-| `AI_DELIVERY_CENTER_COS_SECRET_ID` | COS SecretId | 空 |
-| `AI_DELIVERY_CENTER_COS_SECRET_KEY` | COS SecretKey | 空 |
-| `AI_DELIVERY_CENTER_COS_SIGNED_URL_TTL` | 预签名 URL 有效期 | `10m` |
-| `AI_DELIVERY_CENTER_COS_BUCKET_VERSIONING_ENABLED` | 是否要求 Bucket Versioning | `true` |
 | `AI_DELIVERY_CENTER_JOB_LEASE_TTL` | Job 领取租约 TTL | `60s` |
 | `AI_DELIVERY_CENTER_JOB_HEARTBEAT_INTERVAL` | 客户端续约间隔 | `20s` |
 | `AI_DELIVERY_CENTER_JOB_MAX_RETRY_TIMES` | Job 最大重试次数 | `3` |
@@ -61,6 +55,9 @@
 | `AI_DELIVERY_CENTER_WEBSOCKET_SESSION_IDLE_TIMEOUT` | WebSocket session 空闲离线阈值 | `90s` |
 | `AI_DELIVERY_CENTER_WEBSOCKET_BROKER` | 实时事件广播实现：`local` 或 `redis` | `local` |
 | `AI_DELIVERY_CENTER_WEBSOCKET_REDIS_CHANNEL_PREFIX` | Redis Pub/Sub channel 前缀 | `ai-delivery:ws-events` |
+| `AI_DELIVERY_CENTER_WEBSOCKET_REDIS_REQUIRED` | 是否把 Redis 不可用视为阻断失败 | `false` |
+| `AI_DELIVERY_CENTER_IMPORT_MAX_FILE_SIZE` | bootstrap import 单文件大小上限 | `104857600` |
+| `AI_DELIVERY_CENTER_IMPORT_MANIFEST_RETENTION_DAYS` | import manifest 保留天数 | `30` |
 | `AI_DELIVERY_CENTER_JWT_ISSUER` | JWT issuer | `ai-delivery-center` |
 | `AI_DELIVERY_CENTER_JWT_SECRET` | JWT 签名密钥 | `change-me` |
 | `AI_DELIVERY_CENTER_ACCESS_TOKEN_TTL` | Access token 有效期 | `8h` |
@@ -70,7 +67,7 @@
 | `AI_DELIVERY_CENTER_NACOS_NAMESPACE` | Nacos namespace | 空 |
 | `AI_DELIVERY_CENTER_NACOS_GROUP` | Nacos group | `DEFAULT_GROUP` |
 
-生产环境必须覆盖 `AI_DELIVERY_CENTER_JWT_SECRET`、数据库密码和 COS 密钥，不要把这些值提交到仓库。
+生产环境必须覆盖 `AI_DELIVERY_CENTER_JWT_SECRET` 和数据库密码，不要把这些值提交到仓库。多实例部署建议设置 `AI_DELIVERY_CENTER_WEBSOCKET_BROKER=redis`，并将 `AI_DELIVERY_CENTER_WEBSOCKET_REDIS_REQUIRED=true` 纳入预检阻断项。
 
 ### Flyway 接管已有库
 
@@ -85,23 +82,84 @@ spring.flyway.baseline-version: 0
 
 生产环境接入已有库前仍建议先确认 `AI_DELIVERY_CENTER_DATASOURCE_URL` 指向正确 schema，并备份数据库。
 
-## COS 版本管理
+## Git-backed 产物版本管理
 
-业务版本由数据库管理，COS 只保存不可变文件内容：
+业务版本由数据库索引，文件内容由项目 AI 产物 Git 仓保存：
 
-1. 客户端请求 `POST /api/ai-delivery/artifact-upload-sessions`，中心服务生成 COS key 和预签名上传 URL。
-2. 客户端 PUT 文件到 COS。
-3. 客户端请求 `POST /api/ai-delivery/artifact-versions/complete`。
-4. 中心服务校验 COS 对象 `sha256`、`size`、`contentType`，创建 `ad_file_object` 和 `ad_artifact_version`。
-5. 事务内更新 `ad_artifact.current_version_id`，写入 `ad_domain_event` 并广播。
+1. Local Runner 在项目仓中生成或更新 `docs/{需求号}`、`openspec/changes`、`docs/code_review` 等受控产物。
+2. 用户在页面确认公开同步计划，Runner 执行 `git add`、`commit`、`pull --rebase`、`push`。
+3. push 成功后 Runner 回写中心 `ad_artifact_sync` 和 `ad_artifact_git_version`。
+4. 中心在事务内更新 `ad_artifact.current_version_id`，写入 `ad_domain_event` 并广播。
+5. 其他客户端收到 `artifact.git-sync.completed` 或 `project.repo.pull-required` 后拉取项目仓最新 commit。
 
-推荐 COS key：
+受控产物目录：
 
 ```text
-teams/{teamId}/requirements/{requirementId}/artifacts/{artifactId}/versions/{versionNo}/{fileName}
+docs/{需求号}/
+docs/code_review/
+openspec/changes/
+openspec/specs/
+.codex/skills/
+.codebuddy/skills/
+.qoder/skills/
+.qwen/skills/
 ```
 
-COS 原生 Versioning 仅作为误删和覆盖保险；用户看到的当前版本、版本号、作者、来源 run、审核绑定和冲突检测均以数据库为准。
+旧 `ad_artifact_version` / COS 版本只作为 `LEGACY_COS` 历史只读兼容。`V6__git_only_artifacts_cleanup.sql` 已删除旧上传会话和 COS 版本表，新流程不得再把 COS 作为产物事实源。
+
+## Bootstrap Import
+
+旧本地工作区迁入中心时，先在 Local Runner 侧生成 dry-run 计划：
+
+```bash
+cd tools/ai-delivery-console
+npm run bootstrap:plan -- \
+  --workspaceRoot /path/to/old-workspace \
+  --centerBaseUrl http://127.0.0.1:8728 \
+  --projectId 1 \
+  --userId 1
+```
+
+确认 `conflicts` 和 `skippedArtifacts` 后执行正式导入：
+
+```bash
+npm run bootstrap:import -- \
+  --workspaceRoot /path/to/old-workspace \
+  --centerBaseUrl http://127.0.0.1:8728 \
+  --projectId 1 \
+  --userId 1 \
+  --clientSessionId 16
+```
+
+中心导入 API：
+
+- `POST /api/ai-delivery/import-sessions`
+- `POST /api/ai-delivery/import-sessions/{sessionId}/records`
+- `GET /api/ai-delivery/import-sessions/{sessionId}`
+- `POST /api/ai-delivery/import-sessions/{sessionId}/complete`
+
+导入流程按 `logicalPath + sha256` 幂等去重，重复导入返回 `DUPLICATED`。正式导入必须提供 `clientSessionId`，用于定位当前客户端项目仓和 Git 同步状态。敏感字段、本机绝对路径和不受控产物路径会被拒绝或标记为 conflict。
+
+## Preflight
+
+上线前调用：
+
+```bash
+curl -X POST "http://127.0.0.1:8728/api/ai-delivery/preflight" \
+  -H "Content-Type: application/json" \
+  -H "X-User-Id: 1" \
+  -d '{"projectId":1}'
+```
+
+默认检查项：
+
+- `CENTER`: 中心服务可达。
+- `PROJECT_PERMISSION`: 当前用户具备项目权限。
+- `DB`: import 表、Git artifact 表、同步表、项目仓表和 hash 索引存在。
+- `REDIS`: runtime namespace、job lease 前缀和 WebSocket Redis channel 可用。
+- `WEBSOCKET`: endpoint 和 broker 配置可用。
+
+返回 `PASS`、`WARN` 或 `FAIL`。单实例 `local` broker 下 Redis 失败会降级为 `WARN`；多实例或 `redis` broker 下 Redis 失败会返回 `FAIL`。当前 Git-only 模式不执行 COS 上传链路检查。
 
 ## 启动
 
@@ -127,7 +185,7 @@ java -jar target/ai-delivery-center-0.1.0-SNAPSHOT.jar
 curl http://127.0.0.1:8728/actuator/health
 ```
 
-桌面客户端远程模式默认连接 `http://127.0.0.1:8728`，也可以在「设置 / 个人中心」中修改 `centerBaseUrl`。
+桌面客户端和网页版默认连接 `http://127.0.0.1:8728`，也可以在「设置 / 个人中心」中修改 `centerBaseUrl`。
 
 ## WebSocket 实时协作
 
@@ -158,15 +216,16 @@ curl http://127.0.0.1:8728/actuator/health
 - `B70032`: 订阅的 project、requirement 或 run 不属于当前用户可访问项目。检查 `X-User-Id`、`projectId` 和团队成员关系。
 - `B70033`: `lastEventId` 已超过保留窗口。客户端需要刷新列表和详情后重新订阅。
 - `B70034`: 阶段动作被其他客户端占用。等待占用释放、过期，或由持有人主动释放。
+- `B70041` 至 `B70046`: bootstrap import 或 preflight 失败。检查项目权限、manifest hash、敏感字段、Git artifact hash 索引和导入会话状态。
 - 连接建立但无事件：确认 `AI_DELIVERY_CENTER_WEBSOCKET_ENDPOINT`、反向代理 WebSocket upgrade、Redis broker 配置和客户端 `ack` 逻辑。
 
 ## 运维检查
 
 - MySQL 表结构已执行 Flyway migration，`ad_*` 表存在。
+- `ad_import_session`、`ad_import_item`、`ad_artifact_git_version`、`ad_artifact_sync`、`ad_project_repository`、`ad_user_project_repo_state` 存在。
+- `ad_artifact_git_version.content_sha256` 和 `idx_content_hash` 索引存在。
 - Redis 可用，`ai-delivery:job:{jobId}:lease` 能正常设置过期时间。
 - Redis Pub/Sub 可用；多实例模式下可观察到 `ai-delivery:ws-events:*` channel 消息。
-- COS Bucket region、bucket、SecretId、SecretKey 配置正确，预签名上传/预览 URL 可用。
-- Bucket Versioning 已开启或明确接受只使用业务不可变 key。
 - `AI_DELIVERY_CENTER_JWT_SECRET` 已替换默认值。
 - `ad_run_event` 和 `ad_domain_event` 已配置分区或归档任务。
 - 客户端只上传 OS、capabilities、clientSession 心跳，不上传本机路径、Agent token 或终端命令密钥。

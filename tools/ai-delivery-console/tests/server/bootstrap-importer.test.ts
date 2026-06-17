@@ -122,6 +122,94 @@ describe('bootstrap-importer', () => {
     expect(result.importedArtifacts).toBe(2);
     expect(result.syncedCommits).toEqual(['aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa']);
   });
+
+  it('dry-run 只写本机 manifest，不调用中心和 Git 同步', async () => {
+    await fs.mkdir(path.join(sourceRoot, 'docs/172014/prd'), { recursive: true });
+    await fs.writeFile(path.join(sourceRoot, 'docs/172014/prd/analysis.md'), '# PRD', 'utf8');
+    const plan = await buildBootstrapImportPlan(sourceRoot);
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+
+    const result = await importBootstrapPlan(plan, {
+      centerBaseUrl: 'https://center.example.com',
+      userId: 1,
+      projectId: 10,
+      clientSessionId: 11,
+      workspaceRoot: sourceRoot,
+      dryRun: true,
+      fetchImpl
+    });
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(syncProjectRepository).not.toHaveBeenCalled();
+    expect(result.importedArtifacts).toBe(0);
+    expect(await fs.readFile(path.join(sourceRoot, '.ai-delivery/import-manifest.json'), 'utf8')).toContain(plan.manifestSha256);
+  });
+
+  it('扫描计划会把敏感补充材料标记为冲突而不是导入', async () => {
+    await fs.mkdir(path.join(sourceRoot, 'docs/172014/prd'), { recursive: true });
+    await fs.mkdir(path.join(sourceRoot, 'docs/172014/technical-design/file'), { recursive: true });
+    await fs.writeFile(path.join(sourceRoot, 'docs/172014/prd/analysis.md'), '# PRD', 'utf8');
+    await fs.writeFile(path.join(sourceRoot, 'docs/172014/technical-design/file/token.txt'), 'secret', 'utf8');
+
+    const plan = await buildBootstrapImportPlan(sourceRoot);
+
+    expect(plan.conflicts).toContain('不受控产物路径: docs/172014/technical-design/file/token.txt');
+    expect(plan.requirements[0].artifacts.map((artifact) => artifact.logicalPath)).not.toContain('docs/172014/technical-design/file/token.txt');
+  });
+
+  it('Git 仓中没有变更时按重复产物处理，不再次提交同步', async () => {
+    await fs.mkdir(path.join(sourceRoot, 'docs/172014/prd'), { recursive: true });
+    await fs.writeFile(path.join(sourceRoot, 'docs/172014/prd/analysis.md'), '# PRD', 'utf8');
+    vi.mocked(runGit).mockResolvedValue('');
+    const plan = await buildBootstrapImportPlan(sourceRoot);
+
+    const result = await importBootstrapPlan(plan, {
+      centerBaseUrl: 'https://center.example.com',
+      userId: 1,
+      projectId: 10,
+      clientSessionId: 11,
+      workspaceRoot: sourceRoot,
+      fetchImpl: importFetch() as unknown as typeof fetch
+    });
+
+    expect(confirmArtifactGitSync).not.toHaveBeenCalled();
+    expect(result.duplicatedArtifacts).toBe(1);
+  });
+
+  it('Git 同步失败时记录失败产物并继续完成导入会话', async () => {
+    await fs.mkdir(path.join(sourceRoot, 'docs/172014/prd'), { recursive: true });
+    await fs.writeFile(path.join(sourceRoot, 'docs/172014/prd/analysis.md'), '# PRD', 'utf8');
+    vi.mocked(confirmArtifactGitSync).mockRejectedValue(new Error('push failed'));
+    const plan = await buildBootstrapImportPlan(sourceRoot);
+
+    const result = await importBootstrapPlan(plan, {
+      centerBaseUrl: 'https://center.example.com',
+      userId: 1,
+      projectId: 10,
+      clientSessionId: 11,
+      workspaceRoot: sourceRoot,
+      fetchImpl: importFetch() as unknown as typeof fetch
+    });
+
+    expect(result.failedArtifacts).toBe(1);
+    expect(await fs.readFile(path.join(sourceRoot, '.ai-delivery/import-manifest.json'), 'utf8')).toContain('push failed');
+  });
+
+  it('缺少 clientSessionId 时阻断导入，避免无法定位本机交付工作区', async () => {
+    await fs.mkdir(path.join(sourceRoot, 'docs/172014/prd'), { recursive: true });
+    await fs.writeFile(path.join(sourceRoot, 'docs/172014/prd/analysis.md'), '# PRD', 'utf8');
+    const plan = await buildBootstrapImportPlan(sourceRoot);
+
+    await expect(
+      importBootstrapPlan(plan, {
+        centerBaseUrl: 'https://center.example.com',
+        userId: 1,
+        projectId: 10,
+        workspaceRoot: sourceRoot,
+        fetchImpl: importFetch() as unknown as typeof fetch
+      })
+    ).rejects.toThrow('缺少 clientSessionId');
+  });
 });
 
 function response(data: unknown, ok = true) {
@@ -130,4 +218,37 @@ function response(data: unknown, ok = true) {
     status: ok ? 200 : 500,
     json: async () => (ok ? { success: true, data } : { success: false, message: 'failed' })
   };
+}
+
+function importFetch() {
+  return vi.fn(async (url: string, init?: RequestInit) => {
+    const pathname = new URL(url).pathname;
+    if (pathname === '/api/ai-delivery/import-sessions') {
+      return response({ id: 200 });
+    }
+    if (pathname === '/api/ai-delivery/import-sessions/200/records') {
+      const body = JSON.parse(String(init?.body || '{}'));
+      return response({
+        results: [
+          ...body.requirements.map((requirement: any) => ({
+            sourceKey: `REQUIREMENT:${requirement.requirementId}`,
+            status: 'IMPORTED',
+            targetType: 'REQUIREMENT',
+            targetId: 100
+          })),
+          ...body.artifacts.map((artifact: any, index: number) => ({
+            sourceKey: `ARTIFACT:${artifact.requirementId}:${artifact.logicalPath}:${artifact.sha256}`,
+            status: 'IMPORTED',
+            targetType: 'ARTIFACT',
+            targetId: 500 + index,
+            artifactId: 500 + index
+          }))
+        ]
+      });
+    }
+    if (pathname === '/api/ai-delivery/import-sessions/200/complete') {
+      return response({ id: 200, status: 'COMPLETED' });
+    }
+    return response({}, false);
+  });
 }

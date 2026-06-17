@@ -50,8 +50,8 @@ vi.mock('element-plus', async () => {
 function stubs() {
   return {
     ElButton: {
-      props: ['icon', 'loading', 'type'],
-      template: '<button :disabled="loading" @click="$emit(\'click\', $event)"><slot /></button>'
+      props: ['icon', 'loading', 'type', 'disabled', 'title'],
+      template: '<button :disabled="disabled || loading" :title="title" @click="$emit(\'click\', $event)"><slot /></button>'
     },
     ElTabs: {
       props: ['modelValue'],
@@ -105,7 +105,8 @@ function stubs() {
       template: '<span><slot /></span>'
     },
     ElAlert: {
-      template: '<div />'
+      props: ['title'],
+      template: '<div class="el-alert">{{ title }}<slot /></div>'
     },
     ElEmpty: {
       template: '<div />'
@@ -137,7 +138,8 @@ describe('Settings', () => {
     vi.mocked(apiClient.saveSettings).mockResolvedValue({ projectPaths: ['/Users/me/work'] });
     vi.mocked(apiClient.registerClientSession).mockResolvedValue({ id: 11, clientKey: 'test-client' });
     vi.mocked(apiClient.listWorkspaceMappings).mockResolvedValue([]);
-    vi.mocked(apiClient.getDeliveryWorkspace).mockResolvedValue({ id: 1, clientSessionId: 11, localPath: '/Users/me/delivery', status: 'ACTIVE' });
+    vi.mocked(apiClient.getDeliveryWorkspace).mockResolvedValue({ id: 1, projectId: 2, localPath: '/Users/me/delivery', status: 'ACTIVE' });
+    vi.mocked(apiClient.saveDeliveryWorkspace).mockResolvedValue({ id: 1, projectId: 2, localPath: '/Users/me/delivery-web', status: 'ACTIVE' });
     vi.mocked(apiClient.listGitCredentials).mockResolvedValue([]);
     vi.mocked(apiClient.refreshProjectRepositoryStatus).mockResolvedValue({
       projectId: 2,
@@ -178,6 +180,23 @@ describe('Settings', () => {
     expect(routerPush).toHaveBeenCalledWith({ name: 'projects' });
   });
 
+  it('个人中心不再渲染本机环境配置', async () => {
+    const wrapper = mount(Settings, {
+      global: {
+        plugins: [createPinia()],
+        stubs: stubs()
+      }
+    });
+    await flushPromises();
+
+    expect(wrapper.text()).not.toContain('本机环境');
+    expect(wrapper.text()).not.toContain('中心服务');
+    expect(wrapper.text()).not.toContain('本机 Runner');
+    expect(wrapper.text()).not.toContain('Provider');
+    expect(wrapper.text()).not.toContain('本地模式');
+    expect(wrapper.text()).not.toContain('远程模式');
+  });
+
   it('在个人中心为当前项目添加私有工程目录', async () => {
     const pinia = createPinia();
     setActivePinia(pinia);
@@ -213,6 +232,79 @@ describe('Settings', () => {
     await (wrapper.vm as any).addPath();
 
     expect(apiClient.saveWorkspaceMapping).toHaveBeenCalledWith(2, { localPath: '/Users/me/work' });
+  });
+
+  it('网页端禁用目录选择器但允许手动保存交付工作区', async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const { useProjectStore } = await import('@/stores/project');
+    useProjectStore().current = {
+      id: 2,
+      name: 'AI Delivery',
+      code: 'ai-delivery',
+      status: 'ACTIVE',
+      role: 'OWNER'
+    };
+    const wrapper = mount(Settings, {
+      global: {
+        plugins: [pinia],
+        stubs: stubs()
+      }
+    });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('网页端无法打开本机目录选择器');
+    const directoryButtons = wrapper.findAll('button').filter((button) => button.text().includes('选择目录'));
+    expect(directoryButtons.length).toBeGreaterThan(0);
+    expect(directoryButtons.every((button) => button.attributes('disabled') !== undefined)).toBe(true);
+
+    (wrapper.vm as any).deliveryWorkspacePath = '/Users/me/delivery-web';
+    await (wrapper.vm as any).saveDeliveryWorkspace();
+
+    expect(apiClient.saveDeliveryWorkspace).toHaveBeenCalledWith(2, '/Users/me/delivery-web');
+  });
+
+  it('桌面端目录选择器可回填交付工作区和工程目录', async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const { useProjectStore } = await import('@/stores/project');
+    useProjectStore().current = {
+      id: 2,
+      name: 'AI Delivery',
+      code: 'ai-delivery',
+      status: 'ACTIVE',
+      role: 'OWNER'
+    };
+    const selectDirectory = vi
+      .fn()
+      .mockResolvedValueOnce('/Users/me/delivery-picked')
+      .mockResolvedValueOnce('/Users/me/work-picked');
+    Object.defineProperty(window, 'aiDeliveryDesktop', {
+      configurable: true,
+      value: {
+        selectDirectory,
+        listSubdirectories: vi.fn().mockResolvedValue([])
+      }
+    });
+
+    const wrapper = mount(Settings, {
+      global: {
+        plugins: [pinia],
+        stubs: stubs()
+      }
+    });
+    await flushPromises();
+
+    const directoryButtons = wrapper.findAll('button').filter((button) => button.text().includes('选择目录'));
+    expect(directoryButtons.length).toBeGreaterThan(0);
+    expect(directoryButtons.every((button) => button.attributes('disabled') === undefined)).toBe(true);
+
+    await (wrapper.vm as any).selectDeliveryWorkspace();
+    expect((wrapper.vm as any).deliveryWorkspacePath).toBe('/Users/me/delivery-picked');
+
+    await (wrapper.vm as any).openDirectoryPicker();
+    expect((wrapper.vm as any).newPath).toBe('/Users/me/work-picked');
+    expect(selectDirectory).toHaveBeenCalledTimes(2);
   });
 
   it('在个人中心手动更新当前项目 Skill', async () => {

@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import MarkdownEditor from '../../src/components/MarkdownEditor.vue';
 import { apiClient } from '@/api/client';
+import { setApiRuntimeConfig } from '@/api/runtime';
 import { ElMessage } from 'element-plus';
 
 vi.mock('mermaid', () => ({
@@ -33,6 +34,7 @@ vi.mock('element-plus', async () => {
 describe('MarkdownEditor collaboration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    setApiRuntimeConfig({ centerBaseUrl: 'http://127.0.0.1:8728', runnerBaseUrl: 'http://127.0.0.1:8718', accessToken: '', userId: '', clientSessionId: '', projectId: '' });
   });
 
   it('保存时携带 baseVersionId，B70021 时展示冲突提示', async () => {

@@ -163,6 +163,41 @@ class ImportServiceTest {
     }
 
     @Test
+    void importRecordsRejectsUnauthorizedProject() {
+        // 验证用户无项目权限时，导入会话不可继续写入，避免跨项目污染中心事实。
+        currentSession.set(session());
+        when(permissionService.assertProjectMember(1L, 10L))
+            .thenThrow(new BusinessException(AiDeliveryErrorCode.ACCESS_DENIED, "无权限"));
+
+        assertThatThrownBy(() -> importService.importRecords(1L, 100L, recordsRequest(false)))
+            .isInstanceOf(BusinessException.class)
+            .extracting("errorCode")
+            .isEqualTo(AiDeliveryErrorCode.IMPORT_PROJECT_DENIED);
+    }
+
+    @Test
+    void duplicateArtifactSourceKeyReturnsDuplicatedWithoutWritingAgain() {
+        // 验证相同 logicalPath + sha256 已处理时直接返回 DUPLICATED，不重复创建 artifact。
+        currentSession.set(session());
+        ImportItemEntity existing = new ImportItemEntity();
+        existing.setId(9L);
+        existing.setImportSessionId(100L);
+        existing.setItemType("ARTIFACT");
+        existing.setSourceKey("ARTIFACT:172014:docs/172014/prd/analysis.md:" + hash());
+        existing.setSourceSha256(hash());
+        existing.setTargetType("ARTIFACT");
+        existing.setTargetId(300L);
+        existing.setStatus("IMPORTED");
+        when(importItemMapper.selectOne(any())).thenReturn(existing);
+
+        ImportRecordsResultVO result = importService.importRecords(1L, 100L, recordsRequest(true));
+
+        assertThat(result.getDuplicatedCount()).isEqualTo(1);
+        assertThat(result.getResults().get(0).getStatus()).isEqualTo("DUPLICATED");
+        assertThat(result.getResults().get(0).getArtifactId()).isEqualTo(300L);
+    }
+
+    @Test
     void importRejectsLocalAbsolutePath() {
         // 验证中心服务不会把本地绝对路径或敏感路径写入共享事实。
         currentSession.set(session());

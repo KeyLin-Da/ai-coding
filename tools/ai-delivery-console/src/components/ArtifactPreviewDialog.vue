@@ -60,7 +60,17 @@
             <span>护眼模式</span>
           </label>
           <el-button :disabled="!artifact" :icon="CopyDocument" @click="copyPath">复制路径</el-button>
-          <el-button :disabled="!artifact?.exists" :icon="Download" @click="download">下载</el-button>
+          <el-dropdown v-if="isMarkdown" trigger="click" :disabled="!artifact?.exists" @command="downloadMarkdownArtifact">
+            <el-button :disabled="!artifact?.exists" :icon="Download">下载</el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="markdown">Markdown</el-dropdown-item>
+                <el-dropdown-item command="html">HTML</el-dropdown-item>
+                <el-dropdown-item command="pdf">PDF</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <el-button v-else :disabled="!artifact?.exists" :icon="Download" @click="downloadOriginalArtifact">下载</el-button>
         </div>
       </div>
     </template>
@@ -106,7 +116,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import MarkdownIt from 'markdown-it';
 import mermaid from 'mermaid';
 import { ChatLineSquare, CopyDocument, Download, EditPen, Minus, Plus, Refresh } from '@element-plus/icons-vue';
-import { ElMessage, ElMessageBox } from 'element-plus';
+import { ElDropdown, ElDropdownItem, ElDropdownMenu, ElMessage, ElMessageBox } from 'element-plus';
 import type { ArtifactRef, TechDesignAnnotation, TechDesignVersion } from '@shared/workflow';
 import { apiClient } from '@/api/client';
 import ArtifactVersionDiffDialog from '@/components/ArtifactVersionDiffDialog.vue';
@@ -114,6 +124,8 @@ import TechDesignAnnotationPanel from '@/components/TechDesignAnnotationPanel.vu
 import TechDesignVersionSelector from '@/components/TechDesignVersionSelector.vue';
 import { artifactReadUrl, rewriteMarkdownImageSources } from '@/utils/markdown-assets';
 import { applyAnnotationHighlights, createAnnotationAnchor } from '@/utils/tech-design-annotations';
+
+type DownloadFormat = 'markdown' | 'html' | 'pdf';
 
 const visible = ref(false);
 const loading = ref(false);
@@ -129,6 +141,7 @@ const annotationHash = ref('');
 const loadingVersions = ref(false);
 const selectionDraft = ref<ReturnType<typeof createAnnotationAnchor>>();
 const annotationPanelVisible = ref(true);
+const annotationChangedEventName = 'ai-delivery:tech-design-annotation-changed';
 const eyeCareStorageKey = 'ai-delivery-preview-eye-care';
 const minZoomPercent = 60;
 const maxZoomPercent = 400;
@@ -248,9 +261,7 @@ watch(previewHtml, async () => {
   }
   await nextTick();
   try {
-    const mermaidNodes = markdownPreviewRef.value ? Array.from(markdownPreviewRef.value.querySelectorAll<HTMLElement>('.mermaid')) : [];
-    await mermaid.run(mermaidNodes.length ? { nodes: mermaidNodes } : undefined);
-    enhanceMermaidDiagrams();
+    await renderMermaidDiagrams();
   } catch (error) {
     console.error('Mermaid rendering error:', error);
   }
@@ -291,6 +302,12 @@ function zoomOut() {
 
 function resetZoom() {
   setZoom(defaultZoomPercent);
+}
+
+async function renderMermaidDiagrams() {
+  const mermaidNodes = markdownPreviewRef.value ? Array.from(markdownPreviewRef.value.querySelectorAll<HTMLElement>('.mermaid')) : [];
+  await mermaid.run(mermaidNodes.length ? { nodes: mermaidNodes } : undefined);
+  enhanceMermaidDiagrams();
 }
 
 function detectMermaidDiagramType(code: string) {
@@ -373,10 +390,12 @@ function handleZoomShortcut(event: KeyboardEvent) {
 
 onMounted(() => {
   window.addEventListener('keydown', handleZoomShortcut);
+  window.addEventListener(annotationChangedEventName, handleTechDesignAnnotationChanged);
 });
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleZoomShortcut);
+  window.removeEventListener(annotationChangedEventName, handleTechDesignAnnotationChanged);
 });
 
 async function open(nextArtifact: ArtifactRef) {
@@ -436,6 +455,35 @@ async function loadTechDesignPreviewContext() {
     loading.value = false;
     loadingVersions.value = false;
   }
+}
+
+async function refreshTechDesignAnnotations() {
+  if (!requirementId.value) {
+    return;
+  }
+  const annotationResult = await apiClient.listTechDesignAnnotations(requirementId.value);
+  techDesignAnnotations.value = annotationResult.annotations;
+  annotationHash.value = annotationResult.hash;
+  await nextTick();
+  applyAnnotationMarks();
+}
+
+function annotationEventMatchesCurrentRequirement(detail: unknown) {
+  if (!requirementId.value || !detail || typeof detail !== 'object') {
+    return false;
+  }
+  const payload = detail as Record<string, unknown>;
+  const eventRequirementId = payload.requirementId == null ? '' : String(payload.requirementId);
+  return !eventRequirementId || eventRequirementId === requirementId.value;
+}
+
+function handleTechDesignAnnotationChanged(event: Event) {
+  if (!visible.value || !isTechDesignMarkdown.value || !annotationEventMatchesCurrentRequirement((event as CustomEvent).detail)) {
+    return;
+  }
+  void refreshTechDesignAnnotations().catch((error: Error) => {
+    ElMessage.error(error.message || '刷新批注失败');
+  });
 }
 
 async function loadSelectedTechDesignVersion() {
@@ -608,19 +656,222 @@ async function copyPath() {
   ElMessage.success('路径已复制');
 }
 
-function download() {
+function padNumber(value: number) {
+  return String(value).padStart(2, '0');
+}
+
+function formatTimestamp(date = new Date()) {
+  return [
+    date.getFullYear(),
+    padNumber(date.getMonth() + 1),
+    padNumber(date.getDate()),
+    padNumber(date.getHours()),
+    padNumber(date.getMinutes()),
+    padNumber(date.getSeconds())
+  ].join('');
+}
+
+function sanitizeFilePart(value: string) {
+  return (
+    value
+      .trim()
+      .replace(/\.[a-zA-Z0-9]+$/, '')
+      .replace(/[\\/:*?"<>|#%{}$!`&=+@~，。；：、（）【】《》\s]+/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/^_+|_+$/g, '') || 'artifact'
+  );
+}
+
+function artifactBaseName() {
+  const label = artifact.value?.label || artifact.value?.path.split('/').pop() || 'artifact';
+  return sanitizeFilePart(label);
+}
+
+function exportRequirementId() {
+  return sanitizeFilePart(requirementId.value || 'requirement');
+}
+
+function exportFileName(extensionName: string) {
+  return `${exportRequirementId()}_${formatTimestamp()}_${artifactBaseName()}.${extensionName.replace(/^\./, '')}`;
+}
+
+function downloadBlob(contentValue: string, fileName: string, type: string) {
+  const blob = new Blob([contentValue], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function clonePreviewForExport() {
+  const clone = markdownPreviewRef.value?.cloneNode(true) as HTMLElement | undefined;
+  if (!clone) {
+    return '';
+  }
+  clone.querySelectorAll('.tech-design-annotation-highlight').forEach((node) => {
+    const parent = node.parentNode;
+    if (!parent) {
+      return;
+    }
+    while (node.firstChild) {
+      parent.insertBefore(node.firstChild, node);
+    }
+    parent.removeChild(node);
+    parent.normalize();
+  });
+  return clone.innerHTML;
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function buildExportHtml(fileName: string) {
+  const bodyHtml = clonePreviewForExport() || previewHtml.value;
+  const title = escapeHtml(fileName.replace(/\.[^.]+$/, ''));
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${title}</title>
+  <style>
+    body {
+      margin: 0;
+      color: #1f2d2a;
+      background: #ffffff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      line-height: 1.68;
+    }
+    .artifact-markdown {
+      box-sizing: border-box;
+      width: 100%;
+      max-width: none;
+      min-height: 100vh;
+      margin: 0;
+      padding: 32px;
+      background: #ffffff;
+    }
+    h1, h2, h3, h4 {
+      color: #17231f;
+      line-height: 1.35;
+    }
+    code {
+      padding: 1px 4px;
+      border-radius: 3px;
+      background: #eef2f0;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    }
+    pre {
+      overflow: auto;
+      padding: 14px;
+      border-radius: 6px;
+      background: #f6f8fb;
+      white-space: pre-wrap;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th, td {
+      padding: 8px;
+      border: 1px solid #d7dee8;
+      vertical-align: top;
+    }
+    img, svg {
+      max-width: 100%;
+      height: auto;
+    }
+    .mermaid-diagram {
+      width: 100%;
+      margin: 24px 0 28px;
+      overflow-x: auto;
+      overflow-y: hidden;
+    }
+    .mermaid-diagram svg {
+      display: block;
+    }
+    @media print {
+      body {
+        background: #ffffff;
+      }
+      .artifact-markdown {
+        padding: 18mm 14mm;
+      }
+      .mermaid-diagram {
+        overflow: visible;
+        break-inside: avoid;
+      }
+      pre, table {
+        break-inside: avoid;
+      }
+    }
+  </style>
+</head>
+<body>
+  <article class="artifact-markdown">${bodyHtml}</article>
+</body>
+</html>`;
+}
+
+async function downloadMarkdownArtifact(command: string | number | object) {
+  if (!artifact.value?.path) {
+    return;
+  }
+  const format = String(command) as DownloadFormat;
+  if (format === 'markdown') {
+    downloadBlob(content.value, exportFileName('md'), 'text/markdown;charset=utf-8');
+    ElMessage.success('已下载 Markdown');
+    return;
+  }
+  if (format === 'html') {
+    await nextTick();
+    await renderMermaidDiagrams();
+    const fileName = exportFileName('html');
+    downloadBlob(buildExportHtml(fileName), fileName, 'text/html;charset=utf-8');
+    ElMessage.success('已下载 HTML');
+    return;
+  }
+  if (format === 'pdf') {
+    await nextTick();
+    await renderMermaidDiagrams();
+    const fileName = exportFileName('pdf');
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      ElMessage.error('无法打开 PDF 导出窗口，请检查浏览器弹窗设置');
+      return;
+    }
+    printWindow.document.open();
+    printWindow.document.write(buildExportHtml(fileName));
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+    ElMessage.success('已打开 PDF 导出窗口');
+  }
+}
+
+function downloadOriginalArtifact() {
   if (!artifact.value?.path) {
     return;
   }
   const link = document.createElement('a');
   link.href = artifactUrl.value;
-  link.download = artifact.value.path.split('/').pop() || 'artifact';
+  link.download = exportFileName(extension.value || 'artifact');
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
 }
 
-defineExpose({ open });
+defineExpose({ open, downloadMarkdownArtifact, downloadOriginalArtifact });
 </script>
 
 <style scoped>

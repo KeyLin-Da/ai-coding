@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { RequirementWorkflow } from '../../shared/workflow';
+import type { AgentProvider, RequirementWorkflow } from '../../shared/workflow';
 import { createEmptyStages } from '../../shared/workflow';
 import { apiClient } from '../../src/api/client';
 import { setApiRuntimeConfig } from '../../src/api/runtime';
@@ -16,10 +16,39 @@ function workflow(): RequirementWorkflow {
     createdAt: now,
     updatedAt: now,
     stages: createEmptyStages('DEFECT'),
-    artifacts: [],
+    artifacts: [
+      {
+        id: 'technical-design',
+        stage: 'TECH_DESIGN',
+        label: '技术方案评审文档',
+        path: 'docs/172014/technical-design/design_review.md',
+        kind: 'markdown',
+        exists: true
+      }
+    ],
     runs: [],
     reviews: [],
     issues: []
+  };
+}
+
+function centerRequirement() {
+  return {
+    id: 100,
+    projectId: 10,
+    requirementId: '172014',
+    title: '补充材料',
+    requirementType: 'DEFECT',
+    branchName: 'bugfix/opp#172014',
+    currentStage: 'TECH_DESIGN',
+    status: 'DRAFT',
+    stages: [
+      {
+        stage: 'TECH_DESIGN',
+        status: 'DRAFT'
+      }
+    ],
+    projectNames: ['opp-admin-vue']
   };
 }
 
@@ -52,16 +81,73 @@ describe('apiClient Runner docs endpoints', () => {
     });
   });
 
-  it('需求列表从 Runner 读取以合并项目目录 docs', async () => {
+  it('需求列表优先从 Runner 读取中心状态和本地产物合并结果', async () => {
     const fetchMock = vi.fn().mockImplementation(() => okResponse([workflow()]));
     vi.stubGlobal('fetch', fetchMock);
 
     const result = await apiClient.listRequirements();
 
     expect(result[0].requirementType).toBe('DEFECT');
+    expect(result[0].artifacts).toHaveLength(1);
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe('http://127.0.0.1:8718/api/ai-delivery/requirements?projectId=10');
     expect(init.headers['X-Project-Id']).toBe('10');
+  });
+
+  it('Agent Provider 列表从本地 Runner 读取', async () => {
+    const agents: AgentProvider[] = [
+      {
+        id: 'codex',
+        name: 'Codex',
+        inputMode: 'STDIN',
+        available: true,
+        supportsStreaming: true
+      }
+    ];
+    const fetchMock = vi.fn().mockImplementation(() => okResponse(agents));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiClient.listAgents();
+
+    expect(result).toEqual(agents);
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:8718/api/ai-delivery/agents', expect.any(Object));
+  });
+
+  it('需求详情优先从 Runner 合并接口读取，保留本地扫描产物', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => okResponse(workflow()));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiClient.getRequirement('172014');
+
+    expect(result.currentStage).toBe('TECH_DESIGN');
+    expect(result.artifacts[0].path).toBe('docs/172014/technical-design/design_review.md');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:8718/api/ai-delivery/requirements/172014?projectId=10',
+      expect.any(Object)
+    );
+  });
+
+  it('Runner 不可用时需求详情兜底中心服务，仍能打开基础详情', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('runner down'))
+      .mockImplementationOnce(() => okResponse(centerRequirement()));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiClient.getRequirement('172014');
+
+    expect(result.currentStage).toBe('TECH_DESIGN');
+    expect(result.artifacts).toEqual([]);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'http://127.0.0.1:8718/api/ai-delivery/requirements/172014?projectId=10',
+      expect.any(Object)
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://center.example.com/api/ai-delivery/requirements/172014?projectId=10',
+      expect.any(Object)
+    );
   });
 
   it('补充材料上传提交到本地 Runner', async () => {
@@ -121,25 +207,35 @@ describe('apiClient Runner docs endpoints', () => {
     );
   });
 
-  it('运行日志从本地 Runner 读取', async () => {
+  it('运行日志从中心补偿 API 读取', async () => {
     const fetchMock = vi.fn().mockImplementation(() =>
       okResponse([
         {
-          time: '2026-06-10T01:22:46.000Z',
-          type: 'INFO',
+          id: 1,
+          runId: 100,
+          seq: 1,
+          createdAt: '2026-06-10T01:22:46.000Z',
+          type: 'STDOUT',
           level: 'INFO',
-          message: '开始执行'
+          message: '开始执行',
+          payloadJson: '{"step":"start"}'
         }
       ])
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    await apiClient.getRunEvents('172014', 'run-20260610012246-5eef8c');
+    const events = await apiClient.getRunEvents('172014', '100');
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:8718/api/ai-delivery/runs/run-20260610012246-5eef8c/events?requirementId=172014',
+      'https://center.example.com/api/ai-delivery/runs/100/events?afterSeq=0',
       expect.any(Object)
     );
+    expect(events[0]).toMatchObject({
+      time: '2026-06-10T01:22:46.000Z',
+      type: 'STDOUT',
+      text: '开始执行',
+      data: { step: 'start' }
+    });
   });
 
   it('取消运行提交到本地 Runner', async () => {

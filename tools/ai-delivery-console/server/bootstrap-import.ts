@@ -1,4 +1,13 @@
+import path from 'node:path';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import { buildBootstrapImportPlan, importBootstrapPlan } from './services/bootstrap-importer';
+
+const toolDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const require = createRequire(import.meta.url);
+const { loadProfileEnv } = require('../scripts/env-loader.cjs') as { loadProfileEnv: (rootDir: string) => void };
+
+loadProfileEnv(toolDir);
 
 interface CliArgs {
   centerBaseUrl: string;
@@ -17,7 +26,7 @@ function parseArgs(): CliArgs {
     return index >= 0 ? args[index + 1] || fallback : fallback;
   };
   return {
-    centerBaseUrl: get('centerBaseUrl', process.env.AI_DELIVERY_CENTER_BASE_URL || 'http://127.0.0.1:8728'),
+    centerBaseUrl: get('centerBaseUrl', process.env.VITE_AI_DELIVERY_CENTER_BASE_URL || 'http://127.0.0.1:8728'),
     projectId: get('projectId', process.env.AI_DELIVERY_PROJECT_ID || ''),
     userId: get('userId', process.env.AI_DELIVERY_USER_ID || ''),
     accessToken: get('accessToken', process.env.AI_DELIVERY_ACCESS_TOKEN || ''),

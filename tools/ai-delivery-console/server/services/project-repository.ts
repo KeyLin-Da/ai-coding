@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import type { LocalRequestContext } from './local-request-context';
 import { centerRequest } from './center-client';
 import { assertInsideDeliveryWorkspace, requireDeliveryWorkspaceRoot } from './delivery-workspace';
+import { localServiceError } from './local-errors';
 import { privateKeyPathForCredential, requireActiveGitCredential } from './local-git-credentials';
 
 export type ProjectRepoSyncStatus = 'NOT_CLONED' | 'READY' | 'BEHIND_REMOTE' | 'DIRTY' | 'CONFLICTING' | 'PUSHING' | 'PUSHED' | 'FAILED';
@@ -105,15 +106,15 @@ export function runGit(cwd: string, args: string[], options: GitCommandOptions =
 export async function loadCurrentDeliveryProject(context: LocalRequestContext): Promise<DeliveryProjectPayload> {
   const projectId = String(context.projectId || '').trim();
   if (!projectId) {
-    throw new Error('请先选择项目');
+    throw localServiceError('B70003', '请先选择项目');
   }
   const projects = await centerRequest<DeliveryProjectPayload[]>(context, '/api/ai-delivery/projects/my');
   const project = projects.find((item) => String(item.id) === projectId);
   if (!project) {
-    throw new Error('当前用户无权访问所选项目');
+    throw localServiceError('B70002', '当前用户无权访问所选项目');
   }
   if (!project.repository?.repoUrl) {
-    throw new Error('当前项目未配置AI产物Git仓');
+    throw localServiceError('B70073', '当前项目未配置AI产物Git仓');
   }
   return project;
 }
@@ -130,7 +131,7 @@ async function credentialOptions(context: LocalRequestContext, project: Delivery
   const credential = await requireActiveGitCredential(context, project.repository?.provider || 'PROJECT_GIT');
   const privateKeyPath = await privateKeyPathForCredential(context, credential);
   await fs.access(privateKeyPath).catch(() => {
-    throw new Error('本机Git私钥不存在，请重新生成Git凭证');
+    throw localServiceError('B70072', '本机Git私钥不存在，请重新生成Git凭证');
   });
   return { privateKeyPath };
 }
@@ -159,7 +160,7 @@ function repoStatePath(root: string, projectId: string | number): string {
 function requireClientSessionId(context: LocalRequestContext): number {
   const clientSessionId = Number(context.clientSessionId || 0);
   if (!clientSessionId) {
-    throw new Error('缺少客户端会话ID');
+    throw localServiceError('B70003', '缺少客户端会话ID');
   }
   return clientSessionId;
 }
@@ -185,7 +186,7 @@ export async function readProjectRepositoryStatus(context: LocalRequestContext):
   const { project, repoPath, root } = await resolveProjectRepoPath(context);
   const repository = project.repository;
   if (!repository) {
-    throw new Error('当前项目未配置AI产物Git仓');
+    throw localServiceError('B70073', '当前项目未配置AI产物Git仓');
   }
   const clientSessionId = requireClientSessionId(context);
   const cached = await readLocalRepoStateFromRoot(root, project.id);
@@ -243,7 +244,7 @@ export async function cloneProjectRepository(context: LocalRequestContext): Prom
   const { project, repoPath } = await resolveProjectRepoPath(context);
   const repository = project.repository;
   if (!repository) {
-    throw new Error('当前项目未配置AI产物Git仓');
+    throw localServiceError('B70073', '当前项目未配置AI产物Git仓');
   }
   const options = await credentialOptions(context, project);
   const exists = await fs.stat(repoPath).then((stat) => stat.isDirectory()).catch(() => false);
@@ -259,7 +260,7 @@ export async function syncProjectRepository(context: LocalRequestContext): Promi
   const { project, repoPath } = await resolveProjectRepoPath(context);
   const repository = project.repository;
   if (!repository) {
-    throw new Error('当前项目未配置AI产物Git仓');
+    throw localServiceError('B70073', '当前项目未配置AI产物Git仓');
   }
   const exists = await fs.stat(repoPath).then((stat) => stat.isDirectory()).catch(() => false);
   if (!exists) {
@@ -303,7 +304,7 @@ export async function inspectProjectRepository(context: LocalRequestContext): Pr
   const { project, repoPath } = await resolveProjectRepoPath(context);
   const repository = project.repository;
   if (!repository) {
-    throw new Error('当前项目未配置AI产物Git仓');
+    throw localServiceError('B70073', '当前项目未配置AI产物Git仓');
   }
   const clientSessionId = requireClientSessionId(context);
   const exists = await fs.stat(repoPath).then((stat) => stat.isDirectory()).catch(() => false);
@@ -361,7 +362,7 @@ export async function commitAndPushProjectRepository(
   const { project, repoPath } = await resolveProjectRepoPath(context);
   const repository = project.repository;
   if (!repository) {
-    throw new Error('当前项目未配置AI产物Git仓');
+    throw localServiceError('B70073', '当前项目未配置AI产物Git仓');
   }
   const options = await credentialOptions(context, project);
 

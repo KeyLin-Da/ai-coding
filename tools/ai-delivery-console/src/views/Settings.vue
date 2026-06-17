@@ -31,20 +31,34 @@
       <el-tab-pane label="交付工作区" name="delivery">
         <el-card>
           <template #header>
-            <span>本机全局交付工作区</span>
+            <span>项目交付工作区</span>
           </template>
           <el-alert
-            v-if="!localConfig.clientSessionId"
+            v-if="!project.current"
             type="warning"
             show-icon
-            title="缺少客户端会话ID，无法绑定用户级本地工作区"
+            title="请先选择项目，再配置当前项目的交付工作区"
+          />
+          <el-alert
+            v-if="!canUseDesktopDirectoryPicker"
+            class="directory-capability-alert"
+            type="info"
+            show-icon
+            title="网页端无法打开本机目录选择器，请手动输入绝对路径或在桌面端配置"
           />
           <el-form label-width="120px" label-position="left" class="delivery-form">
             <el-form-item label="工作区目录">
               <div class="inline-control">
                 <el-input v-model="deliveryWorkspacePath" placeholder="选择本机用于保存AI交付产物仓的目录" clearable />
-                <el-button :icon="FolderOpened" @click="selectDeliveryWorkspace">选择目录</el-button>
-                <el-button type="primary" :loading="savingDeliveryWorkspace" @click="saveDeliveryWorkspace">保存</el-button>
+                <el-button
+                  :icon="FolderOpened"
+                  :disabled="!canUseDesktopDirectoryPicker"
+                  title="仅桌面端支持系统目录选择器"
+                  @click="selectDeliveryWorkspace"
+                >
+                  选择目录
+                </el-button>
+                <el-button type="primary" :disabled="!project.current" :loading="savingDeliveryWorkspace" @click="saveDeliveryWorkspace">保存</el-button>
               </div>
             </el-form-item>
             <el-form-item label="当前状态">
@@ -134,8 +148,17 @@
                 <el-button @click="addPath">添加</el-button>
               </template>
             </el-input>
-            <el-button @click="openDirectoryPicker">选择目录</el-button>
+            <el-button
+              :disabled="!canUseDesktopDirectoryPicker"
+              title="仅桌面端支持系统目录选择器"
+              @click="openDirectoryPicker"
+            >
+              选择目录
+            </el-button>
           </div>
+          <p v-if="!canUseDesktopDirectoryPicker" class="muted directory-help">
+            网页端无法读取本机目录结构，请手动输入绝对路径；需要系统目录选择器时请使用桌面端。
+          </p>
 
           <div v-if="newPath.trim() && subdirectories.length" class="subdir-section">
             <div class="subdir-header">
@@ -157,57 +180,6 @@
           </div>
           <div v-else-if="loadingDirs" class="subdir-section">
             <el-skeleton :rows="2" animated />
-          </div>
-        </el-card>
-      </el-tab-pane>
-
-      <el-tab-pane label="本机环境" name="environment">
-        <el-card>
-          <el-form label-width="110px" label-position="left">
-            <el-form-item label="中心服务">
-              <el-input v-model="localConfig.centerBaseUrl" placeholder="http://127.0.0.1:8728" />
-            </el-form-item>
-            <el-form-item label="本机 Runner">
-              <el-input v-model="localConfig.runnerBaseUrl" placeholder="http://127.0.0.1:8718" />
-            </el-form-item>
-            <el-form-item label="终端">
-              <el-select v-model="localConfig.terminalPreference">
-                <el-option label="macOS Terminal" value="MACOS_TERMINAL" />
-                <el-option label="Windows Terminal" value="WINDOWS_TERMINAL" />
-                <el-option label="PowerShell" value="POWERSHELL" />
-                <el-option label="System Shell" value="SYSTEM_SHELL" />
-              </el-select>
-            </el-form-item>
-          </el-form>
-
-          <el-table :data="localConfig.agentProviders" class="agent-table">
-            <el-table-column prop="id" label="Provider" min-width="120" />
-            <el-table-column label="命令" min-width="220">
-              <template #default="{ row }">
-                <el-input v-model="row.command" />
-              </template>
-            </el-table-column>
-            <el-table-column label="启用" width="90">
-              <template #default="{ row }">
-                <el-switch v-model="row.enabled" />
-              </template>
-            </el-table-column>
-          </el-table>
-
-          <el-table :data="settings.diagnostics" class="diagnostic-table">
-            <el-table-column prop="label" label="检查项" min-width="140" />
-            <el-table-column prop="detail" label="结果" min-width="180" />
-            <el-table-column label="状态" width="100">
-              <template #default="{ row }">
-                <el-tag :type="row.status === 'OK' ? 'success' : row.status === 'WARN' ? 'warning' : 'danger'">
-                  {{ row.status }}
-                </el-tag>
-              </template>
-            </el-table-column>
-          </el-table>
-
-          <div class="table-actions">
-            <el-button type="primary" :loading="saving" @click="saveDesktopConfig">保存本机环境</el-button>
           </div>
         </el-card>
       </el-tab-pane>
@@ -246,6 +218,8 @@ const deliveryWorkspace = ref<DeliveryWorkspaceVO | undefined>();
 const deliveryWorkspacePath = ref('');
 const gitCredentials = ref<GitCredentialVO[]>([]);
 const projectRepoState = ref<ProjectRepoStateVO | undefined>();
+const canUseDesktopDirectoryPicker = computed(() => Boolean(window.aiDeliveryDesktop?.selectDirectory));
+const canListLocalSubdirectories = computed(() => Boolean(window.aiDeliveryDesktop?.listSubdirectories));
 
 function syncLocalConfig(config: DesktopLocalConfig) {
   Object.assign(localConfig, JSON.parse(JSON.stringify(config)));
@@ -273,6 +247,10 @@ async function saveProfile() {
 }
 
 async function addPath() {
+  if (!project.current) {
+    ElMessage.warning('请先选择项目');
+    return;
+  }
   const trimmed = newPath.value.trim();
   if (!trimmed) {
     return;
@@ -291,31 +269,37 @@ async function removePath(mappingId: number) {
 }
 
 async function openDirectoryPicker() {
-  const selected = await window.aiDeliveryDesktop?.selectDirectory?.();
+  const selectDirectory = window.aiDeliveryDesktop?.selectDirectory;
+  if (!selectDirectory) {
+    ElMessage.info('网页端无法打开本机目录选择器，请手动输入绝对路径');
+    return;
+  }
+  const selected = await selectDirectory();
   if (selected) {
     newPath.value = selected;
   }
 }
 
 async function selectDeliveryWorkspace() {
-  const selected = await window.aiDeliveryDesktop?.selectDirectory?.();
+  const selectDirectory = window.aiDeliveryDesktop?.selectDirectory;
+  if (!selectDirectory) {
+    ElMessage.info('网页端无法打开本机目录选择器，请手动输入绝对路径');
+    return;
+  }
+  const selected = await selectDirectory();
   if (selected) {
     deliveryWorkspacePath.value = selected;
   }
 }
 
 async function loadDeliveryWorkspace() {
-  if (!localConfig.clientSessionId) {
-    await settings.ensureClientSessionId();
-    syncLocalConfig(settings.desktopConfig);
-  }
-  if (!localConfig.clientSessionId) {
+  if (!project.current) {
     deliveryWorkspace.value = undefined;
     deliveryWorkspacePath.value = '';
     return;
   }
   try {
-    deliveryWorkspace.value = await apiClient.getDeliveryWorkspace(localConfig.clientSessionId);
+    deliveryWorkspace.value = await apiClient.getDeliveryWorkspace(project.current.id);
     deliveryWorkspacePath.value = deliveryWorkspace.value?.localPath || '';
   } catch (error: any) {
     deliveryWorkspace.value = undefined;
@@ -326,23 +310,18 @@ async function loadDeliveryWorkspace() {
 }
 
 async function saveDeliveryWorkspace() {
+  if (!project.current) {
+    ElMessage.warning('请先选择项目');
+    return;
+  }
   const localPath = deliveryWorkspacePath.value.trim();
   if (!localPath) {
     ElMessage.warning('请选择交付工作区目录');
     return;
   }
-  // 若 clientSessionId 缺失，先尝试向中心服务注册
-  if (!localConfig.clientSessionId) {
-    await settings.ensureClientSessionId();
-    syncLocalConfig(settings.desktopConfig);
-  }
-  if (!localConfig.clientSessionId) {
-    ElMessage.error('无法注册客户端会话，请检查中心服务是否可用');
-    return;
-  }
   savingDeliveryWorkspace.value = true;
   try {
-    deliveryWorkspace.value = await apiClient.saveDeliveryWorkspace(localPath, localConfig.clientSessionId);
+    deliveryWorkspace.value = await apiClient.saveDeliveryWorkspace(project.current.id, localPath);
     deliveryWorkspacePath.value = deliveryWorkspace.value.localPath;
     ElMessage.success('交付工作区已保存');
   } catch (error: any) {
@@ -438,6 +417,7 @@ async function checkProjectRepoStatus() {
     return;
   }
   try {
+    await settings.requireClientSessionId();
     projectRepoState.value = await apiClient.refreshProjectRepositoryStatus(project.current.id);
   } catch (error: any) {
     projectRepoState.value = undefined;
@@ -451,6 +431,7 @@ async function cloneProjectRepo() {
   }
   cloningRepo.value = true;
   try {
+    await settings.requireClientSessionId();
     projectRepoState.value = await apiClient.cloneProjectRepository(project.current.id);
     ElMessage.success('项目产物仓已初始化');
   } catch (error: any) {
@@ -470,6 +451,7 @@ async function updateProjectSkills() {
   }
   updatingSkills.value = true;
   try {
+    await settings.requireClientSessionId();
     const result = await apiClient.updateProjectSkills(project.current.id);
     projectRepoState.value = result.state;
     const synced = result.bootstrap.codingSkills.synced;
@@ -520,6 +502,7 @@ async function pushProjectRepo() {
 
   pushingRepo.value = true;
   try {
+    await settings.requireClientSessionId();
     projectRepoState.value = await apiClient.pushProjectRepository(project.current.id, message ? { message } : {});
     ElMessage.success('提交并推送成功');
   } catch (error: any) {
@@ -531,13 +514,14 @@ async function pushProjectRepo() {
 
 async function loadSubdirectories() {
   const dirPath = newPath.value.trim();
-  if (!dirPath) {
+  const listSubdirectories = window.aiDeliveryDesktop?.listSubdirectories;
+  if (!dirPath || !canListLocalSubdirectories.value || !listSubdirectories) {
     subdirectories.value = [];
     return;
   }
   loadingDirs.value = true;
   try {
-    subdirectories.value = await window.aiDeliveryDesktop?.listSubdirectories?.(dirPath) ?? [];
+    subdirectories.value = await listSubdirectories(dirPath);
   } finally {
     loadingDirs.value = false;
   }
@@ -546,19 +530,6 @@ async function loadSubdirectories() {
 watch(newPath, () => {
   loadSubdirectories();
 });
-
-async function saveDesktopConfig() {
-  saving.value = true;
-  try {
-    await settings.saveDesktop(JSON.parse(JSON.stringify(localConfig)));
-    syncLocalConfig(settings.desktopConfig);
-    ElMessage.success('保存成功');
-  } catch (error: any) {
-    ElMessage.error(error.message || '保存失败');
-  } finally {
-    saving.value = false;
-  }
-}
 
 async function logout() {
   project.clearSelection();
@@ -609,11 +580,6 @@ onMounted(async () => {
   width: 100%;
 }
 
-.agent-table,
-.diagnostic-table {
-  margin-top: 1rem;
-}
-
 .table-actions {
   display: flex;
   justify-content: flex-start;
@@ -635,6 +601,10 @@ onMounted(async () => {
 
 .delivery-form {
   margin-top: 0.25rem;
+}
+
+.directory-capability-alert {
+  margin-bottom: 0.75rem;
 }
 
 .inline-control {
@@ -659,6 +629,10 @@ onMounted(async () => {
 
 .subdir-section {
   margin-top: 0.75rem;
+}
+
+.directory-help {
+  margin-top: 0.5rem;
 }
 
 .subdir-header {

@@ -9,6 +9,7 @@ import { getAgentProvider, startAgentInTerminal, startAgentProcess } from './age
 import { normalizePrdClarification } from './workflow-repository';
 import { hasStagedTrackedChanges, readGitChanges } from './git-changes';
 import { buildArtifactPublishEvents, captureControlledArtifactSnapshot } from './manual-artifact-sharing';
+import { resolveWorkspaceOrRuntimePath } from './runtime-paths';
 
 const cliActionMap: Partial<Record<ActionInput['actionType'], string[]>> = {
   OPENSPEC_STATUS: ['openspec', 'status'],
@@ -118,10 +119,6 @@ function legacyTechDesignQuestionPath(requirementId: string): string {
   return `docs/${normalizeRequirementId(requirementId)}/technical-design/questions.md`;
 }
 
-function techDesignAnnotationSummaryPath(requirementId: string): string {
-  return `docs/${normalizeRequirementId(requirementId)}/technical-design/annotations/comments.md`;
-}
-
 function isTechnicalDesignSourcePath(filePath: string): boolean {
   return filePath.replace(/\\/g, '/').includes('/technical-design/file/');
 }
@@ -162,22 +159,13 @@ function existingTechDesignQuestionPaths(workflow: RequirementWorkflow): string[
     });
 }
 
-function existingTechDesignAnnotationPaths(workflow: RequirementWorkflow): string[] {
-  const summaryPath = techDesignAnnotationSummaryPath(workflow.requirementId);
-  return workflow.artifacts
-    .filter((item) => item.exists && item.kind !== 'directory' && (item.id === 'technical-design-annotations' || item.path === summaryPath))
-    .map((item) => item.path)
-    .sort((left, right) => left.localeCompare(right));
-}
-
 function techDesignSourcePaths(workflow: RequirementWorkflow, params: Record<string, unknown>): string[] {
   const explicitPaths = asStringArray(params.sourceFiles).filter((filePath) => !isTechnicalDesignQuestionPath(workflow, filePath) || !isConsumedTechDesignQuestionPath(workflow, filePath));
-  const annotationPaths = existingTechDesignAnnotationPaths(workflow);
   const questionPaths = existingTechDesignQuestionPaths(workflow);
   if (explicitPaths.length) {
-    return uniqueNonEmpty([...annotationPaths, ...questionPaths, ...explicitPaths]);
+    return uniqueNonEmpty([...questionPaths, ...explicitPaths]);
   }
-  return uniqueNonEmpty([...annotationPaths, ...questionPaths, ...(workflow.techDesignSourceFiles || []).map((file) => file.path).filter(Boolean)]);
+  return uniqueNonEmpty([...questionPaths, ...(workflow.techDesignSourceFiles || []).map((file) => file.path).filter(Boolean)]);
 }
 
 function uniqueNonEmpty(values: string[]): string[] {
@@ -443,7 +431,7 @@ export function validateActionInput(workspaceRoot: string, action: ActionInput, 
       }
     }
     for (const value of asStringArray(params.sourceFiles)) {
-      assertInsideWorkspace(workspaceRoot, value);
+      resolveWorkspaceOrRuntimePath(workspaceRoot, value);
     }
   }
   const allowed = new Set<ActionInput['actionType']>([

@@ -63,6 +63,17 @@ interface CenterRequirementVO {
   projectNames?: string[];
 }
 
+interface CenterRunEventVO {
+  id?: number;
+  runId: number;
+  seq: number;
+  level: RunEvent['level'];
+  type?: string;
+  message: string;
+  payloadJson?: string;
+  createdAt?: string;
+}
+
 export interface CenterWsTicketVO {
   ticket: string;
   wsUrl: string;
@@ -124,7 +135,8 @@ export interface WorkspaceMappingVO {
 
 export interface DeliveryWorkspaceVO {
   id: number;
-  clientSessionId: number;
+  projectId: number;
+  clientSessionId?: number;
   localPath: string;
   status: string;
 }
@@ -318,6 +330,40 @@ function centerRequirementToWorkflow(item: CenterRequirementVO): RequirementWork
   };
 }
 
+function centerRunEventToRunEvent(item: CenterRunEventVO): RunEvent {
+  const normalizedType = String(item.type || 'INFO').toUpperCase();
+  const typeMap: Record<string, RunEvent['type']> = {
+    START: 'START',
+    STDOUT: 'STDOUT',
+    STDERR: 'STDERR',
+    INFO: 'INFO',
+    WARN: 'WARN',
+    ERROR: 'ERROR',
+    ARTIFACT: 'ARTIFACT',
+    EXIT: 'EXIT',
+    CANCELLED: 'CANCELLED'
+  };
+  return {
+    time: item.createdAt || new Date().toISOString(),
+    type: typeMap[normalizedType] || 'INFO',
+    level: item.level,
+    message: item.message,
+    text: item.message,
+    data: parseJson(item.payloadJson)
+  };
+}
+
+function parseJson(value?: string): unknown {
+  if (!value) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
 export interface ClientSessionVO {
   id: number;
   userId: number;
@@ -400,22 +446,21 @@ export const apiClient = {
       }
     );
   },
-  getDeliveryWorkspace(clientSessionId: string | number = getApiRuntimeConfig().clientSessionId) {
-    if (!clientSessionId) {
-      throw new Error('缺少客户端会话ID');
+  getDeliveryWorkspace(projectId: string | number = getApiRuntimeConfig().projectId) {
+    if (!projectId) {
+      throw new Error('缺少项目ID');
     }
     return request<DeliveryWorkspaceVO | undefined>(
-      `/api/ai-delivery/users/me/delivery-workspace?clientSessionId=${encodeURIComponent(String(clientSessionId))}`
+      `/api/ai-delivery/projects/${encodeURIComponent(String(projectId))}/delivery-workspace`
     );
   },
-  saveDeliveryWorkspace(localPath: string, clientSessionId: string | number = getApiRuntimeConfig().clientSessionId) {
-    if (!clientSessionId) {
-      throw new Error('缺少客户端会话ID');
+  saveDeliveryWorkspace(projectId: string | number, localPath: string) {
+    if (!projectId) {
+      throw new Error('缺少项目ID');
     }
-    return request<DeliveryWorkspaceVO>('/api/ai-delivery/users/me/delivery-workspace', {
+    return request<DeliveryWorkspaceVO>(`/api/ai-delivery/projects/${encodeURIComponent(String(projectId))}/delivery-workspace`, {
       method: 'POST',
       body: JSON.stringify({
-        clientSessionId: Number(clientSessionId),
         localPath
       })
     });
@@ -469,21 +514,31 @@ export const apiClient = {
     });
   },
   listRequirements() {
+    const centerFallback = () =>
+      request<CenterRequirementVO[]>(`/api/ai-delivery/requirements?projectId=${encodeURIComponent(requireRemoteProjectId())}`)
+        .then((items) => items.map(centerRequirementToWorkflow));
     return runnerRequest<RequirementWorkflow[]>(`/api/ai-delivery/requirements?projectId=${encodeURIComponent(requireRemoteProjectId())}`)
       .then((items) => {
         saveWorkflowCache(items);
         return items;
       })
-      .catch((error) => {
-        const cached = loadWorkflowListCache();
-        if (cached.length) {
-          return cached;
-        }
-        throw error;
-      });
+      .catch(() =>
+        centerFallback()
+          .then((items) => {
+            saveWorkflowCache(items);
+            return items;
+          })
+          .catch((error) => {
+            const cached = loadWorkflowListCache();
+            if (cached.length) {
+              return cached;
+            }
+            throw error;
+          })
+      );
   },
   listAgents() {
-    return request<AgentProvider[]>('/api/ai-delivery/agents');
+    return runnerRequest<AgentProvider[]>('/api/ai-delivery/agents');
   },
   listProjectHistory() {
     return request<WorkflowProject[]>('/api/ai-delivery/project-history');
@@ -499,27 +554,13 @@ export const apiClient = {
         branchName: input.branchName,
         projectNames: (input.projects || []).map((p) => p.name)
       })
-    })
-      .then((item) =>
-        runnerRequest<RequirementWorkflow>('/api/ai-delivery/requirements', {
-          method: 'POST',
-          body: JSON.stringify({
-            id: item.id,
-            requirementId: item.requirementId,
-            title: item.title,
-            requirementType: item.requirementType || input.requirementType || 'REQUIREMENT',
-            branchName: item.branchName || input.branchName,
-            projects: input.projects || (item.projectNames || []).map((name) => ({ name, path: name })),
-            prdClarification: input.prdClarification,
-            techDesignDocument: input.techDesignDocument,
-            techDesignClarification: input.techDesignClarification,
-            techDesignSourceFiles: input.techDesignSourceFiles,
-            sources: input.sources
-          })
-        }).catch(() => centerRequirementToWorkflow(item))
-      );
+    }).then(centerRequirementToWorkflow);
   },
   getRequirement(requirementId: string) {
+    const centerFallback = () =>
+      request<CenterRequirementVO>(
+        `/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}?projectId=${encodeURIComponent(requireRemoteProjectId())}`
+      ).then(centerRequirementToWorkflow);
     return runnerRequest<RequirementWorkflow>(
       `/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}?projectId=${encodeURIComponent(requireRemoteProjectId())}`
     )
@@ -527,13 +568,20 @@ export const apiClient = {
         saveWorkflowItemCache(item);
         return item;
       })
-      .catch((error) => {
-        const cached = loadWorkflowItemCache(requirementId);
-        if (cached) {
-          return cached;
-        }
-        throw error;
-      });
+      .catch(() =>
+        centerFallback()
+          .then((workflow) => {
+            saveWorkflowItemCache(workflow);
+            return workflow;
+          })
+          .catch((error) => {
+            const cached = loadWorkflowItemCache(requirementId);
+            if (cached) {
+              return cached;
+            }
+            throw error;
+          })
+      );
   },
   getOpenSpecSummary(requirementId: string, changeName: string) {
     return runnerRequest<OpenSpecSummary>(
@@ -665,7 +713,8 @@ export const apiClient = {
     });
   },
   getRunEvents(requirementId: string, runId: string) {
-    return runnerRequest<RunEvent[]>(`/api/ai-delivery/runs/${encodeURIComponent(runId)}/events?requirementId=${encodeURIComponent(requirementId)}`);
+    return request<CenterRunEventVO[]>(`/api/ai-delivery/runs/${encodeURIComponent(runId)}/events?afterSeq=0`)
+      .then((items) => items.map(centerRunEventToRunEvent));
   },
   cancelRun(requirementId: string, runId: string) {
     return runnerRequest<{ cancelled: boolean }>(`/api/ai-delivery/runs/${encodeURIComponent(runId)}/cancel`, {
@@ -674,24 +723,9 @@ export const apiClient = {
     });
   },
   openRunEventStream(requirementId: string, runId: string) {
-    const runtime = getApiRuntimeConfig();
-    const params = new URLSearchParams({
-      requirementId,
-      tail: '1'
-    });
-    if (runtime.projectId) {
-      params.set('projectId', runtime.projectId);
-    }
-    if (runtime.clientSessionId) {
-      params.set('clientSessionId', runtime.clientSessionId);
-    }
-    if (runtime.userId) {
-      params.set('userId', runtime.userId);
-    }
-    if (runtime.centerBaseUrl) {
-      params.set('centerBaseUrl', runtime.centerBaseUrl);
-    }
-    return new EventSource(resolveRunnerApiUrl(`/api/ai-delivery/runs/${encodeURIComponent(runId)}/stream?${params.toString()}`));
+    void requirementId;
+    void runId;
+    throw new Error('运行日志实时订阅已迁移到中心 WebSocket');
   },
   createWsTicket(clientSessionId?: string | number) {
     const runtime = getApiRuntimeConfig();

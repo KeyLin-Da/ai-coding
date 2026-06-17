@@ -6,6 +6,7 @@ import lombok.Data;
 public class DeliveryWorkspaceVO {
 
     private Long id;
+    private Long projectId;
     private Long clientSessionId;
     private String localPath;
     private String status;

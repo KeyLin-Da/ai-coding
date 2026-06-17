@@ -1,5 +1,12 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { apiRuntimeHeaders, resolveApiUrl, resolveRunnerApiUrl, resolveWebSocketUrl, setApiRuntimeConfig } from '../../src/api/runtime';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  apiRuntimeEnvDefaults,
+  apiRuntimeHeaders,
+  resolveApiUrl,
+  resolveRunnerApiUrl,
+  resolveWebSocketUrl,
+  setApiRuntimeConfig
+} from '../../src/api/runtime';
 import {
   defaultDesktopLocalConfig,
   loadDesktopLocalConfig,
@@ -8,6 +15,7 @@ import {
 
 describe('desktop-local-config', () => {
   beforeEach(() => {
+    vi.unstubAllEnvs();
     const values = new Map<string, string>();
     Object.defineProperty(window, 'localStorage', {
       configurable: true,
@@ -20,22 +28,39 @@ describe('desktop-local-config', () => {
     });
     window.localStorage.clear();
     delete window.aiDeliveryDesktop;
-    setApiRuntimeConfig({ centerBaseUrl: 'http://127.0.0.1:8728', accessToken: '', userId: '', clientSessionId: '', projectId: '' });
+    setApiRuntimeConfig({ centerBaseUrl: 'http://127.0.0.1:8728', runnerBaseUrl: 'http://127.0.0.1:8718', accessToken: '', userId: '', clientSessionId: '', projectId: '' });
   });
 
-  it('默认配置只保存本机映射和命令摘要', () => {
+  it('默认配置只保存本机运行基础信息，不再维护前端 Provider 命令表', () => {
+    vi.stubEnv('VITE_AI_DELIVERY_CENTER_BASE_URL', '');
+    vi.stubEnv('VITE_AI_DELIVERY_RUNNER_BASE_URL', '');
     const config = defaultDesktopLocalConfig();
 
     expect(config.clientSessionId).toBe('');
     expect(config.runnerBaseUrl).toBe('http://127.0.0.1:8718');
-    expect(config.agentProviders.map((item) => item.command)).toEqual(['codex', 'openspec', 'git', 'node']);
     expect(config.workspaceMappings).toEqual([]);
+    expect('agentProviders' in config).toBe(false);
   });
 
-  it('浏览器回退存储读写本地配置', async () => {
+  it('默认中心和 Runner 地址可由 env profile 提供', () => {
+    vi.stubEnv('VITE_AI_DELIVERY_CENTER_BASE_URL', 'https://env-center.example.com');
+    vi.stubEnv('VITE_AI_DELIVERY_RUNNER_BASE_URL', 'http://127.0.0.1:9876');
+
+    expect(apiRuntimeEnvDefaults()).toEqual({
+      centerBaseUrl: 'https://env-center.example.com',
+      runnerBaseUrl: 'http://127.0.0.1:9876'
+    });
+    expect(defaultDesktopLocalConfig().centerBaseUrl).toBe('https://env-center.example.com');
+    expect(defaultDesktopLocalConfig().runnerBaseUrl).toBe('http://127.0.0.1:9876');
+  });
+
+  it('浏览器回退存储读写本地配置且运行地址始终来自 env profile', async () => {
+    vi.stubEnv('VITE_AI_DELIVERY_CENTER_BASE_URL', 'https://env-center.example.com');
+    vi.stubEnv('VITE_AI_DELIVERY_RUNNER_BASE_URL', 'http://127.0.0.1:9876');
     const config = {
       ...defaultDesktopLocalConfig(),
       centerBaseUrl: 'https://center.example.com',
+      runnerBaseUrl: 'http://127.0.0.1:8718',
       userId: '1',
       workspaceMappings: [{ projectId: 'p1', localPath: '/Users/me/work' }]
     };
@@ -43,8 +68,34 @@ describe('desktop-local-config', () => {
     await saveDesktopLocalConfig(config);
     const loaded = await loadDesktopLocalConfig();
 
-    expect(loaded.centerBaseUrl).toBe('https://center.example.com');
+    expect(loaded.centerBaseUrl).toBe('https://env-center.example.com');
+    expect(loaded.runnerBaseUrl).toBe('http://127.0.0.1:9876');
     expect(loaded.workspaceMappings).toEqual([{ projectId: 'p1', localPath: '/Users/me/work' }]);
+  });
+
+  it('读取旧 local-mode 配置时丢弃旧运行地址和本地数据模式字段', async () => {
+    vi.stubEnv('VITE_AI_DELIVERY_CENTER_BASE_URL', 'https://env-center.example.com');
+    vi.stubEnv('VITE_AI_DELIVERY_RUNNER_BASE_URL', 'http://127.0.0.1:9876');
+    window.localStorage.setItem(
+      'ai-delivery.desktop.local-config',
+      JSON.stringify({
+        apiMode: 'local',
+        localBaseUrl: 'http://127.0.0.1:8718',
+        centerBaseUrl: 'https://center.example.com',
+        runnerBaseUrl: 'http://127.0.0.1:8718',
+        clientSessionId: '11',
+        agentProviders: [{ id: 'OPENSPEC', command: 'openspec', enabled: true }]
+      })
+    );
+
+    const loaded = await loadDesktopLocalConfig();
+
+    expect(loaded.centerBaseUrl).toBe('https://env-center.example.com');
+    expect(loaded.runnerBaseUrl).toBe('http://127.0.0.1:9876');
+    expect(loaded.clientSessionId).toBe('11');
+    expect('apiMode' in loaded).toBe(false);
+    expect('localBaseUrl' in loaded).toBe(false);
+    expect('agentProviders' in loaded).toBe(false);
   });
 
   it('远程 API runtime 拼接中心服务 URL 并携带用户头', () => {

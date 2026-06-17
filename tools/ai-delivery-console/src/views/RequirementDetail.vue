@@ -424,6 +424,7 @@ import ArtifactGitSyncDialog from '@/components/ArtifactGitSyncDialog.vue';
 import DesignQuestionDialog from '@/components/DesignQuestionDialog.vue';
 import GitChangeInspector from '@/components/GitChangeInspector.vue';
 import { useWorkflowStore } from '@/stores/workflow';
+import { useSettingsStore } from '@/stores/settings';
 import { apiClient, type RequirementWorkspaceStateVO } from '@/api/client';
 import { getApiRuntimeConfig } from '@/api/runtime';
 import { findLatestStageRun } from '@/utils/run-selection';
@@ -436,6 +437,7 @@ import {
 
 const route = useRoute();
 const store = useWorkflowStore();
+const settings = useSettingsStore();
 const activeStage = ref<WorkflowStage>('PRD');
 const reviewDialog = ref<InstanceType<typeof ReviewDialog>>();
 const artifactGitSyncDialog = ref<InstanceType<typeof ArtifactGitSyncDialog>>();
@@ -1059,15 +1061,24 @@ async function copyToClipboard(text: string) {
 }
 
 async function ensureDeliveryReady(actionLabel: string, options: { allowDirty?: boolean; skipRepositoryChecks?: boolean } = {}) {
-  const runtime = getApiRuntimeConfig();
-  if (!runtime.clientSessionId) {
-    ElMessage.warning('请先在个人中心配置客户端会话ID');
+  let runtime = getApiRuntimeConfig();
+  if (!runtime.projectId) {
+    ElMessage.warning('请先选择项目');
     return false;
   }
+  if (!runtime.clientSessionId) {
+    try {
+      await settings.requireClientSessionId();
+      runtime = getApiRuntimeConfig();
+    } catch (error: any) {
+      ElMessage.warning(error.message || '请先在个人中心配置客户端会话ID');
+      return false;
+    }
+  }
   try {
-    const workspace = await apiClient.getDeliveryWorkspace(runtime.clientSessionId);
+    const workspace = await apiClient.getDeliveryWorkspace(runtime.projectId);
     if (!workspace?.localPath) {
-      ElMessage.warning(`请先在个人中心配置交付工作区，再${actionLabel}`);
+      ElMessage.warning(`请先在个人中心配置当前项目交付工作区，再${actionLabel}`);
       return false;
     }
     if (!options.skipRepositoryChecks) {

@@ -5,8 +5,18 @@ export interface CenterRequestContext {
   fetchImpl?: typeof fetch;
 }
 
+export type CenterRequestError = Error & {
+  code?: string;
+  data?: unknown;
+  status?: number;
+};
+
+export function isCenterEndpointUnavailableError(error: unknown): boolean {
+  return Boolean(error && typeof error === 'object' && (error as CenterRequestError).status === 404);
+}
+
 export function resolveCenterBaseUrl(context: CenterRequestContext): string {
-  return (context.centerBaseUrl || process.env.AI_DELIVERY_CENTER_BASE_URL || 'http://127.0.0.1:8728').replace(/\/+$/, '');
+  return (context.centerBaseUrl || process.env.VITE_AI_DELIVERY_CENTER_BASE_URL || 'http://127.0.0.1:8728').replace(/\/+$/, '');
 }
 
 export function centerAuthHeaders(context: CenterRequestContext): Record<string, string> {
@@ -36,9 +46,10 @@ export async function centerRequest<T>(
   });
   const body = await response.json().catch(() => null);
   if (!response.ok || body?.success === false) {
-    const error = new Error(body?.message || `中心服务请求失败: ${response.status}`) as Error & { code?: string; data?: unknown };
+    const error = new Error(body?.message || `中心服务请求失败: ${response.status}`) as CenterRequestError;
     error.code = body?.code;
     error.data = body?.data;
+    error.status = response.status;
     throw error;
   }
   return (body?.data ?? body) as T;
