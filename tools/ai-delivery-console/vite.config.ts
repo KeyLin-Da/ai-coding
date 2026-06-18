@@ -11,7 +11,7 @@ const { loadProfileEnv, resolveEnvProfile } = require('./scripts/env-loader.cjs'
 };
 
 function profileForMode(mode: string): string {
-  if (process.env.AI_DELIVERY_ENV || process.env.VITE_AI_DELIVERY_ENV) {
+  if (process.env.AI_DELIVERY_ENV) {
     return resolveEnvProfile();
   }
   return supportedProfiles.has(mode) ? mode : 'local';
@@ -36,7 +36,21 @@ export default defineConfig(({ mode }) => {
   const env = process.env;
   const devPort = envNumber(env.VITE_AI_DELIVERY_DEV_PORT, 5178);
   const previewPort = envNumber(env.VITE_AI_DELIVERY_PREVIEW_PORT, 4178);
+  const centerTarget = env.VITE_AI_DELIVERY_CENTER_BASE_URL || 'http://127.0.0.1:8728';
   const runnerTarget = env.VITE_AI_DELIVERY_RUNNER_BASE_URL || 'http://127.0.0.1:8718';
+  const proxy = {
+    '/runner-api': {
+      target: runnerTarget,
+      changeOrigin: true,
+      rewrite: (pathname: string) => pathname.replace(/^\/runner-api/, '')
+    },
+    '/center-api': {
+      target: centerTarget,
+      changeOrigin: true,
+      ws: true,
+      rewrite: (pathname: string) => pathname.replace(/^\/center-api/, '')
+    }
+  };
 
   return {
     base: './',
@@ -50,17 +64,13 @@ export default defineConfig(({ mode }) => {
     server: {
       port: devPort,
       host: true,
-      proxy: {
-        '/api': {
-          target: runnerTarget,
-          changeOrigin: true
-        }
-      },
+      proxy,
       allowedHosts: envList(env.VITE_AI_DELIVERY_ALLOWED_HOSTS, ['127.0.0.1', 'localhost'])
     },
     preview: {
       port: previewPort,
-      host: true
+      host: true,
+      proxy
     },
     build: {
       outDir: 'dist',

@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { ArtifactRef, RequirementWorkflow, RunRecord } from '../../shared/workflow';
 import { hashContent } from './workspace';
 import { scanRequirementArtifacts } from './workspace-scanner';
+import { isReportRunLogPath } from './artifact-path-rules';
 
 export interface ArtifactSnapshotEntry {
   path: string;
@@ -126,6 +127,9 @@ export function isShareableControlledArtifact(workflow: RequirementWorkflow, rel
     return false;
   }
   if (normalized.includes('/workflow/')) {
+    return false;
+  }
+  if (isReportRunLogPath(normalized, workflow.requirementId)) {
     return false;
   }
   return /\.(md|markdown|html|json|txt|log)$/i.test(normalized);

@@ -6,7 +6,12 @@ import { deriveCurrentStage } from '../../shared/stage-rules';
 import { normalizeRequirementId } from './workspace';
 import { saveProjectHistory } from './project-history';
 import { normalizeWorkflowProjects } from './project-resolver';
-import { getWorkflowRuntimeDir, getWorkflowRuntimeStatePath, listRuntimeRequirementIds } from './runtime-paths';
+import {
+  getLegacyHashedWorkflowRuntimeStatePath,
+  getWorkflowRuntimeDir,
+  getWorkflowRuntimeStatePath,
+  listRuntimeRequirementIds
+} from './runtime-paths';
 
 export function normalizePrdClarification(value?: string): string | undefined {
   const withoutControls = Array.from(String(value || ''))
@@ -52,7 +57,11 @@ export class WorkflowRepository {
   }
 
   async load(requirementId: string): Promise<RequirementWorkflow | null> {
-    for (const statePath of [this.getStatePath(requirementId), this.getLegacyStatePath(requirementId)]) {
+    for (const statePath of [
+      this.getStatePath(requirementId),
+      getLegacyHashedWorkflowRuntimeStatePath(this.workspaceRoot, requirementId),
+      this.getLegacyStatePath(requirementId)
+    ]) {
       const content = await fs.readFile(statePath, 'utf8').catch((error: any) => {
         if (error.code === 'ENOENT') {
           return '';

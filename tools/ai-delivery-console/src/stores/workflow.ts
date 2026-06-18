@@ -8,6 +8,10 @@ import { RealtimeClient, type RealtimeDomainEvent } from '@/services/realtime-cl
 let requirementsLoadInFlight: Promise<RequirementWorkflow[]> | undefined;
 const requirementLoadInFlight = new Map<string, Promise<RequirementWorkflow>>();
 
+function isCenterRunId(runId: string | number): boolean {
+  return /^\d+$/.test(String(runId).trim());
+}
+
 interface WorkflowState {
   requirements: RequirementWorkflow[];
   current?: RequirementWorkflow;
@@ -118,11 +122,30 @@ export const useWorkflowStore = defineStore('workflow', {
       }
       this.stopRunStream();
       this.activeRunId = runId;
-      void this.ensureRealtimeClient()
-        .then((client) => client.subscribeRun(runId, this.runEventSeqs[runId] || 0))
-        .catch(() => {
-          this.realtimeStatus = 'ERROR';
-        });
+      if (isCenterRunId(runId)) {
+        void this.ensureRealtimeClient()
+          .then((client) => client.subscribeRun(runId, this.runEventSeqs[runId] || 0))
+          .catch(() => {
+            this.realtimeStatus = 'ERROR';
+          });
+        return;
+      }
+      const source = apiClient.openRunEventStream(this.current.requirementId, runId);
+      this.runEventSource = source;
+      source.onmessage = (event) => {
+        if (this.activeRunId !== runId) {
+          return;
+        }
+        const runEvent = JSON.parse(event.data) as RunEvent;
+        this.runEvents.push(runEvent);
+        this.runEventSeqs[runId] = this.runEvents.length;
+      };
+      source.onerror = () => {
+        source.close();
+        if (this.runEventSource === source) {
+          this.runEventSource = undefined;
+        }
+      };
     },
     stopRunStream() {
       this.runEventSource?.close();

@@ -353,6 +353,10 @@ function centerRunEventToRunEvent(item: CenterRunEventVO): RunEvent {
   };
 }
 
+export function isCenterRunId(runId: string | number): boolean {
+  return /^\d+$/.test(String(runId).trim());
+}
+
 function parseJson(value?: string): unknown {
   if (!value) {
     return undefined;
@@ -713,8 +717,11 @@ export const apiClient = {
     });
   },
   getRunEvents(requirementId: string, runId: string) {
-    return request<CenterRunEventVO[]>(`/api/ai-delivery/runs/${encodeURIComponent(runId)}/events?afterSeq=0`)
-      .then((items) => items.map(centerRunEventToRunEvent));
+    if (isCenterRunId(runId)) {
+      return request<CenterRunEventVO[]>(`/api/ai-delivery/runs/${encodeURIComponent(runId)}/events?afterSeq=0`)
+        .then((items) => items.map(centerRunEventToRunEvent));
+    }
+    return runnerRequest<RunEvent[]>(`/api/ai-delivery/runs/${encodeURIComponent(runId)}/events?requirementId=${encodeURIComponent(requirementId)}`);
   },
   cancelRun(requirementId: string, runId: string) {
     return runnerRequest<{ cancelled: boolean }>(`/api/ai-delivery/runs/${encodeURIComponent(runId)}/cancel`, {
@@ -723,9 +730,24 @@ export const apiClient = {
     });
   },
   openRunEventStream(requirementId: string, runId: string) {
-    void requirementId;
-    void runId;
-    throw new Error('运行日志实时订阅已迁移到中心 WebSocket');
+    const runtime = getApiRuntimeConfig();
+    const params = new URLSearchParams({
+      requirementId,
+      tail: '1'
+    });
+    if (runtime.projectId) {
+      params.set('projectId', runtime.projectId);
+    }
+    if (runtime.clientSessionId) {
+      params.set('clientSessionId', runtime.clientSessionId);
+    }
+    if (runtime.userId) {
+      params.set('userId', runtime.userId);
+    }
+    if (runtime.centerBaseUrl) {
+      params.set('centerBaseUrl', runtime.centerBaseUrl);
+    }
+    return new EventSource(resolveRunnerApiUrl(`/api/ai-delivery/runs/${encodeURIComponent(runId)}/stream?${params.toString()}`));
   },
   createWsTicket(clientSessionId?: string | number) {
     const runtime = getApiRuntimeConfig();

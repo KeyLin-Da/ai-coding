@@ -59,7 +59,7 @@ describe('env-loader', () => {
     });
   });
 
-  it('按 profile 加载 env 文件且不覆盖显式环境变量', async () => {
+  it('按 profile 分层加载 env 文件，profile 覆盖公共值且不覆盖 shell 显式变量', async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-env-'));
     await fs.writeFile(path.join(tempDir, '.env'), 'VITE_AI_DELIVERY_PORT=8718\nCUSTOM_VALUE=base\n', 'utf8');
     await fs.writeFile(

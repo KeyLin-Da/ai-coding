@@ -4,7 +4,7 @@ const path = require('node:path');
 const SUPPORTED_PROFILES = new Set(['local', 'dev', 'prd']);
 
 function resolveEnvProfile(value) {
-  const requested = String(value || process.env.AI_DELIVERY_ENV || process.env.VITE_AI_DELIVERY_ENV || 'local').trim();
+  const requested = String(value || process.env.AI_DELIVERY_ENV || 'local').trim();
   return SUPPORTED_PROFILES.has(requested) ? requested : 'local';
 }
 
@@ -45,8 +45,7 @@ function parseEnvValue(raw) {
 function envFilePaths(rootDir, profile) {
   return [
     path.join(rootDir, '.env'),
-    path.join(rootDir, `.env.${profile}`),
-    path.join(rootDir, `.env.${profile}.local`)
+    path.join(rootDir, `.env.${profile}`)
   ];
 }
 
@@ -62,10 +61,12 @@ function loadProfileEnv(rootDir, options = {}) {
     const parsed = parseEnvText(fs.readFileSync(filePath, 'utf8'));
     loadedFiles.push(filePath);
     for (const [key, value] of Object.entries(parsed)) {
-      if (override || process.env[key] === undefined) {
-        process.env[key] = value;
-      }
       loadedValues[key] = value;
+    }
+  }
+  for (const [key, value] of Object.entries(loadedValues)) {
+    if (override || process.env[key] === undefined) {
+      process.env[key] = value;
     }
   }
   return {

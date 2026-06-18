@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   apiRuntimeEnvDefaults,
   apiRuntimeHeaders,
@@ -29,6 +29,10 @@ describe('desktop-local-config', () => {
     window.localStorage.clear();
     delete window.aiDeliveryDesktop;
     setApiRuntimeConfig({ centerBaseUrl: 'http://127.0.0.1:8728', runnerBaseUrl: 'http://127.0.0.1:8718', accessToken: '', userId: '', clientSessionId: '', projectId: '' });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('默认配置只保存本机运行基础信息，不再维护前端 Provider 命令表', () => {
@@ -98,7 +102,7 @@ describe('desktop-local-config', () => {
     expect('agentProviders' in loaded).toBe(false);
   });
 
-  it('远程 API runtime 拼接中心服务 URL 并携带用户头', () => {
+  it('HTTP 页面 runtime 使用同源代理并携带真实上游地址头', () => {
     setApiRuntimeConfig({
       centerBaseUrl: 'https://center.example.com/',
       userId: '7',
@@ -107,9 +111,9 @@ describe('desktop-local-config', () => {
       runnerBaseUrl: 'http://127.0.0.1:8718'
     });
 
-    expect(resolveApiUrl('/api/ai-delivery/jobs')).toBe('https://center.example.com/api/ai-delivery/jobs');
-    expect(resolveRunnerApiUrl('/api/ai-delivery/git-credentials/generate-local')).toBe('http://127.0.0.1:8718/api/ai-delivery/git-credentials/generate-local');
-    expect(resolveWebSocketUrl('/api/ai-delivery/ws')).toBe('wss://center.example.com/api/ai-delivery/ws');
+    expect(resolveApiUrl('/api/ai-delivery/jobs')).toBe('/center-api/api/ai-delivery/jobs');
+    expect(resolveRunnerApiUrl('/api/ai-delivery/git-credentials/generate-local')).toBe('/runner-api/api/ai-delivery/git-credentials/generate-local');
+    expect(resolveWebSocketUrl('/api/ai-delivery/ws')).toBe('ws://localhost:3000/center-api/api/ai-delivery/ws');
     expect(apiRuntimeHeaders()).toEqual({
       'X-User-Id': '7',
       'X-Project-Id': '2',
@@ -125,6 +129,12 @@ describe('desktop-local-config', () => {
       userId: '7',
       clientSessionId: '9',
       projectId: '2'
+    });
+    vi.stubGlobal('window', {
+      location: {
+        protocol: 'file:',
+        origin: 'null'
+      }
     });
 
     expect(resolveApiUrl('/api/ai-delivery/requirements')).toBe('http://127.0.0.1:8728/api/ai-delivery/requirements');

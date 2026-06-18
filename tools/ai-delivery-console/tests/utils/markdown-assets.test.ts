@@ -30,7 +30,7 @@ describe('markdown-assets', () => {
     const rewritten = rewriteMarkdownImageSources(html, 'docs/141846/prd/analysis.md');
 
     expect(rewritten).toContain(
-      'src="http://runner.example.com/api/artifacts/read?path=docs%2F141846%2Fprd%2Ffiles%2Fscreenshots%2Franking_main_20260610.png"'
+      'src="/runner-api/api/artifacts/read?path=docs%2F141846%2Fprd%2Ffiles%2Fscreenshots%2Franking_main_20260610.png"'
     );
     expect(rewritten).toContain('alt="排行榜主页面"');
   });
@@ -39,7 +39,7 @@ describe('markdown-assets', () => {
     const html = '<img src="https://example.com/screen.png" alt="external">';
 
     expect(rewriteMarkdownImageSources(html, 'docs/141846/prd/analysis.md')).toBe(html);
-    expect(artifactReadUrl('docs/141846/prd/analysis.md')).toBe('http://runner.example.com/api/artifacts/read?path=docs%2F141846%2Fprd%2Fanalysis.md');
+    expect(artifactReadUrl('docs/141846/prd/analysis.md')).toBe('/runner-api/api/artifacts/read?path=docs%2F141846%2Fprd%2Fanalysis.md');
   });
 
   it('产物读取 URL 携带项目运行时上下文以支持图片标签直连', () => {
@@ -51,7 +51,7 @@ describe('markdown-assets', () => {
     });
 
     expect(artifactReadUrl('docs/141846/technical-design/file/screenshot.png')).toBe(
-      'http://runner.example.com/api/artifacts/read?path=docs%2F141846%2Ftechnical-design%2Ffile%2Fscreenshot.png&projectId=5&clientSessionId=16&userId=1&centerBaseUrl=http%3A%2F%2Fcenter.example.com'
+      '/runner-api/api/artifacts/read?path=docs%2F141846%2Ftechnical-design%2Ffile%2Fscreenshot.png&projectId=5&clientSessionId=16&userId=1&centerBaseUrl=http%3A%2F%2Fcenter.example.com'
     );
   });
 });

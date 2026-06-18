@@ -156,7 +156,7 @@ describe('ArtifactPreviewDialog', () => {
     expect(wrapper.html()).toContain('<h1>PRD</h1>');
     expect(wrapper.text()).toContain('产物内容');
     expect(wrapper.find('.artifact-markdown img').attributes('src')).toBe(
-      'http://127.0.0.1:8718/api/artifacts/read?path=docs%2F172014%2Fprd%2Ffiles%2Fscreenshots%2Franking_main_20260610.png'
+      '/runner-api/api/artifacts/read?path=docs%2F172014%2Fprd%2Ffiles%2Fscreenshots%2Franking_main_20260610.png'
     );
     expect(wrapper.text()).toContain('v2');
     expect(wrapper.text()).toContain('4 个版本');
@@ -425,7 +425,7 @@ sequenceDiagram
     const image = wrapper.find('.artifact-image-wrap img');
     expect(image.exists()).toBe(true);
     expect(image.attributes('src')).toBe(
-      'http://127.0.0.1:8718/api/artifacts/read?path=docs%2F141846%2Ftechnical-design%2Ffile%2Fscreenshot.png&projectId=5&clientSessionId=16&userId=1&centerBaseUrl=http%3A%2F%2Fcenter.example.com'
+      '/runner-api/api/artifacts/read?path=docs%2F141846%2Ftechnical-design%2Ffile%2Fscreenshot.png&projectId=5&clientSessionId=16&userId=1&centerBaseUrl=http%3A%2F%2Fcenter.example.com'
     );
     expect(apiClient.readArtifact).not.toHaveBeenCalled();
   });

@@ -8,6 +8,7 @@ import {
   prepareCenterTechDesignAnnotationInput,
   techDesignAnnotationSnapshotPath
 } from '../../server/services/center-tech-design-annotations';
+import { validateActionInput } from '../../server/services/action-adapters';
 import type { RequirementWorkflow } from '../../shared/workflow';
 import { createEmptyStages } from '../../shared/workflow';
 
@@ -127,6 +128,12 @@ describe('center-tech-design-annotations service', () => {
     const content = await fs.readFile(prepared.sourceFilePath, 'utf8');
     expect(content).toContain('# 技术方案批注摘要');
     expect(content).toContain('补充 Redis key 和过期时间');
+    expect(() =>
+      validateActionInput(root, {
+        actionType: 'DESIGN_GENERATE',
+        params: { sourceFiles: [prepared.sourceFilePath] }
+      })
+    ).not.toThrow();
   });
 
   it('中心待消费批注接口不存在时不阻断生成', async () => {

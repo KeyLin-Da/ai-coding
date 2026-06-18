@@ -74,7 +74,9 @@ npm run server:dev
 npm run dev
 ```
 
-默认中心服务地址为 `http://127.0.0.1:8728`，Local Runner 地址为 `http://127.0.0.1:8718`，前端开发服务为 `http://127.0.0.1:5178`。网页版和桌面端读取需求、阶段、产物索引、审核、问题和运行日志时都请求中心服务；Runner 只提供本机桥接、Agent 执行、Git 同步和 bootstrap import。
+默认中心服务地址为 `http://127.0.0.1:8728`，Local Runner 地址为 `http://127.0.0.1:8718`，浏览器单一入口为 `http://127.0.0.1:5178`。HTTP(S) 页面通过同源路径 `/center-api/*` 和 `/runner-api/*` 分别代理到 Center 与 Runner，Center WebSocket 也通过 `/center-api/*` upgrade，避免浏览器 CORS 与 HTTPS 页面访问 HTTP Runner 的 Mixed Content。网页版和桌面端读取需求、阶段、产物索引、审核、问题和运行日志时都请求中心服务；Runner 只提供本机桥接、Agent 执行、Git 同步和 bootstrap import。
+
+Runner 与 Center 仍是独立进程，`8718` 只是 Runner 内部上游端口。若将 `dist` 部署到独立 Web 服务器，必须在该服务器复刻以下路径契约：`/runner-api` 转发 Runner 并移除前缀，`/center-api` 转发 Center、移除前缀并支持 WebSocket upgrade。
 
 ### 环境 Profile
 
@@ -84,6 +86,7 @@ npm run dev
 .env.local   # 本机开发，中心服务和 Runner 默认都在 127.0.0.1
 .env.dev     # 联调环境，中心服务指向 dev，Runner 仍默认使用本机
 .env.prd     # 生产构建默认值
+.env.<profile>.local # 个人覆盖，不进入 Git
 .env.example # 变量模板
 ```
 
@@ -107,7 +110,7 @@ npm run build:dev
 npm run build:prd
 ```
 
-兼容入口仍然可用：`npm run dev`、`npm run server:dev`、`npm run desktop:dev` 默认走 local，`npm run build` 默认走 prd。`VITE_AI_DELIVERY_*` 用于前端默认值，`AI_DELIVERY_*` 用于 Runner、Electron 和 CLI。若个人中心已经保存了中心服务或 Runner 地址，本机保存值优先于 env 默认值。
+兼容入口仍然可用：`npm run dev`、`npm run server:dev`、`npm run desktop:dev` 默认走 local，`npm run build` 默认走 prd。受控 profile 只声明环境差异，未声明项使用代码默认值；个人 Center tunnel 或 allowed hosts 写入 `.env.<profile>.local`。文件优先级为 `.env` < `.env.<profile>` < `.env.<profile>.local`，shell 显式变量优先级最高。
 
 如果需要指定 Runner 使用的工作区根目录：
 
@@ -151,7 +154,7 @@ Runner 在 clone 项目仓后会把工具链仓 `skills/coding-*` 同步到项�
 cd tools/ai-delivery-console
 npm install
 npm run dev
-AI_DELIVERY_DESKTOP_URL=http://127.0.0.1:5178 npm run desktop:dev
+npm run desktop:dev
 ```
 
 开发态桌面窗口默认加载 `http://127.0.0.1:5178`。生产打包时应用会加载 `dist/index.html`，安装包输出到 `release/`：
@@ -164,8 +167,10 @@ npm run desktop:build
 
 中心服务、Runner 和 Agent CLI 命令通过 env profile 或启动环境变量配置：
 
-- `VITE_AI_DELIVERY_CENTER_BASE_URL` / `AI_DELIVERY_CENTER_BASE_URL`: 中心服务地址，例如 `http://127.0.0.1:8728`
-- `VITE_AI_DELIVERY_RUNNER_BASE_URL` / `AI_DELIVERY_RUNNER_URL`: Local Runner 地址，例如 `http://127.0.0.1:8718`
+- `VITE_AI_DELIVERY_CENTER_BASE_URL`: Center 代理上游与 Electron 直连地址，例如 `http://127.0.0.1:8728`
+- `VITE_AI_DELIVERY_RUNNER_BASE_URL`: Runner 代理上游与 Electron 直连地址，默认 `http://127.0.0.1:8718`
+- `VITE_AI_DELIVERY_PORT`、`VITE_AI_DELIVERY_DEV_PORT`、`VITE_AI_DELIVERY_PREVIEW_PORT`: 可选端口覆盖，默认分别为 `8718`、`5178`、`4178`
+- `VITE_AI_DELIVERY_ALLOWED_HOSTS`: 可选 Vite Host 白名单，个人 tunnel 域名应配置在 `.env.<profile>.local`
 - `CODEX_COMMAND`、`CODEBUDDY_COMMAND`、`QODER_COMMAND`、`QWEN_COMMAND`: 覆盖默认 Agent CLI 命令
 - `AGENT_PROVIDERS_JSON` / `AGENT_PROVIDERS_PATH`: 高级场景下整体覆盖或扩展后端 Provider 列表
 

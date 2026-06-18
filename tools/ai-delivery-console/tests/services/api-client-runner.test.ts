@@ -90,7 +90,7 @@ describe('apiClient Runner docs endpoints', () => {
     expect(result[0].requirementType).toBe('DEFECT');
     expect(result[0].artifacts).toHaveLength(1);
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('http://127.0.0.1:8718/api/ai-delivery/requirements?projectId=10');
+    expect(url).toBe('/runner-api/api/ai-delivery/requirements?projectId=10');
     expect(init.headers['X-Project-Id']).toBe('10');
   });
 
@@ -110,7 +110,7 @@ describe('apiClient Runner docs endpoints', () => {
     const result = await apiClient.listAgents();
 
     expect(result).toEqual(agents);
-    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:8718/api/ai-delivery/agents', expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledWith('/runner-api/api/ai-delivery/agents', expect.any(Object));
   });
 
   it('需求详情优先从 Runner 合并接口读取，保留本地扫描产物', async () => {
@@ -122,7 +122,7 @@ describe('apiClient Runner docs endpoints', () => {
     expect(result.currentStage).toBe('TECH_DESIGN');
     expect(result.artifacts[0].path).toBe('docs/172014/technical-design/design_review.md');
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:8718/api/ai-delivery/requirements/172014?projectId=10',
+      '/runner-api/api/ai-delivery/requirements/172014?projectId=10',
       expect.any(Object)
     );
   });
@@ -140,12 +140,12 @@ describe('apiClient Runner docs endpoints', () => {
     expect(result.artifacts).toEqual([]);
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      'http://127.0.0.1:8718/api/ai-delivery/requirements/172014?projectId=10',
+      '/runner-api/api/ai-delivery/requirements/172014?projectId=10',
       expect.any(Object)
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      'https://center.example.com/api/ai-delivery/requirements/172014?projectId=10',
+      '/center-api/api/ai-delivery/requirements/172014?projectId=10',
       expect.any(Object)
     );
   });
@@ -158,7 +158,7 @@ describe('apiClient Runner docs endpoints', () => {
     await apiClient.uploadTechDesignFiles('172014', [file]);
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:8718/api/ai-delivery/requirements/172014/tech-design-files',
+      '/runner-api/api/ai-delivery/requirements/172014/tech-design-files',
       expect.objectContaining({
         method: 'POST',
         body: expect.any(FormData)
@@ -186,7 +186,7 @@ describe('apiClient Runner docs endpoints', () => {
     await apiClient.runAction('172014', { actionType: 'DESIGN_GENERATE' });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:8718/api/ai-delivery/requirements/172014/actions',
+      '/runner-api/api/ai-delivery/requirements/172014/actions',
       expect.objectContaining({
         method: 'POST'
       })
@@ -200,7 +200,7 @@ describe('apiClient Runner docs endpoints', () => {
     await apiClient.previewActionCommand('172014', { actionType: 'DESIGN_GENERATE' });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:8718/api/ai-delivery/requirements/172014/actions/command',
+      '/runner-api/api/ai-delivery/requirements/172014/actions/command',
       expect.objectContaining({
         method: 'POST'
       })
@@ -227,7 +227,7 @@ describe('apiClient Runner docs endpoints', () => {
     const events = await apiClient.getRunEvents('172014', '100');
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://center.example.com/api/ai-delivery/runs/100/events?afterSeq=0',
+      '/center-api/api/ai-delivery/runs/100/events?afterSeq=0',
       expect.any(Object)
     );
     expect(events[0]).toMatchObject({
@@ -238,6 +238,42 @@ describe('apiClient Runner docs endpoints', () => {
     });
   });
 
+  it('本地 Runner 字符串 runId 的运行日志从 Runner 读取', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      okResponse([
+        {
+          time: '2026-06-17T11:06:58.000Z',
+          type: 'START',
+          level: 'INFO',
+          message: '开始执行本地 run'
+        }
+      ])
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const events = await apiClient.getRunEvents('164946', 'run-20260617110658-10d25f');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/runner-api/api/ai-delivery/runs/run-20260617110658-10d25f/events?requirementId=164946',
+      expect.any(Object)
+    );
+    expect(events[0]).toMatchObject({
+      type: 'START',
+      message: '开始执行本地 run'
+    });
+  });
+
+  it('本地 Runner 字符串 runId 的实时日志使用 Runner SSE', () => {
+    const eventSource = vi.fn();
+    vi.stubGlobal('EventSource', eventSource);
+
+    apiClient.openRunEventStream('164946', 'run-20260617110658-10d25f');
+
+    expect(eventSource).toHaveBeenCalledWith(
+      '/runner-api/api/ai-delivery/runs/run-20260617110658-10d25f/stream?requirementId=164946&tail=1&projectId=10&clientSessionId=20&userId=1&centerBaseUrl=https%3A%2F%2Fcenter.example.com'
+    );
+  });
+
   it('取消运行提交到本地 Runner', async () => {
     const fetchMock = vi.fn().mockImplementation(() => okResponse({ cancelled: true }));
     vi.stubGlobal('fetch', fetchMock);
@@ -245,7 +281,7 @@ describe('apiClient Runner docs endpoints', () => {
     await apiClient.cancelRun('172014', 'run-20260610012246-5eef8c');
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:8718/api/ai-delivery/runs/run-20260610012246-5eef8c/cancel',
+      '/runner-api/api/ai-delivery/runs/run-20260610012246-5eef8c/cancel',
       expect.objectContaining({
         method: 'POST'
       })

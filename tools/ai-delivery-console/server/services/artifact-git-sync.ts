@@ -6,6 +6,7 @@ import { centerRequest } from './center-client';
 import { hashContent } from './workspace';
 import { inspectProjectRepository, resolveProjectRepoPath, runGit } from './project-repository';
 import { privateKeyPathForCredential, requireActiveGitCredential } from './local-git-credentials';
+import { isReportRunLogPath } from './artifact-path-rules';
 
 export interface ArtifactGitSyncPlanInput {
   stage: WorkflowStage;
@@ -87,6 +88,10 @@ function excludedPrefixes(workflow: RequirementWorkflow): string[] {
   return [`docs/${requirementId}/workflow/`];
 }
 
+function isExcludedArtifactPath(workflow: RequirementWorkflow, normalizedPath: string): boolean {
+  return excludedPrefixes(workflow).some((prefix) => normalizedPath.startsWith(prefix)) || isReportRunLogPath(normalizedPath, workflow.requirementId);
+}
+
 function controlledExactPaths(): string[] {
   return [
     'openspec/config.yaml'
@@ -98,7 +103,7 @@ export function assertControlledArtifactPath(workflow: RequirementWorkflow, file
   if (!normalized || normalized.startsWith('/') || normalized.includes('../') || normalized.includes('//')) {
     throw new Error(`同步文件路径不合法: ${filePath}`);
   }
-  const isExcluded = excludedPrefixes(workflow).some((prefix) => normalized.startsWith(prefix));
+  const isExcluded = isExcludedArtifactPath(workflow, normalized);
   const isControlled = !isExcluded && (controlledExactPaths().includes(normalized) || controlledPrefixes(workflow).some((prefix) => normalized.startsWith(prefix)));
   if (!isControlled) {
     throw new Error(`同步文件不在受控产物路径内: ${filePath}`);

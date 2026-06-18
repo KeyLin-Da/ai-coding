@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { existsSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { WorkflowStage } from '../../shared/workflow';
@@ -6,9 +7,14 @@ import { assertInsideWorkspace, normalizeRequirementId } from './workspace';
 
 const RUNTIME_REF_PREFIX = '.ai-delivery-runtime';
 
-function safeRuntimeProjectKey(workspaceRoot: string): string {
+function runtimeProjectCode(workspaceRoot: string): string {
   const resolved = path.resolve(workspaceRoot);
-  const name = path.basename(resolved).replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 60) || 'workspace';
+  return path.basename(resolved).replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 60) || 'workspace';
+}
+
+function legacyRuntimeProjectKey(workspaceRoot: string): string {
+  const resolved = path.resolve(workspaceRoot);
+  const name = runtimeProjectCode(resolved);
   const hash = crypto.createHash('sha256').update(resolved).digest('hex').slice(0, 8);
   return `${name}-${hash}`;
 }
@@ -29,11 +35,23 @@ export function getRunnerRuntimeRoot(workspaceRoot: string): string {
   const baseRoot = process.env.AI_DELIVERY_RUNTIME_ROOT
     ? path.resolve(process.env.AI_DELIVERY_RUNTIME_ROOT)
     : path.join(getRunnerPrivateRoot(resolvedWorkspaceRoot), 'runtime');
-  return path.join(baseRoot, safeRuntimeProjectKey(resolvedWorkspaceRoot));
+  return path.join(baseRoot, runtimeProjectCode(resolvedWorkspaceRoot));
+}
+
+export function getLegacyHashedRunnerRuntimeRoot(workspaceRoot: string): string {
+  const resolvedWorkspaceRoot = path.resolve(workspaceRoot);
+  const baseRoot = process.env.AI_DELIVERY_RUNTIME_ROOT
+    ? path.resolve(process.env.AI_DELIVERY_RUNTIME_ROOT)
+    : path.join(getRunnerPrivateRoot(resolvedWorkspaceRoot), 'runtime');
+  return path.join(baseRoot, legacyRuntimeProjectKey(resolvedWorkspaceRoot));
 }
 
 export function getConsoleStateDir(workspaceRoot: string): string {
-  return path.join(getRunnerPrivateRoot(workspaceRoot), 'console', safeRuntimeProjectKey(workspaceRoot));
+  return path.join(getRunnerPrivateRoot(workspaceRoot), 'console', runtimeProjectCode(workspaceRoot));
+}
+
+export function getLegacyHashedConsoleStateDir(workspaceRoot: string): string {
+  return path.join(getRunnerPrivateRoot(workspaceRoot), 'console', legacyRuntimeProjectKey(workspaceRoot));
 }
 
 export function getRequirementRuntimeDir(workspaceRoot: string, requirementId: string): string {
@@ -48,8 +66,16 @@ export function getWorkflowRuntimeStatePath(workspaceRoot: string, requirementId
   return path.join(getWorkflowRuntimeDir(workspaceRoot, requirementId), 'state.json');
 }
 
+export function getLegacyHashedWorkflowRuntimeStatePath(workspaceRoot: string, requirementId: string): string {
+  return path.join(getLegacyHashedRunnerRuntimeRoot(workspaceRoot), 'requirements', normalizeRequirementId(requirementId), 'workflow', 'state.json');
+}
+
 export function getRunRuntimeDir(workspaceRoot: string, requirementId: string): string {
   return path.join(getRequirementRuntimeDir(workspaceRoot, requirementId), 'runs');
+}
+
+export function getLegacyHashedRunRuntimeDir(workspaceRoot: string, requirementId: string): string {
+  return path.join(getLegacyHashedRunnerRuntimeRoot(workspaceRoot), 'requirements', normalizeRequirementId(requirementId), 'runs');
 }
 
 export function getPromptRuntimeDir(workspaceRoot: string, requirementId: string): string {
@@ -70,23 +96,28 @@ export function getStageLogRuntimeDir(workspaceRoot: string, requirementId: stri
   return path.join(getRequirementRuntimeDir(workspaceRoot, requirementId), 'logs', stageMap[stage]);
 }
 
-function assertInsideRuntimeRoot(workspaceRoot: string, filePath: string): string {
-  const root = getRunnerRuntimeRoot(workspaceRoot);
+function isInsideRoot(root: string, filePath: string): boolean {
   const absolute = path.resolve(filePath);
   const relative = path.relative(root, absolute);
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+  return !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+
+function assertInsideRuntimeRoot(root: string, filePath: string): string {
+  const absolute = path.resolve(filePath);
+  if (!isInsideRoot(root, absolute)) {
     throw new Error(`路径不在运行目录内: ${filePath}`);
   }
   return absolute;
 }
 
 export function toRuntimePathRef(workspaceRoot: string, absolutePath: string): string {
-  const root = getRunnerRuntimeRoot(workspaceRoot);
-  const relative = path.relative(root, path.resolve(absolutePath));
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
-    throw new Error(`路径不在运行目录内: ${absolutePath}`);
+  const absolute = path.resolve(absolutePath);
+  for (const root of [getRunnerRuntimeRoot(workspaceRoot), getLegacyHashedRunnerRuntimeRoot(workspaceRoot)]) {
+    if (isInsideRoot(root, absolute)) {
+      return `${RUNTIME_REF_PREFIX}/${path.relative(root, absolute).replace(/\\/g, '/')}`;
+    }
   }
-  return `${RUNTIME_REF_PREFIX}/${relative.replace(/\\/g, '/')}`;
+  throw new Error(`路径不在运行目录内: ${absolutePath}`);
 }
 
 export function resolveWorkspaceOrRuntimePath(workspaceRoot: string, filePath: string): string {
@@ -96,13 +127,28 @@ export function resolveWorkspaceOrRuntimePath(workspaceRoot: string, filePath: s
     if (!relative || relative.includes('../')) {
       throw new Error(`运行目录路径不合法: ${filePath}`);
     }
-    return assertInsideRuntimeRoot(workspaceRoot, path.join(getRunnerRuntimeRoot(workspaceRoot), relative));
+    const currentRoot = getRunnerRuntimeRoot(workspaceRoot);
+    const currentPath = assertInsideRuntimeRoot(currentRoot, path.join(currentRoot, relative));
+    const legacyRoot = getLegacyHashedRunnerRuntimeRoot(workspaceRoot);
+    const legacyPath = assertInsideRuntimeRoot(legacyRoot, path.join(legacyRoot, relative));
+    return existsSync(currentPath) || !existsSync(legacyPath) ? currentPath : legacyPath;
+  }
+  if (path.isAbsolute(filePath)) {
+    const absolute = path.resolve(filePath);
+    for (const root of [getRunnerRuntimeRoot(workspaceRoot), getLegacyHashedRunnerRuntimeRoot(workspaceRoot)]) {
+      if (isInsideRoot(root, absolute)) {
+        return absolute;
+      }
+    }
   }
   return assertInsideWorkspace(workspaceRoot, filePath);
 }
 
 export async function listRuntimeRequirementIds(workspaceRoot: string): Promise<string[]> {
-  const root = path.join(getRunnerRuntimeRoot(workspaceRoot), 'requirements');
-  const entries = await fs.readdir(root, { withFileTypes: true }).catch(() => []);
-  return entries.filter((entry) => entry.isDirectory()).map((entry) => normalizeRequirementId(entry.name));
+  const requirementIds = new Set<string>();
+  for (const runtimeRoot of [getRunnerRuntimeRoot(workspaceRoot), getLegacyHashedRunnerRuntimeRoot(workspaceRoot)]) {
+    const entries = await fs.readdir(path.join(runtimeRoot, 'requirements'), { withFileTypes: true }).catch(() => []);
+    entries.filter((entry) => entry.isDirectory()).forEach((entry) => requirementIds.add(normalizeRequirementId(entry.name)));
+  }
+  return [...requirementIds];
 }

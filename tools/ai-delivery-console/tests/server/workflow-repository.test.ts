@@ -4,7 +4,11 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { WorkflowRepository } from '../../server/services/workflow-repository';
 import { readProjectHistory } from '../../server/services/project-history';
-import { getConsoleStateDir, getWorkflowRuntimeStatePath } from '../../server/services/runtime-paths';
+import {
+  getConsoleStateDir,
+  getLegacyHashedWorkflowRuntimeStatePath,
+  getWorkflowRuntimeStatePath
+} from '../../server/services/runtime-paths';
 
 async function tmpWorkspace() {
   return fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-repo-'));
@@ -25,6 +29,26 @@ describe('WorkflowRepository', () => {
     expect(loaded?.implementationSteps?.ARTIFACT_REVIEW.status).toBe('NOT_STARTED');
     await expect(fs.stat(getWorkflowRuntimeStatePath(workspace, 'REQ_172014'))).resolves.toBeTruthy();
     await expect(fs.stat(path.join(workspace, 'docs', 'REQ_172014', 'workflow', 'state.json'))).rejects.toThrow();
+  });
+
+  it('兼容读取旧哈希运行目录并将后续保存写入项目 code 目录', async () => {
+    const workspace = await tmpWorkspace();
+    const repository = new WorkflowRepository(workspace);
+    await repository.upsert({ requirementId: '172014', title: '旧哈希目录需求' });
+    const currentPath = getWorkflowRuntimeStatePath(workspace, '172014');
+    const legacyPath = getLegacyHashedWorkflowRuntimeStatePath(workspace, '172014');
+    await fs.mkdir(path.dirname(legacyPath), { recursive: true });
+    await fs.rename(currentPath, legacyPath);
+
+    const loaded = await repository.load('172014');
+    expect(loaded?.title).toBe('旧哈希目录需求');
+    expect((await repository.list()).map((item) => item.requirementId)).toContain('172014');
+    if (!loaded) {
+      throw new Error('expected legacy workflow');
+    }
+    await repository.save(loaded);
+
+    await expect(fs.stat(currentPath)).resolves.toBeTruthy();
   });
 
   it('缺陷类型默认生成 bugfix 分支名', async () => {

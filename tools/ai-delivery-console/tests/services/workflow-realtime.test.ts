@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ElMessage } from 'element-plus';
 import { createEmptyStages, type RequirementWorkflow } from '../../shared/workflow';
 import { useWorkflowStore } from '@/stores/workflow';
+import { apiClient } from '@/api/client';
 
 vi.mock('element-plus', () => ({
   ElMessage: {
@@ -205,5 +206,23 @@ describe('workflow realtime hints', () => {
 
     expect(subscribeRun).toHaveBeenCalledWith('100', 2);
     expect(eventSource).not.toHaveBeenCalled();
+  });
+
+  it('本地 Runner 字符串 runId 的实时日志走本地 SSE', () => {
+    const store = useWorkflowStore();
+    store.current = workflow();
+    const source = {
+      close: vi.fn(),
+      onmessage: undefined as ((event: MessageEvent) => void) | undefined,
+      onerror: undefined as (() => void) | undefined
+    } as unknown as EventSource;
+    const openRunEventStream = vi.spyOn(apiClient, 'openRunEventStream').mockReturnValue(source);
+    const ensureRealtimeClient = vi.spyOn(store, 'ensureRealtimeClient');
+
+    store.streamRunEvents('run-20260617110658-10d25f');
+
+    expect(openRunEventStream).toHaveBeenCalledWith('172014', 'run-20260617110658-10d25f');
+    expect(ensureRealtimeClient).not.toHaveBeenCalled();
+    expect(store.runEventSource).toBeTruthy();
   });
 });

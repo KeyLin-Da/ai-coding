@@ -7,6 +7,7 @@ import { scanRequirementArtifacts } from './workspace-scanner';
 import type { LocalRequestContext } from './local-request-context';
 import { confirmArtifactGitSync } from './artifact-git-sync';
 import { resolveProjectRepoPath, runGit, syncProjectRepository } from './project-repository';
+import { isReportRunLogPath } from './artifact-path-rules';
 
 export type BootstrapImportStatus = 'PENDING' | 'IMPORTED' | 'DUPLICATED' | 'CONFLICTED' | 'SKIPPED' | 'FAILED' | 'COMPLETED';
 
@@ -430,6 +431,9 @@ function isBootstrapGitSyncPath(requirement: BootstrapImportRequirement, logical
     return false;
   }
   const requirementId = normalizeRequirementId(requirement.requirementId);
+  if (isReportRunLogPath(normalized, requirementId)) {
+    return false;
+  }
   const changeName = requirement.stages.IMPLEMENTATION.changeName || `req-${requirementId}`;
   return (
     (normalized.startsWith(`docs/${requirementId}/`) && !normalized.startsWith(`docs/${requirementId}/workflow/`)) ||
@@ -683,6 +687,9 @@ function isControlledArtifactPath(relativePath: string): boolean {
     return false;
   }
   if (/(\.env|secret|private-key|token)/i.test(normalized)) {
+    return false;
+  }
+  if (isReportRunLogPath(normalized)) {
     return false;
   }
   return (

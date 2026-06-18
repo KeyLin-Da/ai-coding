@@ -2,7 +2,12 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { RunEvent, WorkflowStage } from '../../shared/workflow';
 import { createId } from './workspace';
-import { getRunRuntimeDir, getStageLogRuntimeDir, resolveWorkspaceOrRuntimePath } from './runtime-paths';
+import {
+  getLegacyHashedRunRuntimeDir,
+  getRunRuntimeDir,
+  getStageLogRuntimeDir,
+  resolveWorkspaceOrRuntimePath
+} from './runtime-paths';
 
 const TERMINAL_TRANSCRIPT_MAX_BYTES = 256 * 1024;
 
@@ -57,18 +62,25 @@ export async function appendStageCommandLog(
 }
 
 export async function readRunEvents(workspaceRoot: string, requirementId: string, runId: string): Promise<RunEvent[]> {
-  try {
-    const content = await fs.readFile(getRunPath(workspaceRoot, requirementId, runId), 'utf8');
+  for (const runPath of [
+    getRunPath(workspaceRoot, requirementId, runId),
+    path.join(getLegacyHashedRunRuntimeDir(workspaceRoot, requirementId), `${runId}.jsonl`)
+  ]) {
+    const content = await fs.readFile(runPath, 'utf8').catch((error: any) => {
+      if (error.code === 'ENOENT') {
+        return '';
+      }
+      throw error;
+    });
+    if (!content) {
+      continue;
+    }
     return content
       .split('\n')
       .filter(Boolean)
       .map((line) => JSON.parse(line) as RunEvent);
-  } catch (error: any) {
-    if (error.code === 'ENOENT') {
-      return [];
-    }
-    throw error;
   }
+  return [];
 }
 
 export async function readTerminalTranscriptSize(workspaceRoot: string, transcriptPath?: string): Promise<number> {

@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { assertProjectPathsConfigured, loadPrivateProjectSettings, loadSettings, saveSettings, validateSettings } from '../../server/services/project-settings';
-import { getConsoleStateDir } from '../../server/services/runtime-paths';
+import { getConsoleStateDir, getLegacyHashedConsoleStateDir } from '../../server/services/runtime-paths';
 
 describe('project-settings', () => {
   let tempDir: string;
@@ -38,6 +38,18 @@ describe('project-settings', () => {
     const loaded = await loadSettings(tempDir);
 
     expect(loaded).toEqual({ projectPaths: ['/Users/dev/projects'] });
+    await expect(fs.stat(legacyPath)).rejects.toThrow();
+    await expect(fs.stat(path.join(getConsoleStateDir(tempDir), 'settings.json'))).resolves.toBeTruthy();
+  });
+
+  it('读取旧哈希目录配置后迁移到项目 code 目录', async () => {
+    const legacyPath = path.join(getLegacyHashedConsoleStateDir(tempDir), 'settings.json');
+    await fs.mkdir(path.dirname(legacyPath), { recursive: true });
+    await fs.writeFile(legacyPath, JSON.stringify({ projectPaths: ['/Users/dev/legacy-projects'] }), 'utf8');
+
+    const loaded = await loadSettings(tempDir);
+
+    expect(loaded).toEqual({ projectPaths: ['/Users/dev/legacy-projects'] });
     await expect(fs.stat(legacyPath)).rejects.toThrow();
     await expect(fs.stat(path.join(getConsoleStateDir(tempDir), 'settings.json'))).resolves.toBeTruthy();
   });

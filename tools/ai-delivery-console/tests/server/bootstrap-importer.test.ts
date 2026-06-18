@@ -123,6 +123,37 @@ describe('bootstrap-importer', () => {
     expect(result.syncedCommits).toEqual(['aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa']);
   });
 
+  it('初始化导入排除 reports 下的运行日志但保留普通报告', async () => {
+    await fs.mkdir(path.join(sourceRoot, 'docs/172014/prd'), { recursive: true });
+    await fs.mkdir(path.join(sourceRoot, 'docs/172014/reports'), { recursive: true });
+    await fs.writeFile(path.join(sourceRoot, 'docs/172014/prd/analysis.md'), '# PRD', 'utf8');
+    await fs.writeFile(path.join(sourceRoot, 'docs/172014/reports/implementation-report.md'), '# implementation', 'utf8');
+    await fs.writeFile(path.join(sourceRoot, 'docs/172014/reports/run-20260610085925-588899.log'), 'runtime log', 'utf8');
+    vi.mocked(runGit).mockResolvedValue(
+      [
+        '?? docs/172014/prd/analysis.md',
+        '?? docs/172014/reports/implementation-report.md',
+        '?? docs/172014/reports/run-20260610085925-588899.log'
+      ].join('\n')
+    );
+    const plan = await buildBootstrapImportPlan(sourceRoot);
+
+    await importBootstrapPlan(plan, {
+      centerBaseUrl: 'https://center.example.com',
+      userId: 1,
+      projectId: 10,
+      clientSessionId: 11,
+      workspaceRoot: sourceRoot,
+      fetchImpl: importFetch() as unknown as typeof fetch
+    });
+
+    expect(await fs.readFile(path.join(repoRoot, 'docs/172014/reports/implementation-report.md'), 'utf8')).toBe('# implementation');
+    await expect(fs.stat(path.join(repoRoot, 'docs/172014/reports/run-20260610085925-588899.log'))).rejects.toThrow();
+    const syncedFiles = vi.mocked(confirmArtifactGitSync).mock.calls.flatMap((call) => call[2].files);
+    expect(syncedFiles).toContain('docs/172014/reports/implementation-report.md');
+    expect(syncedFiles).not.toContain('docs/172014/reports/run-20260610085925-588899.log');
+  });
+
   it('dry-run 只写本机 manifest，不调用中心和 Git 同步', async () => {
     await fs.mkdir(path.join(sourceRoot, 'docs/172014/prd'), { recursive: true });
     await fs.writeFile(path.join(sourceRoot, 'docs/172014/prd/analysis.md'), '# PRD', 'utf8');

@@ -120,7 +120,7 @@ describe('MarkdownEditor collaboration', () => {
     await flushPromises();
 
     expect(wrapper.find('.markdown-preview img').attributes('src')).toBe(
-      'http://127.0.0.1:8718/api/artifacts/read?path=docs%2F141846%2Fprd%2Ffiles%2Fscreenshots%2Franking_main_20260610.png'
+      '/runner-api/api/artifacts/read?path=docs%2F141846%2Fprd%2Ffiles%2Fscreenshots%2Franking_main_20260610.png'
     );
   });
 });
