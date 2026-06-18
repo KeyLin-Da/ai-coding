@@ -207,6 +207,63 @@ describe('apiClient Runner docs endpoints', () => {
     );
   });
 
+  it('公开分享列表通过 Runner 读取以补齐本地产物仓绑定', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => okResponse([]));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiClient.listPublicArtifactShares({
+      projectId: 10,
+      requirementId: '172014',
+      artifactPath: 'docs/172014/technical-design/design_review.md'
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/runner-api/api/ai-delivery/artifact-shares?projectId=10&requirementId=172014&artifactPath=docs%2F172014%2Ftechnical-design%2Fdesign_review.md',
+      expect.any(Object)
+    );
+  });
+
+  it('历史公开分享通过 Runner 重新生成 token', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      okResponse({
+        id: 1,
+        projectId: 10,
+        requirementId: '172014',
+        artifactPath: 'docs/172014/technical-design/design_review.md',
+        status: 'ENABLED',
+        publicPath: '/share/artifacts/token-2'
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiClient.regeneratePublicArtifactShareToken(1);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/runner-api/api/ai-delivery/artifact-shares/1/token/regenerate',
+      expect.objectContaining({ method: 'POST' })
+    );
+  });
+
+  it('产物读取显式携带项目 ID 且保留 Runner 运行时请求头', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      okResponse({
+        artifact: workflow().artifacts[0],
+        content: '# 技术方案'
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiClient.readArtifact('docs/172014/technical-design/questions/review.md', 42);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(
+      '/runner-api/api/ai-delivery/artifacts?path=docs%2F172014%2Ftechnical-design%2Fquestions%2Freview.md&projectId=42'
+    );
+    expect(init.headers['X-User-Id']).toBe('1');
+    expect(init.headers['X-Project-Id']).toBe('10');
+    expect(init.headers['X-Client-Session-Id']).toBe('20');
+  });
+
   it('运行日志从中心补偿 API 读取', async () => {
     const fetchMock = vi.fn().mockImplementation(() =>
       okResponse([

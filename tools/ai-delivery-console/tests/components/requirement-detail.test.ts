@@ -6,6 +6,7 @@ import { createEmptyImplementationSteps, createEmptyStages } from '../../shared/
 import RequirementDetail from '../../src/views/RequirementDetail.vue';
 import { apiClient } from '@/api/client';
 import { setApiRuntimeConfig } from '@/api/runtime';
+import { useProjectStore } from '@/stores/project';
 import { ElMessage, ElMessageBox } from 'element-plus';
 
 vi.mock('vue-router', () => ({
@@ -221,6 +222,13 @@ function componentStubs() {
 async function mountDetail(current: RequirementWorkflow, openSpecSummary: OpenSpecSummary = emptyOpenSpecSummary) {
   const pinia = createPinia();
   setActivePinia(pinia);
+  useProjectStore(pinia).current = {
+    id: 10,
+    name: 'AI Delivery',
+    code: 'ai-delivery',
+    status: 'ACTIVE',
+    role: 'OWNER'
+  };
   vi.mocked(apiClient.getRequirement).mockResolvedValue(current);
   vi.mocked(apiClient.listAgents).mockResolvedValue(agents);
   vi.mocked(apiClient.listRequirements).mockResolvedValue([current]);
@@ -914,7 +922,7 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     const wrapper = await mountDetail(current);
     await flushPromises();
 
-    expect(apiClient.readArtifact).toHaveBeenCalledWith(outputPath);
+    expect(apiClient.readArtifact).toHaveBeenCalledWith(outputPath, 10);
     await openDesignQuestionDialog(wrapper);
 
     expect(wrapper.text()).toContain('已回答');

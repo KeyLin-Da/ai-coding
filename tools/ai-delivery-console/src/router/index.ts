@@ -5,6 +5,8 @@ import RequirementList from '@/views/RequirementList.vue';
 import RequirementDetail from '@/views/RequirementDetail.vue';
 import Settings from '@/views/Settings.vue';
 import ProjectRepositoryRequired from '@/views/ProjectRepositoryRequired.vue';
+import ArtifactPreviewPage from '@/views/ArtifactPreviewPage.vue';
+import PublicArtifactPreviewPage from '@/views/PublicArtifactPreviewPage.vue';
 import { useAuthStore } from '@/stores/auth';
 import { useProjectStore } from '@/stores/project';
 
@@ -33,6 +35,18 @@ const router = createRouter({
       props: true
     },
     {
+      path: '/artifacts/preview',
+      name: 'artifact-preview',
+      component: ArtifactPreviewPage,
+      meta: { allowProjectless: true }
+    },
+    {
+      path: '/share/artifacts/:token',
+      name: 'public-artifact-preview',
+      component: PublicArtifactPreviewPage,
+      meta: { public: true }
+    },
+    {
       path: '/settings',
       name: 'settings',
       component: Settings
@@ -48,19 +62,23 @@ const router = createRouter({
 router.beforeEach((to) => {
   const auth = useAuthStore();
   const project = useProjectStore();
+  if (to.meta.public) {
+    return true;
+  }
   if (!auth.isAuthenticated && to.name !== 'login') {
-    return { name: 'login' };
+    return { name: 'login', query: { redirect: to.fullPath } };
   }
   if (auth.isAuthenticated && to.name === 'login') {
     return project.current ? { name: 'requirements' } : { name: 'projects' };
   }
-  if (auth.isAuthenticated && !project.current && !['projects', 'settings'].includes(String(to.name))) {
+  if (auth.isAuthenticated && !project.current && !to.meta.allowProjectless && !['projects', 'settings'].includes(String(to.name))) {
     return { name: 'projects' };
   }
   if (
     auth.isAuthenticated &&
     project.current &&
     !project.current.repository?.repoUrl &&
+    !to.meta.allowProjectless &&
     !['projects', 'settings', 'project-repository-required'].includes(String(to.name))
   ) {
     return { name: 'project-repository-required' };

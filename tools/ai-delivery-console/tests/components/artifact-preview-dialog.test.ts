@@ -148,7 +148,7 @@ describe('ArtifactPreviewDialog', () => {
       versionCount: 4,
       createdBy: 1,
       sourceRunId: 900
-    });
+    }, 42);
     await nextTick();
 
     expect(wrapper.text()).toContain('PRD 分析文档');
@@ -156,8 +156,9 @@ describe('ArtifactPreviewDialog', () => {
     expect(wrapper.html()).toContain('<h1>PRD</h1>');
     expect(wrapper.text()).toContain('产物内容');
     expect(wrapper.find('.artifact-markdown img').attributes('src')).toBe(
-      '/runner-api/api/artifacts/read?path=docs%2F172014%2Fprd%2Ffiles%2Fscreenshots%2Franking_main_20260610.png'
+      '/runner-api/api/artifacts/read?path=docs%2F172014%2Fprd%2Ffiles%2Fscreenshots%2Franking_main_20260610.png&projectId=42&centerBaseUrl=http%3A%2F%2F127.0.0.1%3A8728'
     );
+    expect(apiClient.readArtifact).toHaveBeenCalledWith('docs/172014/prd/analysis.md', 42);
     expect(wrapper.text()).toContain('v2');
     expect(wrapper.text()).toContain('4 个版本');
     expect(wrapper.text()).toContain('run 900');

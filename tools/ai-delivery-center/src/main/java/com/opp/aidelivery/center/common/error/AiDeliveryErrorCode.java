@@ -38,6 +38,9 @@ public enum AiDeliveryErrorCode {
     PROJECT_REPOSITORY_PUSH_FAILED("B70076", "Git push 失败或远端已更新"),
     ARTIFACT_SYNC_PATH_DENIED("B70077", "选择文件不在受控产物路径内"),
     PROJECT_REPOSITORY_IMMUTABLE("B70078", "项目 Git 仓地址创建后不可修改"),
+    ARTIFACT_SHARE_INVALID("B70079", "分享链接无效或已过期"),
+    ARTIFACT_SHARE_PATH_DENIED("B70080", "分享产物路径不允许访问"),
+    ARTIFACT_SHARE_UNREADABLE("B70081", "分享产物当前不可读取"),
     INTERNAL_ERROR("B70999", "系统异常");
 
     private final String code;

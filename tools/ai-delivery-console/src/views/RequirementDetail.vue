@@ -91,7 +91,7 @@
                 <el-button :disabled="!canClarifyPrd" :icon="ChatLineSquare" @click="openPrdClarificationDialog">澄清 PRD</el-button>
                 <span v-if="requiresPrdApproval && !canClarifyPrd" class="muted">请先生成 PRD 文档后再澄清。</span>
               </div>
-              <MarkdownEditor title="PRD 文档" :artifact-path="prdEditorPath" @saved="reload" />
+              <MarkdownEditor title="PRD 文档" :artifact-path="prdEditorPath" :project-id="currentProjectId" @saved="reload" />
             </div>
 
             <div v-else-if="activeStage === 'TECH_DESIGN'" class="stage-actions">
@@ -164,7 +164,7 @@
                   </div>
                 </div>
               </section>
-              <MarkdownEditor title="技术方案" :artifact-path="technicalDesignEditorPath" @saved="reload" />
+              <MarkdownEditor title="技术方案" :artifact-path="technicalDesignEditorPath" :project-id="currentProjectId" @saved="reload" />
             </div>
 
             <div v-else-if="activeStage === 'IMPLEMENTATION'" class="stage-actions">
@@ -310,6 +310,7 @@
                 :key="`${selectedOpenSpecDocPath}-${openSpecPreviewVersion}`"
                 title="文档内容"
                 :artifact-path="selectedOpenSpecDocPath"
+                :project-id="currentProjectId"
                 @saved="reload"
               />
             </div>
@@ -329,7 +330,12 @@
               </div>
               <el-alert v-if="codeReviewMode === 'staged'" type="warning" show-icon title="暂存区预审仅基于 git diff --cached，不作为正式合并判定" />
               <el-alert v-if="openSpecSummary?.archived" type="success" show-icon :title="`OpenSpec 已归档：${openSpecSummary.archivePath}`" />
-              <MarkdownEditor title="代码评审汇总" :artifact-path="stageArtifactPath('CODE_REVIEW')" @saved="reload" />
+              <MarkdownEditor
+                title="代码评审汇总"
+                :artifact-path="stageArtifactPath('CODE_REVIEW')"
+                :project-id="currentProjectId"
+                @saved="reload"
+              />
             </div>
           </div>
         </section>
@@ -425,6 +431,7 @@ import DesignQuestionDialog from '@/components/DesignQuestionDialog.vue';
 import GitChangeInspector from '@/components/GitChangeInspector.vue';
 import { useWorkflowStore } from '@/stores/workflow';
 import { useSettingsStore } from '@/stores/settings';
+import { useProjectStore } from '@/stores/project';
 import { apiClient, type RequirementWorkspaceStateVO } from '@/api/client';
 import { getApiRuntimeConfig } from '@/api/runtime';
 import { findLatestStageRun } from '@/utils/run-selection';
@@ -438,6 +445,7 @@ import {
 const route = useRoute();
 const store = useWorkflowStore();
 const settings = useSettingsStore();
+const projectStore = useProjectStore();
 const activeStage = ref<WorkflowStage>('PRD');
 const reviewDialog = ref<InstanceType<typeof ReviewDialog>>();
 const artifactGitSyncDialog = ref<InstanceType<typeof ArtifactGitSyncDialog>>();
@@ -472,6 +480,7 @@ const workspaceStates = ref<RequirementWorkspaceStateVO[]>([]);
 const actionRunning = ref(false);
 
 const workflow = computed(() => store.current);
+const currentProjectId = computed(() => projectStore.current?.id || '');
 const pageBusy = computed(() => store.loading || actionRunning.value);
 const realtimeStatusText = computed(() => {
   const text: Record<typeof store.realtimeStatus, string> = {
@@ -802,7 +811,7 @@ async function loadOpenSpecSummary() {
 }
 
 function previewArtifact(artifact: ArtifactRef) {
-  artifactPreviewDialog.value?.open(artifact);
+  artifactPreviewDialog.value?.open(artifact, currentProjectId.value);
 }
 
 async function loadTechDesignQuestionRecords() {
@@ -816,7 +825,7 @@ async function loadTechDesignQuestionRecords() {
     const records: TechDesignQuestionRecord[] = [];
     for (const path of paths) {
       try {
-        const result = await apiClient.readArtifact(path);
+        const result = await apiClient.readArtifact(path, currentProjectId.value);
         records.push(...parseTechDesignQuestionRecords(result.content, path));
       } catch (error) {
         console.warn('读取技术方案答疑记录失败:', path, error);

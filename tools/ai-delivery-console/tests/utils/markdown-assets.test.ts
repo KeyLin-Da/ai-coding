@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { setApiRuntimeConfig } from '../../src/api/runtime';
-import { artifactReadUrl, resolveMarkdownAssetPath, rewriteMarkdownImageSources } from '../../src/utils/markdown-assets';
+import { artifactReadUrl, publicArtifactAssetUrl, resolveMarkdownAssetPath, rewriteMarkdownImageSources } from '../../src/utils/markdown-assets';
 
 describe('markdown-assets', () => {
   beforeEach(() => {
@@ -52,6 +52,32 @@ describe('markdown-assets', () => {
 
     expect(artifactReadUrl('docs/141846/technical-design/file/screenshot.png')).toBe(
       '/runner-api/api/artifacts/read?path=docs%2F141846%2Ftechnical-design%2Ffile%2Fscreenshot.png&projectId=5&clientSessionId=16&userId=1&centerBaseUrl=http%3A%2F%2Fcenter.example.com'
+    );
+  });
+
+  it('显式项目 ID 优先于全局运行时项目上下文', () => {
+    setApiRuntimeConfig({
+      centerBaseUrl: 'http://center.example.com',
+      userId: '1',
+      projectId: '5',
+      clientSessionId: '16'
+    });
+
+    expect(artifactReadUrl('docs/141846/technical-design/file/screenshot.png', 42)).toBe(
+      '/runner-api/api/artifacts/read?path=docs%2F141846%2Ftechnical-design%2Ffile%2Fscreenshot.png&projectId=42&clientSessionId=16&userId=1&centerBaseUrl=http%3A%2F%2Fcenter.example.com'
+    );
+  });
+
+  it('公开分享图片地址改写到公开 assets 接口', () => {
+    const html = '<img src="files/screen.png" alt="screen">';
+    const rewritten = rewriteMarkdownImageSources(
+      html,
+      'docs/141846/prd/analysis.md',
+      (assetPath) => publicArtifactAssetUrl('share-token', assetPath)
+    );
+
+    expect(rewritten).toContain(
+      'src="/runner-api/api/ai-delivery/public-artifact-shares/share-token/assets?path=docs%2F141846%2Fprd%2Ffiles%2Fscreen.png"'
     );
   });
 });

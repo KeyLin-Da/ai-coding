@@ -67,4 +67,11 @@ describe('router guard', () => {
     await router.push('/login');
     expect(router.currentRoute.value.name).toBe('requirements');
   });
+
+  it('公开分享页跳过登录、项目选择和仓库配置守卫', async () => {
+    await router.push('/share/artifacts/token-1');
+    await router.isReady();
+
+    expect(router.currentRoute.value.name).toBe('public-artifact-preview');
+  });
 });

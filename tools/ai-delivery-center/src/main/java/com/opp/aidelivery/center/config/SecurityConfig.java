@@ -41,6 +41,7 @@ public class SecurityConfig {
             .antMatchers(HttpMethod.POST, "/api/ai-delivery/auth/register").permitAll()
             .antMatchers(HttpMethod.POST, "/api/ai-delivery/auth/login").permitAll()
             .antMatchers(HttpMethod.POST, "/api/ai-delivery/ws-tickets").permitAll()
+            .antMatchers(HttpMethod.GET, "/api/ai-delivery/public-artifact-shares/**").permitAll()
             .antMatchers("/api/ai-delivery/ws", "/api/ai-delivery/ws/**").permitAll()
             .antMatchers("/actuator/health").permitAll()
             .anyRequest().authenticated();

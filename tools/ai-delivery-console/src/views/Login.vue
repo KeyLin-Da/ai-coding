@@ -69,7 +69,9 @@ async function submit() {
     await settings.ensureClientSessionId();
     await project.loadProjects();
     ElMessage.success('登录成功');
-    router.push(project.current ? { name: 'requirements' } : { name: 'projects' });
+    const currentRoute = 'currentRoute' in router ? router.currentRoute.value : undefined;
+    const redirect = typeof currentRoute?.query?.redirect === 'string' ? currentRoute.query.redirect : '';
+    router.push(redirect || (project.current ? { name: 'requirements' } : { name: 'projects' }));
   } catch (error: any) {
     ElMessage.error(error.message || '登录失败');
   }

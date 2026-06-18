@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import { URL } from 'node:url';
 import type { ActionInput, GitStageUntrackedInput, PrdSourceFile, RequirementInput, RequirementWorkflow, ReviewInput, RunRecord, TechDesignSourceFile, WorkflowStatus } from '../shared/workflow';
@@ -14,9 +15,11 @@ import { cancelAgentRun, listAgentProviders, refreshTerminalRunStatuses } from '
 import { normalizeOpenSpecChangeName, readOpenSpecSummary, updateOpenSpecTaskStatus } from './services/openspec-summary';
 import { readGitChanges, stageUntrackedFiles } from './services/git-changes';
 import { buildArtifactGitSyncPlan, confirmArtifactGitSync, type ArtifactGitSyncConfirmInput, type ArtifactGitSyncPlanInput } from './services/artifact-git-sync';
+import { centerPublicRequest, centerRequest } from './services/center-client';
 import { readProjectHistory, listProjectsFromConfiguredPaths } from './services/project-history';
 import { assertProjectPathsConfigured, loadPrivateProjectSettings, loadSettings, saveSettings, validateSettings } from './services/project-settings';
 import { parseLocalRequestContext, type LocalRequestContext } from './services/local-request-context';
+import { localServiceError } from './services/local-errors';
 import { generateLocalGitCredential, regenerateLocalGitCredential, type LocalGitCredentialGenerateInput } from './services/local-git-credentials';
 import { cloneProjectRepository, commitAndPushProjectRepository, inspectProjectRepository, readProjectRepositoryStatus, resolveProjectRepoPath, syncProjectRepository } from './services/project-repository';
 import { bootstrapProjectArtifactWorkspace } from './services/skill-sync';
@@ -60,6 +63,37 @@ import {
   saveTechDesignSourceFileSnapshot,
   type UploadedPrdSourceFile
 } from './services/prd-source-files';
+import {
+  assertPreviewableArtifactPath,
+  contentTypeForPath,
+  resolvePublicAssetPath,
+  resolveSharePathInWorkspace
+} from './services/artifact-share-paths';
+import { findArtifactShareRoot, findArtifactShareToken, rememberArtifactShareLocation } from './services/artifact-share-locations';
+
+interface ArtifactShareCreateInput {
+  projectId?: number | string;
+  requirementPk?: number | string;
+  requirementId?: string;
+  artifactPath?: string;
+  expireAt?: string;
+  showAnnotations?: boolean;
+  allowDownload?: boolean;
+}
+
+interface ArtifactSharePayload {
+  id: number;
+  projectId: number;
+  requirementPk?: number;
+  requirementId: string;
+  artifactPath: string;
+  status: string;
+  expireAt?: string;
+  showAnnotations?: boolean;
+  allowDownload?: boolean;
+  token?: string;
+  publicPath?: string;
+}
 
 async function parseBody<T>(request: IncomingMessage): Promise<T> {
   const chunks: Buffer[] = [];
@@ -308,8 +342,8 @@ function statusForError(error: any): number {
     return status;
   }
   const unauthorizedCodes = new Set(['B70001', 'B70061', 'B70062']);
-  const forbiddenCodes = new Set(['B70002', 'B70046', 'B70063']);
-  const notFoundCodes = new Set(['ENOENT', 'B70004']);
+  const forbiddenCodes = new Set(['B70002', 'B70046', 'B70063', 'B70080']);
+  const notFoundCodes = new Set(['ENOENT', 'B70004', 'B70079', 'B70081']);
   const badRequestCodes = new Set(['VALIDATION_ERROR', 'B70003', 'B70043', 'B70065', 'B70066', 'B70077']);
   const conflictCodes = new Set([
     'ARTIFACT_CONFLICT',
@@ -365,6 +399,43 @@ export function createRouter(workspaceRoot: string) {
       }
       return workspaceRoot;
     }
+  }
+
+  async function resolvePublicArtifactRoot(context: LocalRequestContext, share: ArtifactSharePayload): Promise<string> {
+    const projectContext = { ...context, projectId: String(share.projectId) };
+    if (projectContext.accessToken || projectContext.userId) {
+      try {
+        const authenticatedRoot = await resolveArtifactRoot(projectContext, true);
+        const candidate = resolveSharePathInWorkspace(authenticatedRoot, share.artifactPath);
+        const stat = await fs.stat(candidate.absolutePath).catch(() => null);
+        if (stat?.isFile()) {
+          return authenticatedRoot;
+        }
+      } catch {
+        // 公开链接允许无登录访问；登录上下文不可用时继续查找 Runner 私有绑定。
+      }
+    }
+    const boundRoot = await findArtifactShareRoot(workspaceRoot, share);
+    if (boundRoot) {
+      const candidate = resolveSharePathInWorkspace(boundRoot, share.artifactPath);
+      const stat = await fs.stat(candidate.absolutePath).catch(() => null);
+      if (stat?.isFile()) {
+        return boundRoot;
+      }
+    }
+    const candidate = resolveSharePathInWorkspace(workspaceRoot, share.artifactPath);
+    const stat = await fs.stat(candidate.absolutePath).catch(() => null);
+    if (stat?.isFile()) {
+      return workspaceRoot;
+    }
+    throw localServiceError('B70081', '分享产物当前不可读取');
+  }
+
+  async function resolvePublicShare(context: LocalRequestContext, token: string): Promise<ArtifactSharePayload> {
+    return centerPublicRequest<ArtifactSharePayload>(
+      context,
+      `/api/ai-delivery/public-artifact-shares/${encodeURIComponent(token)}`
+    );
   }
 
   async function resolveWorkflowStore(context: LocalRequestContext, required = false): Promise<{ root: string; repository: WorkflowRepository }> {
@@ -1341,6 +1412,156 @@ export function createRouter(workspaceRoot: string) {
         return;
       }
 
+      if (request.method === 'GET' && pathname === '/api/ai-delivery/artifact-shares') {
+        const projectId = url.searchParams.get('projectId') || requestContext.projectId;
+        if (!projectId) {
+          throw localServiceError('B70003', '缺少项目ID');
+        }
+        const projectContext = { ...requestContext, projectId: String(projectId) };
+        const artifactRoot = await resolveArtifactRoot(projectContext, true);
+        const query = url.searchParams.toString();
+        const shares = await centerRequest<ArtifactSharePayload[]>(
+          projectContext,
+          `/api/ai-delivery/artifact-shares${query ? `?${query}` : ''}`
+        );
+        for (const share of shares) {
+          let artifactPath: string;
+          try {
+            artifactPath = assertPreviewableArtifactPath(share.requirementId, share.artifactPath);
+          } catch {
+            // 历史异常路径不应阻断其余分享列表和有效位置绑定。
+            continue;
+          }
+          await rememberArtifactShareLocation(workspaceRoot, { ...share, artifactPath }, artifactRoot);
+          const token = await findArtifactShareToken(workspaceRoot, { ...share, artifactPath });
+          if (token && share.status === 'ENABLED') {
+            share.publicPath = `/share/artifacts/${encodeURIComponent(token)}`;
+          }
+        }
+        send(response, 200, { data: shares });
+        return;
+      }
+
+      if (request.method === 'POST' && pathname === '/api/ai-delivery/artifact-shares/public') {
+        const body = await parseBody<ArtifactShareCreateInput>(request);
+        const projectId = body.projectId || requestContext.projectId;
+        const requirementId = String(body.requirementId || '').trim();
+        if (!projectId) {
+          throw localServiceError('B70003', '缺少项目ID');
+        }
+        if (!requirementId) {
+          throw localServiceError('B70003', '缺少需求号');
+        }
+        const artifactPath = assertPreviewableArtifactPath(requirementId, String(body.artifactPath || ''));
+        const artifactRoot = await resolveArtifactRoot({ ...requestContext, projectId: String(projectId) }, true);
+        const resolvedPath = resolveSharePathInWorkspace(artifactRoot, artifactPath);
+        const stat = await fs.stat(resolvedPath.absolutePath).catch(() => null);
+        if (!stat?.isFile()) {
+          throw localServiceError('B70081', '分享产物当前不可读取');
+        }
+        const share = await centerRequest<ArtifactSharePayload>(requestContext, '/api/ai-delivery/artifact-shares/public', {
+          method: 'POST',
+          body: JSON.stringify({
+            projectId,
+            requirementPk: body.requirementPk,
+            requirementId,
+            artifactPath: resolvedPath.relativePath,
+            expireAt: body.expireAt,
+            showAnnotations: body.showAnnotations,
+            allowDownload: body.allowDownload
+          })
+        });
+        await rememberArtifactShareLocation(
+          workspaceRoot,
+          {
+            id: share.id,
+            projectId,
+            requirementId,
+            artifactPath: resolvedPath.relativePath,
+            token: share.token
+          },
+          artifactRoot
+        );
+        send(response, 200, {
+          data: {
+            ...share,
+            publicPath: share.token ? `/share/artifacts/${encodeURIComponent(share.token)}` : undefined
+          }
+        });
+        return;
+      }
+
+      const regenerateShareMatch = match(pathname, /^\/api\/ai-delivery\/artifact-shares\/([^/]+)\/token\/regenerate$/);
+      if (request.method === 'POST' && regenerateShareMatch) {
+        const shareId = decodeURIComponent(regenerateShareMatch[1]);
+        const share = await centerRequest<ArtifactSharePayload>(
+          requestContext,
+          `/api/ai-delivery/artifact-shares/${encodeURIComponent(shareId)}/token/regenerate`,
+          { method: 'POST', body: JSON.stringify({}) }
+        );
+        const artifactPath = assertPreviewableArtifactPath(share.requirementId, share.artifactPath);
+        const projectContext = { ...requestContext, projectId: String(share.projectId) };
+        const artifactRoot = await resolveArtifactRoot(projectContext, true);
+        await rememberArtifactShareLocation(
+          workspaceRoot,
+          { ...share, artifactPath, token: share.token },
+          artifactRoot
+        );
+        send(response, 200, {
+          data: {
+            ...share,
+            publicPath: share.token ? `/share/artifacts/${encodeURIComponent(share.token)}` : undefined
+          }
+        });
+        return;
+      }
+
+      const publicPreviewMatch = match(pathname, /^\/api\/ai-delivery\/public-artifact-shares\/([^/]+)\/preview$/);
+      if (request.method === 'GET' && publicPreviewMatch) {
+        const token = decodeURIComponent(publicPreviewMatch[1]);
+        const share = await resolvePublicShare(requestContext, token);
+        const artifactPath = assertPreviewableArtifactPath(share.requirementId, share.artifactPath);
+        const artifactRoot = await resolvePublicArtifactRoot(requestContext, { ...share, artifactPath });
+        const result = await readArtifact(artifactRoot, artifactPath);
+        if (!result.artifact.exists) {
+          throw localServiceError('B70081', '分享产物当前不可读取');
+        }
+        send(response, 200, {
+          data: {
+            share,
+            artifact: result.artifact,
+            content: result.content,
+            contentType: contentTypeForPath(artifactPath),
+            showAnnotations: share.showAnnotations !== false,
+            allowDownload: share.allowDownload !== false
+          }
+        });
+        return;
+      }
+
+      const publicAssetsMatch = match(pathname, /^\/api\/ai-delivery\/public-artifact-shares\/([^/]+)\/assets$/);
+      if (request.method === 'GET' && publicAssetsMatch) {
+        const token = decodeURIComponent(publicAssetsMatch[1]);
+        const assetPath = url.searchParams.get('path');
+        if (!assetPath) {
+          send(response, 400, { message: '缺少 path 参数' });
+          return;
+        }
+        const share = await resolvePublicShare(requestContext, token);
+        const artifactPath = assertPreviewableArtifactPath(share.requirementId, share.artifactPath);
+        const artifactRoot = await resolvePublicArtifactRoot(requestContext, { ...share, artifactPath });
+        const normalizedAssetPath = resolvePublicAssetPath(share.requirementId, artifactPath, assetPath);
+        const resolvedPath = resolveSharePathInWorkspace(artifactRoot, normalizedAssetPath);
+        const fileBuffer = await fs.readFile(resolvedPath.absolutePath);
+        response.writeHead(200, {
+          'Content-Type': contentTypeForPath(normalizedAssetPath),
+          'Cache-Control': 'public, max-age=3600',
+          'Access-Control-Allow-Origin': '*'
+        });
+        response.end(fileBuffer);
+        return;
+      }
+
       // 读取图片等二进制文件
       if (request.method === 'GET' && pathname === '/api/artifacts/read') {
         const filePath = url.searchParams.get('path');
@@ -1350,51 +1571,18 @@ export function createRouter(workspaceRoot: string) {
           return;
         }
         try {
-          const fs = await import('node:fs/promises');
-          const pathModule = await import('node:path');
           const artifactRoot = await resolveArtifactRoot(requestContext, true);
-          const absolutePath = pathModule.resolve(artifactRoot, filePath);
-          
-          // 安全检查：确保文件在工作区内
-          if (!absolutePath.startsWith(artifactRoot)) {
-            response.writeHead(403, { 'Content-Type': 'application/json' });
-            response.end(JSON.stringify({ message: '不允许访问工作区外的文件' }));
-            return;
-          }
-          
+          const absolutePath = resolveSharePathInWorkspace(artifactRoot, filePath).absolutePath;
           const fileBuffer = await fs.readFile(absolutePath);
-          
-          // 根据文件扩展名设置 Content-Type
-          const ext = pathModule.extname(filePath).toLowerCase();
-          const mimeTypes: Record<string, string> = {
-            '.html': 'text/html; charset=utf-8',
-            '.htm': 'text/html; charset=utf-8',
-            '.md': 'text/markdown; charset=utf-8',
-            '.markdown': 'text/markdown; charset=utf-8',
-            '.json': 'application/json; charset=utf-8',
-            '.txt': 'text/plain; charset=utf-8',
-            '.log': 'text/plain; charset=utf-8',
-            '.xml': 'application/xml; charset=utf-8',
-            '.yaml': 'text/yaml; charset=utf-8',
-            '.yml': 'text/yaml; charset=utf-8',
-            '.pdf': 'application/pdf',
-            '.png': 'image/png',
-            '.jpg': 'image/jpeg',
-            '.jpeg': 'image/jpeg',
-            '.gif': 'image/gif',
-            '.webp': 'image/webp',
-            '.svg': 'image/svg+xml'
-          };
-          const contentType = mimeTypes[ext] || 'application/octet-stream';
-          
           response.writeHead(200, {
-            'Content-Type': contentType,
+            'Content-Type': contentTypeForPath(filePath),
             'Cache-Control': 'public, max-age=3600',
             'Access-Control-Allow-Origin': '*'
           });
           response.end(fileBuffer);
         } catch (error: any) {
-          response.writeHead(404, { 'Content-Type': 'application/json' });
+          const denied = error.code === 'B70065' || error.code === 'B70080' || String(error.message || '').includes('路径不在工作区内');
+          response.writeHead(denied ? 403 : 404, { 'Content-Type': 'application/json' });
           response.end(JSON.stringify({ message: error.code === 'ENOENT' ? '文件不存在' : error.message }));
         }
         return;

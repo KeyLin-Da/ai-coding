@@ -62,12 +62,13 @@ import MarkdownIt from 'markdown-it';
 import { DocumentChecked, Download, FullScreen, Minus, View } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { apiClient } from '@/api/client';
-import { rewriteMarkdownImageSources } from '@/utils/markdown-assets';
+import { artifactReadUrl, rewriteMarkdownImageSources } from '@/utils/markdown-assets';
 import mermaid from 'mermaid';
 
 const props = defineProps<{
   title: string;
   artifactPath?: string;
+  projectId: string | number;
 }>();
 
 const emit = defineEmits<{
@@ -110,7 +111,7 @@ const saving = ref(false);
 
 const previewHtml = computed(() => {
   const rendered = md.render(content.value || '');
-  return rewriteMarkdownImageSources(rendered, props.artifactPath);
+  return rewriteMarkdownImageSources(rendered, props.artifactPath, (assetPath) => artifactReadUrl(assetPath, props.projectId));
 });
 
 // 在 DOM 更新后渲染 mermaid 图表
@@ -182,7 +183,7 @@ async function load() {
   }
   loading.value = true;
   try {
-    const result = await apiClient.readArtifact(props.artifactPath);
+    const result = await apiClient.readArtifact(props.artifactPath, props.projectId);
     content.value = result.content;
     expectedHash.value = result.artifact.hash;
     baseVersionId.value = result.artifact.currentVersionId || result.artifact.versionId || result.artifact.hash;

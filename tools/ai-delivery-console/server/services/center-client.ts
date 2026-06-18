@@ -54,3 +54,28 @@ export async function centerRequest<T>(
   }
   return (body?.data ?? body) as T;
 }
+
+export async function centerPublicRequest<T>(
+  context: Pick<CenterRequestContext, 'centerBaseUrl' | 'fetchImpl'>,
+  path: string,
+  init: RequestInit = {}
+): Promise<T> {
+  const fetcher = context.fetchImpl || fetch;
+  const headers = {
+    ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+    ...(init.headers || {})
+  };
+  const response = await fetcher(`${resolveCenterBaseUrl(context)}${path}`, {
+    ...init,
+    headers
+  });
+  const body = await response.json().catch(() => null);
+  if (!response.ok || body?.success === false) {
+    const error = new Error(body?.message || `中心服务请求失败: ${response.status}`) as CenterRequestError;
+    error.code = body?.code;
+    error.data = body?.data;
+    error.status = response.status;
+    throw error;
+  }
+  return (body?.data ?? body) as T;
+}

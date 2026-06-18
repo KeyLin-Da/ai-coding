@@ -59,6 +59,7 @@
             <input v-model="eyeCareMode" type="checkbox" />
             <span>护眼模式</span>
           </label>
+          <el-button :disabled="!artifact?.exists" :icon="Share" @click="openShareDialog">分享</el-button>
           <el-button :disabled="!artifact" :icon="CopyDocument" @click="copyPath">复制路径</el-button>
           <el-dropdown v-if="isMarkdown" trigger="click" :disabled="!artifact?.exists" @command="downloadMarkdownArtifact">
             <el-button :disabled="!artifact?.exists" :icon="Download">下载</el-button>
@@ -108,6 +109,7 @@
       </div>
     </div>
     <ArtifactVersionDiffDialog ref="versionDiffDialog" />
+    <ArtifactShareDialog ref="shareDialog" />
   </el-dialog>
 </template>
 
@@ -115,11 +117,12 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import MarkdownIt from 'markdown-it';
 import mermaid from 'mermaid';
-import { ChatLineSquare, CopyDocument, Download, EditPen, Minus, Plus, Refresh } from '@element-plus/icons-vue';
+import { ChatLineSquare, CopyDocument, Download, EditPen, Minus, Plus, Refresh, Share } from '@element-plus/icons-vue';
 import { ElDropdown, ElDropdownItem, ElDropdownMenu, ElMessage, ElMessageBox } from 'element-plus';
 import type { ArtifactRef, TechDesignAnnotation, TechDesignVersion } from '@shared/workflow';
 import { apiClient } from '@/api/client';
 import ArtifactVersionDiffDialog from '@/components/ArtifactVersionDiffDialog.vue';
+import ArtifactShareDialog from '@/components/ArtifactShareDialog.vue';
 import TechDesignAnnotationPanel from '@/components/TechDesignAnnotationPanel.vue';
 import TechDesignVersionSelector from '@/components/TechDesignVersionSelector.vue';
 import { artifactReadUrl, rewriteMarkdownImageSources } from '@/utils/markdown-assets';
@@ -130,9 +133,11 @@ type DownloadFormat = 'markdown' | 'html' | 'pdf';
 const visible = ref(false);
 const loading = ref(false);
 const artifact = ref<ArtifactRef>();
+const projectId = ref<string | number>('');
 const content = ref('');
 const markdownPreviewRef = ref<HTMLElement>();
 const versionDiffDialog = ref<InstanceType<typeof ArtifactVersionDiffDialog>>();
+const shareDialog = ref<InstanceType<typeof ArtifactShareDialog>>();
 const techDesignVersions = ref<TechDesignVersion[]>([]);
 const selectedVersionId = ref('current');
 const selectedVersion = ref<TechDesignVersion>();
@@ -191,7 +196,7 @@ const extension = computed(() => {
   return dotIndex >= 0 ? path.slice(dotIndex).toLowerCase() : '';
 });
 
-const artifactUrl = computed(() => (artifact.value ? artifactReadUrl(artifact.value.path) : ''));
+const artifactUrl = computed(() => (artifact.value ? artifactReadUrl(artifact.value.path, projectId.value) : ''));
 const isMarkdown = computed(() => artifact.value?.kind === 'markdown' || ['.md', '.markdown'].includes(extension.value));
 const isHtml = computed(() => artifact.value?.kind === 'html' || extension.value === '.html');
 const isPdf = computed(() => extension.value === '.pdf');
@@ -208,7 +213,7 @@ const zoomStageStyle = computed<Record<string, string>>(() => ({
 
 const previewHtml = computed(() => {
   const rendered = md.render(content.value || '');
-  return rewriteMarkdownImageSources(rendered, artifact.value?.path);
+  return rewriteMarkdownImageSources(rendered, artifact.value?.path, (assetPath) => artifactReadUrl(assetPath, projectId.value));
 });
 
 const formattedContent = computed(() => {
@@ -398,8 +403,9 @@ onUnmounted(() => {
   window.removeEventListener(annotationChangedEventName, handleTechDesignAnnotationChanged);
 });
 
-async function open(nextArtifact: ArtifactRef) {
+async function open(nextArtifact: ArtifactRef, nextProjectId: string | number) {
   artifact.value = nextArtifact;
+  projectId.value = nextProjectId;
   content.value = '';
   techDesignVersions.value = [];
   techDesignAnnotations.value = [];
@@ -423,7 +429,7 @@ async function open(nextArtifact: ArtifactRef) {
   }
   loading.value = true;
   try {
-    const result = await apiClient.readArtifact(nextArtifact.path);
+    const result = await apiClient.readArtifact(nextArtifact.path, projectId.value);
     content.value = result.content;
   } catch (error: any) {
     ElMessage.error(error.message || '读取产物失败');
@@ -634,6 +640,21 @@ function openVersionDiff() {
     return;
   }
   versionDiffDialog.value?.open(requirementId.value, techDesignVersions.value, selectedVersionId.value);
+}
+
+function openShareDialog() {
+  if (!artifact.value) {
+    return;
+  }
+  if (!projectId.value) {
+    ElMessage.warning('请先选择项目后再分享');
+    return;
+  }
+  shareDialog.value?.open({
+    artifact: artifact.value,
+    projectId: projectId.value,
+    requirementId: requirementId.value
+  });
 }
 
 async function copyPath() {

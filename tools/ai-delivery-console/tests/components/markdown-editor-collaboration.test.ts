@@ -53,7 +53,8 @@ describe('MarkdownEditor collaboration', () => {
     const wrapper = mount(MarkdownEditor, {
       props: {
         title: 'PRD',
-        artifactPath: 'docs/172014/prd/analysis.md'
+        artifactPath: 'docs/172014/prd/analysis.md',
+        projectId: 10
       },
       global: {
         stubs: {
@@ -96,7 +97,8 @@ describe('MarkdownEditor collaboration', () => {
     const wrapper = mount(MarkdownEditor, {
       props: {
         title: 'PRD',
-        artifactPath: 'docs/141846/prd/analysis.md'
+        artifactPath: 'docs/141846/prd/analysis.md',
+        projectId: 10
       },
       global: {
         stubs: {
@@ -120,7 +122,8 @@ describe('MarkdownEditor collaboration', () => {
     await flushPromises();
 
     expect(wrapper.find('.markdown-preview img').attributes('src')).toBe(
-      '/runner-api/api/artifacts/read?path=docs%2F141846%2Fprd%2Ffiles%2Fscreenshots%2Franking_main_20260610.png'
+      '/runner-api/api/artifacts/read?path=docs%2F141846%2Fprd%2Ffiles%2Fscreenshots%2Franking_main_20260610.png&projectId=10&centerBaseUrl=http%3A%2F%2F127.0.0.1%3A8728'
     );
+    expect(apiClient.readArtifact).toHaveBeenCalledWith('docs/141846/prd/analysis.md', 10);
   });
 });

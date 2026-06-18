@@ -22,12 +22,13 @@ function normalizeWorkspacePath(filePath: string): string {
   return segments.join('/');
 }
 
-export function artifactReadUrl(filePath: string): string {
+export function artifactReadUrl(filePath: string, projectId?: string | number): string {
   const runtime = getApiRuntimeConfig();
   const params = new URLSearchParams({ path: filePath });
-  if (runtime.projectId || runtime.clientSessionId || runtime.userId) {
-    if (runtime.projectId) {
-      params.set('projectId', runtime.projectId);
+  const resolvedProjectId = projectId ? String(projectId) : runtime.projectId;
+  if (resolvedProjectId || runtime.clientSessionId || runtime.userId) {
+    if (resolvedProjectId) {
+      params.set('projectId', resolvedProjectId);
     }
     if (runtime.clientSessionId) {
       params.set('clientSessionId', runtime.clientSessionId);
@@ -42,6 +43,11 @@ export function artifactReadUrl(filePath: string): string {
   return resolveRunnerApiUrl(`/api/artifacts/read?${params.toString()}`);
 }
 
+export function publicArtifactAssetUrl(token: string, filePath: string): string {
+  const params = new URLSearchParams({ path: filePath });
+  return resolveRunnerApiUrl(`/api/ai-delivery/public-artifact-shares/${encodeURIComponent(token)}/assets?${params.toString()}`);
+}
+
 export function resolveMarkdownAssetPath(markdownPath: string, src: string): string {
   const cleanSrc = src.trim();
   if (!markdownPath || !cleanSrc || externalAssetPattern.test(cleanSrc)) {
@@ -51,7 +57,7 @@ export function resolveMarkdownAssetPath(markdownPath: string, src: string): str
   return normalizeWorkspacePath(rawPath);
 }
 
-export function rewriteMarkdownImageSources(html: string, markdownPath?: string): string {
+export function rewriteMarkdownImageSources(html: string, markdownPath?: string, assetUrlForPath: (path: string) => string = artifactReadUrl): string {
   if (!markdownPath) {
     return html;
   }
@@ -60,6 +66,6 @@ export function rewriteMarkdownImageSources(html: string, markdownPath?: string)
     if (!assetPath) {
       return match;
     }
-    return `<img${before}src=${quote}${artifactReadUrl(assetPath)}${quote}${after}>`;
+    return `<img${before}src=${quote}${assetUrlForPath(assetPath)}${quote}${after}>`;
   });
 }

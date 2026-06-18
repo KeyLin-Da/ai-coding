@@ -1,6 +1,7 @@
 import type {
   ActionInput,
   AgentProvider,
+  ArtifactRef,
   GitChangeSummary,
   GitStageUntrackedInput,
   OpenSpecSummary,
@@ -235,9 +236,49 @@ export interface ArtifactGitSyncConfirmResult {
   centerResult: unknown;
 }
 
+export interface ArtifactShareCreateInput {
+  projectId: string | number;
+  requirementPk?: string | number;
+  requirementId: string;
+  artifactPath: string;
+  expireAt?: string;
+  showAnnotations?: boolean;
+  allowDownload?: boolean;
+}
+
+export interface ArtifactShareVO {
+  id: number;
+  projectId: number;
+  requirementPk?: number;
+  requirementId: string;
+  artifactPath: string;
+  visibility?: string;
+  status: string;
+  expireAt?: string;
+  showAnnotations?: boolean;
+  allowDownload?: boolean;
+  accessCount?: number;
+  lastAccessAt?: string;
+  createdBy?: number;
+  revokedAt?: string;
+  createdAt?: string;
+  token?: string;
+  publicPath?: string;
+}
+
+export interface PublicArtifactPreviewPayload {
+  share: ArtifactShareVO;
+  artifact: ArtifactRef;
+  content: string;
+  contentType?: string;
+  showAnnotations?: boolean;
+  allowDownload?: boolean;
+}
+
 async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
   const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
   const response = await fetch(resolveApiUrl(url), {
+    ...options,
     headers: isFormData
       ? {
           ...apiRuntimeHeaders(),
@@ -247,8 +288,7 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
           'Content-Type': 'application/json',
           ...apiRuntimeHeaders(),
           ...(options.headers || {})
-        },
-    ...options
+        }
   });
   const body = (await response.json()) as ApiResult<T>;
   if (!response.ok || body.success === false) {
@@ -263,6 +303,7 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
 async function runnerRequest<T>(url: string, options: RequestInit = {}): Promise<T> {
   const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
   const response = await fetch(resolveRunnerApiUrl(url), {
+    ...options,
     headers: isFormData
       ? {
           ...apiRuntimeHeaders(),
@@ -272,8 +313,7 @@ async function runnerRequest<T>(url: string, options: RequestInit = {}): Promise
           'Content-Type': 'application/json',
           ...apiRuntimeHeaders(),
           ...(options.headers || {})
-        },
-    ...options
+        }
   });
   const body = (await response.json()) as ApiResult<T>;
   if (!response.ok || body.success === false) {
@@ -643,9 +683,44 @@ export const apiClient = {
       body: JSON.stringify(input)
     });
   },
-  readArtifact(path: string) {
-    return runnerRequest<{ artifact: { hash?: string; updatedAt?: string; currentVersionId?: string | number; versionId?: string | number }; content: string }>(
-      `/api/ai-delivery/artifacts?path=${encodeURIComponent(path)}`
+  readArtifact(path: string, projectId?: string | number) {
+    const params = new URLSearchParams({ path });
+    if (projectId) {
+      params.set('projectId', String(projectId));
+    }
+    return runnerRequest<{ artifact: ArtifactRef; content: string }>(`/api/ai-delivery/artifacts?${params.toString()}`);
+  },
+  createPublicArtifactShare(input: ArtifactShareCreateInput) {
+    return runnerRequest<ArtifactShareVO>('/api/ai-delivery/artifact-shares/public', {
+      method: 'POST',
+      body: JSON.stringify(input)
+    });
+  },
+  listPublicArtifactShares(input: { projectId: string | number; requirementId?: string; artifactPath?: string }) {
+    const params = new URLSearchParams({ projectId: String(input.projectId) });
+    if (input.requirementId) {
+      params.set('requirementId', input.requirementId);
+    }
+    if (input.artifactPath) {
+      params.set('artifactPath', input.artifactPath);
+    }
+    return runnerRequest<ArtifactShareVO[]>(`/api/ai-delivery/artifact-shares?${params.toString()}`);
+  },
+  revokePublicArtifactShare(shareId: string | number) {
+    return request<ArtifactShareVO>(`/api/ai-delivery/artifact-shares/${encodeURIComponent(String(shareId))}/revoke`, {
+      method: 'POST',
+      body: JSON.stringify({})
+    });
+  },
+  regeneratePublicArtifactShareToken(shareId: string | number) {
+    return runnerRequest<ArtifactShareVO>(
+      `/api/ai-delivery/artifact-shares/${encodeURIComponent(String(shareId))}/token/regenerate`,
+      { method: 'POST', body: JSON.stringify({}) }
+    );
+  },
+  readPublicArtifactSharePreview(token: string) {
+    return runnerRequest<PublicArtifactPreviewPayload>(
+      `/api/ai-delivery/public-artifact-shares/${encodeURIComponent(token)}/preview`
     );
   },
   listTechDesignVersions(requirementId: string) {

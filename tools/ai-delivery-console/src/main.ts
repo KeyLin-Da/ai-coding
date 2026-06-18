@@ -12,18 +12,22 @@ import { useSettingsStore } from '@/stores/settings';
 const pinia = createPinia();
 const app = createApp(App);
 
-app.use(pinia).use(router).use(ElementPlus);
+app.use(pinia).use(ElementPlus);
 
-useSettingsStore(pinia)
-  .load()
-  .then(async () => {
+async function bootstrap() {
+  try {
+    await useSettingsStore(pinia).load();
     const auth = useAuthStore(pinia);
     await auth.restore();
     if (auth.isAuthenticated) {
       await useSettingsStore(pinia).ensureClientSessionId();
       await useProjectStore(pinia).loadProjects();
     }
-  })
-  .finally(() => {
+  } finally {
+    app.use(router);
+    await router.isReady();
     app.mount('#app');
-  });
+  }
+}
+
+void bootstrap();

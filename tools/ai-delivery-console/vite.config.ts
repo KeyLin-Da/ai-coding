@@ -65,7 +65,7 @@ export default defineConfig(({ mode }) => {
       port: devPort,
       host: true,
       proxy,
-      allowedHosts: envList(env.VITE_AI_DELIVERY_ALLOWED_HOSTS, ['127.0.0.1', 'localhost'])
+      allowedHosts: envList(env.VITE_AI_DELIVERY_ALLOWED_HOSTS, ['webcams-southwest-substantially-neon.trycloudflare.com','127.0.0.1', 'localhost'])
     },
     preview: {
       port: previewPort,
