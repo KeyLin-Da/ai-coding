@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { createRouter } from '../../server/router';
+import { hashContent } from '../../server/services/workspace';
 
 function routerRequest(
   method: string,
@@ -73,6 +74,33 @@ function publicShare(pathname = 'docs/172014/technical-design/design_review.md')
   };
 }
 
+function centerAnnotation(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'annotation-1',
+    artifactPath: 'docs/172014/technical-design/design_review.md',
+    versionId: 'current',
+    versionSource: 'CURRENT_DRAFT',
+    contentHash: 'tech-hash',
+    selectedText: '当前内容',
+    anchor: {
+      plainStart: 7,
+      plainEnd: 11,
+      prefixText: '技术方案',
+      suffixText: '',
+      headingPath: ['技术方案'],
+      occurrence: 1
+    },
+    comment: '请补充说明',
+    status: 'OPEN',
+    includeInNextGeneration: true,
+    createdBy: 1,
+    createdByName: '评审张三',
+    createdAt: '2026-06-18T07:00:00.000Z',
+    updatedAt: '2026-06-18T07:00:00.000Z',
+    ...overrides
+  };
+}
+
 function projectWithRepository() {
   return {
     id: 10,
@@ -111,6 +139,199 @@ describe('artifact share router', () => {
       expect(result.status).toBe(200);
       expect(result.body.data.content).toContain('当前内容');
       expect(result.body.data.allowDownload).toBe(false);
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('公开技术方案批注通过 token 读取并保留创建人展示名', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-share-annotations-'));
+    const content = '# 技术方案\n当前内容';
+    const contentHash = hashContent(content);
+    await fs.mkdir(path.join(tempDir, 'docs/172014/technical-design'), { recursive: true });
+    await fs.writeFile(path.join(tempDir, 'docs/172014/technical-design/design_review.md'), content, 'utf8');
+    const router = createRouter(tempDir);
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const parsed = new URL(String(input));
+      if (parsed.pathname === '/api/ai-delivery/public-artifact-shares/token-1') {
+        return jsonResponse({ ...publicShare(), showAnnotations: true });
+      }
+      if (parsed.pathname === '/api/ai-delivery/public-artifact-shares/token-1/tech-design-annotations') {
+        return jsonResponse([
+          centerAnnotation({ id: 'annotation-old', contentHash: 'old-hash', comment: '上一版批注' }),
+          centerAnnotation({ contentHash, comment: '当前版本批注' })
+        ]);
+      }
+      return jsonResponse(null, 404, 'B70004', '接口不存在');
+    }));
+
+    try {
+      const { response, done } = routerResponse();
+      await router(routerRequest('GET', '/api/ai-delivery/public-artifact-shares/token-1/tech-design-annotations?versionId=current'), response);
+      const result = await done;
+
+      expect(result.status).toBe(200);
+      expect(result.body.data.annotations).toHaveLength(1);
+      expect(result.body.data.annotations[0]).toMatchObject({
+        createdByName: '评审张三',
+        requirementId: '172014',
+        contentHash,
+        comment: '当前版本批注'
+      });
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('公开技术方案批注隐藏时拒绝读取', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-share-annotations-hidden-'));
+    const router = createRouter(tempDir);
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ ...publicShare(), showAnnotations: false })));
+
+    try {
+      const { response, done } = routerResponse();
+      await router(routerRequest('GET', '/api/ai-delivery/public-artifact-shares/token-1/tech-design-annotations'), response);
+      const result = await done;
+
+      expect(result.status).toBe(403);
+      expect(result.body.code).toBe('B70082');
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('公开技术方案批注未登录时拒绝新增', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-share-annotation-create-anon-'));
+    const router = createRouter(tempDir);
+
+    try {
+      const { response, done } = routerResponse();
+      await router(
+        routerRequest(
+          'POST',
+          '/api/ai-delivery/public-artifact-shares/token-1/tech-design-annotations',
+          { 'content-type': 'application/json' },
+          JSON.stringify({ versionId: 'current', selectedText: '当前内容', comment: '请补充说明', anchor: { plainStart: 0, plainEnd: 4 } })
+        ),
+        response
+      );
+      const result = await done;
+
+      expect(result.status).toBe(401);
+      expect(result.body.code).toBe('B70001');
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('公开技术方案批注任意登录接收人可通过 token 新增', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-share-annotation-create-'));
+    const content = '# 技术方案\n当前内容';
+    const contentHash = hashContent(content);
+    await fs.mkdir(path.join(tempDir, 'docs/172014/technical-design'), { recursive: true });
+    await fs.writeFile(path.join(tempDir, 'docs/172014/technical-design/design_review.md'), content, 'utf8');
+    const router = createRouter(tempDir);
+    const requests: Array<{ pathname: string; body?: any }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const parsed = new URL(String(input));
+      requests.push({ pathname: parsed.pathname, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      if (parsed.pathname === '/api/ai-delivery/public-artifact-shares/token-1') {
+        return jsonResponse({ ...publicShare(), showAnnotations: true });
+      }
+      if (parsed.pathname === '/api/ai-delivery/public-artifact-shares/token-1/tech-design-annotations') {
+        return jsonResponse([centerAnnotation({ contentHash })]);
+      }
+      return jsonResponse(null, 404, 'B70004', '接口不存在');
+    }));
+
+    try {
+      const { response, done } = routerResponse();
+      await router(
+        routerRequest(
+          'POST',
+          '/api/ai-delivery/public-artifact-shares/token-1/tech-design-annotations',
+          {
+            'content-type': 'application/json',
+            'x-user-id': '1',
+            'x-center-base-url': 'http://center.local'
+          },
+          JSON.stringify({
+            versionId: 'current',
+            selectedText: '当前内容',
+            comment: '请补充说明',
+            includeInNextGeneration: true,
+            anchor: { plainStart: 7, plainEnd: 11, prefixText: '技术方案', suffixText: '', headingPath: ['技术方案'], occurrence: 1 }
+          })
+        ),
+        response
+      );
+      const result = await done;
+
+      expect(result.status).toBe(200);
+      expect(result.body.data.annotations[0].createdByName).toBe('评审张三');
+      expect(requests.some((item) => item.pathname === '/api/ai-delivery/public-artifact-shares/token-1/tech-design-annotations')).toBe(true);
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('公开技术方案批注未登录时拒绝删除', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-share-annotation-delete-anon-'));
+    const router = createRouter(tempDir);
+
+    try {
+      const { response, done } = routerResponse();
+      await router(
+        routerRequest('POST', '/api/ai-delivery/public-artifact-shares/token-1/tech-design-annotations/annotation-1/delete'),
+        response
+      );
+      const result = await done;
+
+      expect(result.status).toBe(401);
+      expect(result.body.code).toBe('B70001');
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('公开技术方案批注登录接收人可删除本人批注', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-share-annotation-delete-'));
+    const content = '# 技术方案\n当前内容';
+    const contentHash = hashContent(content);
+    await fs.mkdir(path.join(tempDir, 'docs/172014/technical-design'), { recursive: true });
+    await fs.writeFile(path.join(tempDir, 'docs/172014/technical-design/design_review.md'), content, 'utf8');
+    const router = createRouter(tempDir);
+    const requests: Array<{ pathname: string; method?: string }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const parsed = new URL(String(input));
+      requests.push({ pathname: parsed.pathname, method: init?.method });
+      if (parsed.pathname === '/api/ai-delivery/public-artifact-shares/token-1') {
+        return jsonResponse({ ...publicShare(), showAnnotations: true });
+      }
+      if (parsed.pathname === '/api/ai-delivery/public-artifact-shares/token-1/tech-design-annotations/annotation-1/delete') {
+        return jsonResponse([centerAnnotation({ id: 'annotation-other', contentHash })]);
+      }
+      return jsonResponse(null, 404, 'B70004', '接口不存在');
+    }));
+
+    try {
+      const { response, done } = routerResponse();
+      await router(
+        routerRequest(
+          'POST',
+          '/api/ai-delivery/public-artifact-shares/token-1/tech-design-annotations/annotation-1/delete',
+          { 'x-user-id': '2', 'x-center-base-url': 'http://center.local' }
+        ),
+        response
+      );
+      const result = await done;
+
+      expect(result.status).toBe(200);
+      expect(result.body.data.annotations).toHaveLength(1);
+      expect(requests).toContainEqual({
+        pathname: '/api/ai-delivery/public-artifact-shares/token-1/tech-design-annotations/annotation-1/delete',
+        method: 'POST'
+      });
     } finally {
       await fs.rm(tempDir, { recursive: true, force: true });
     }

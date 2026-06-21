@@ -811,7 +811,7 @@ async function loadOpenSpecSummary() {
 }
 
 function previewArtifact(artifact: ArtifactRef) {
-  artifactPreviewDialog.value?.open(artifact, currentProjectId.value);
+  artifactPreviewDialog.value?.open(artifact, currentProjectId.value, workflow.value.id || '');
 }
 
 async function loadTechDesignQuestionRecords() {

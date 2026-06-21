@@ -162,6 +162,7 @@ describe('workflow realtime hints', () => {
 
     expect(annotationChanged).toHaveBeenCalledTimes(1);
     expect((annotationChanged.mock.calls[0][0] as CustomEvent).detail).toMatchObject({
+      requirementPk: 100,
       requirementId: '172014',
       annotationId: 'annotation-1',
       operation: 'CREATED'

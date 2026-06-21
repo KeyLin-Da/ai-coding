@@ -88,6 +88,84 @@ describe('tech design versioned annotation UI', () => {
     expect(highlight?.textContent).toBe('缓存策略');
   });
 
+  it('正文 hash 一致时按偏移高亮跨节点和空白选区', () => {
+    document.body.innerHTML = '<article><p>需要<strong>缓存</strong>\n策略说明。</p></article>';
+    const root = document.querySelector('article') as HTMLElement;
+    const startText = root.querySelector('strong')?.firstChild as Text;
+    const endText = root.querySelector('p')?.lastChild as Text;
+    const range = document.createRange();
+    range.setStart(startText, 0);
+    range.setEnd(endText, 3);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+
+    const draft = createAnnotationAnchor(root);
+    expect(draft?.selectedText).toBe('缓存 策略');
+
+    applyAnnotationHighlights(root, [annotation({ anchor: draft?.anchor, selectedText: draft?.selectedText, contentHash: 'hash' })], 'hash');
+    const highlights = Array.from(root.querySelectorAll('.tech-design-annotation-highlight'));
+    expect(highlights).toHaveLength(2);
+    expect(highlights.map((item) => item.textContent).join('').replace(/\s+/g, ' ').trim()).toBe('缓存 策略');
+  });
+
+  it('跨段批注高亮时跳过 Markdown 结构空白', () => {
+    document.body.innerHTML = `
+      <article>
+        <p>采纳本轮评审意见。</p>
+        <ul>
+          <li>榜单主页数据接口</li>
+          <li>悬浮入口配置接口</li>
+        </ul>
+      </article>
+    `;
+    const root = document.querySelector('article') as HTMLElement;
+    const startText = root.querySelector('p')?.firstChild as Text;
+    const listItems = root.querySelectorAll('li');
+    const endText = listItems[1].firstChild as Text;
+    const range = document.createRange();
+    range.setStart(startText, 0);
+    range.setEnd(endText, endText.textContent?.length || 0);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+
+    const draft = createAnnotationAnchor(root);
+    expect(draft?.selectedText).toBe('采纳本轮评审意见。 榜单主页数据接口 悬浮入口配置接口');
+
+    applyAnnotationHighlights(root, [annotation({ anchor: draft?.anchor, selectedText: draft?.selectedText, contentHash: 'hash' })], 'hash');
+    const highlights = Array.from(root.querySelectorAll('.tech-design-annotation-highlight'));
+
+    expect(highlights).toHaveLength(3);
+    expect(highlights.map((item) => item.textContent)).toEqual(['采纳本轮评审意见。', '榜单主页数据接口', '悬浮入口配置接口']);
+    expect(highlights.every((item) => /\S/.test(item.textContent || ''))).toBe(true);
+  });
+
+  it('正文存在短横线和空白变体时仍按规范化文本高亮', () => {
+    document.body.innerHTML = '<article><h1>【OPP】 <span>F1‑学习积分排行榜</span></h1><p>正文</p></article>';
+    const root = document.querySelector('article') as HTMLElement;
+
+    applyAnnotationHighlights(
+      root,
+      [
+        annotation({
+          selectedText: 'F1-学习积',
+          contentHash: 'old-hash',
+          anchor: {
+            plainStart: 0,
+            plainEnd: 6,
+            prefixText: '【OPP】',
+            suffixText: '分排行榜',
+            headingPath: ['技术方案'],
+            occurrence: 1
+          }
+        })
+      ],
+      'current-hash'
+    );
+
+    const highlight = root.querySelector('.tech-design-annotation-highlight');
+    expect(highlight?.textContent).toBe('F1‑学习积');
+  });
+
   it('版本选择器展示当前草稿和历史版本', () => {
     const wrapper = mount(TechDesignVersionSelector, {
       props: {

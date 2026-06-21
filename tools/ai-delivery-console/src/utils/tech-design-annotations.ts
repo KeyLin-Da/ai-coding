@@ -1,6 +1,62 @@
 import type { TechDesignAnnotation, TechDesignAnnotationAnchor } from '@shared/workflow';
 
 const highlightClass = 'tech-design-annotation-highlight';
+const dashVariants = /[\u2010-\u2015\u2212]/g;
+const zeroWidthChars = /[\u200B-\u200D\uFEFF]/g;
+
+interface NormalizedContent {
+  text: string;
+  starts: number[];
+  ends: number[];
+}
+
+function normalizeSearchText(value: string): string {
+  return value
+    .normalize('NFKC')
+    .replace(dashVariants, '-')
+    .replace(zeroWidthChars, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeContentWithOffsets(content: string): NormalizedContent {
+  let text = '';
+  const starts: number[] = [];
+  const ends: number[] = [];
+  let pendingSpace: { start: number; end: number } | undefined;
+  for (let index = 0; index < content.length; ) {
+    const codePoint = content.codePointAt(index);
+    const raw = codePoint == null ? content[index] : String.fromCodePoint(codePoint);
+    const start = index;
+    index += raw.length;
+    if (zeroWidthChars.test(raw)) {
+      zeroWidthChars.lastIndex = 0;
+      continue;
+    }
+    zeroWidthChars.lastIndex = 0;
+    if (/\s/.test(raw)) {
+      pendingSpace = pendingSpace || { start, end: index };
+      pendingSpace.end = index;
+      continue;
+    }
+    const normalized = raw.normalize('NFKC').replace(dashVariants, '-').replace(zeroWidthChars, '');
+    if (!normalized) {
+      continue;
+    }
+    if (pendingSpace && text) {
+      text += ' ';
+      starts.push(pendingSpace.start);
+      ends.push(pendingSpace.end);
+    }
+    pendingSpace = undefined;
+    for (let offset = 0; offset < normalized.length; offset += 1) {
+      text += normalized[offset];
+      starts.push(start);
+      ends.push(index);
+    }
+  }
+  return { text, starts, ends };
+}
 
 function textNodes(root: HTMLElement): Text[] {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -50,7 +106,7 @@ export function createAnnotationAnchor(root: HTMLElement, selection: Selection |
   if (range.collapsed || !root.contains(range.commonAncestorContainer)) {
     return undefined;
   }
-  const selectedText = selection.toString().replace(/\s+/g, ' ').trim();
+  const selectedText = normalizeSearchText(selection.toString());
   if (!selectedText) {
     return undefined;
   }
@@ -62,8 +118,8 @@ export function createAnnotationAnchor(root: HTMLElement, selection: Selection |
     anchor: {
       plainStart: start,
       plainEnd: end,
-      prefixText: content.slice(Math.max(0, start - 80), start).replace(/\s+/g, ' ').trim(),
-      suffixText: content.slice(end, end + 80).replace(/\s+/g, ' ').trim(),
+      prefixText: normalizeSearchText(content.slice(Math.max(0, start - 80), start)),
+      suffixText: normalizeSearchText(content.slice(end, end + 80)),
       headingPath: headingPath(root, range.startContainer),
       occurrence: occurrenceBefore(content, selectedText, start)
     }
@@ -71,15 +127,16 @@ export function createAnnotationAnchor(root: HTMLElement, selection: Selection |
 }
 
 function occurrenceBefore(content: string, selectedText: string, start: number): number {
-  if (!selectedText) {
+  const selected = normalizeSearchText(selectedText);
+  if (!selected) {
     return 1;
   }
-  const before = content.slice(0, start + selectedText.length);
+  const before = normalizeContentWithOffsets(content.slice(0, start + selectedText.length)).text;
   let count = 0;
-  let index = before.indexOf(selectedText);
+  let index = before.indexOf(selected);
   while (index >= 0) {
     count += 1;
-    index = before.indexOf(selectedText, index + selectedText.length);
+    index = before.indexOf(selected, index + selected.length);
   }
   return Math.max(1, count);
 }
@@ -87,29 +144,36 @@ function occurrenceBefore(content: string, selectedText: string, start: number):
 function locateByOffset(content: string, annotation: TechDesignAnnotation): { start: number; end: number } | undefined {
   const start = annotation.anchor.plainStart;
   const end = annotation.anchor.plainEnd;
-  if (start >= 0 && end > start && content.slice(start, end).replace(/\s+/g, ' ').trim() === annotation.selectedText) {
+  if (start >= 0 && end > start && normalizeSearchText(content.slice(start, end)) === normalizeSearchText(annotation.selectedText)) {
     return { start, end };
   }
   return undefined;
 }
 
 function locateByText(content: string, annotation: TechDesignAnnotation): { start: number; end: number } | undefined {
-  const selected = annotation.selectedText;
+  const selected = normalizeSearchText(annotation.selectedText);
   if (!selected) {
     return undefined;
   }
+  const normalizedContent = normalizeContentWithOffsets(content);
+  const prefixText = normalizeSearchText(annotation.anchor.prefixText);
+  const suffixText = normalizeSearchText(annotation.anchor.suffixText);
   let occurrence = 0;
-  let index = content.indexOf(selected);
+  let index = normalizedContent.text.indexOf(selected);
   while (index >= 0) {
     occurrence += 1;
-    const prefix = content.slice(Math.max(0, index - annotation.anchor.prefixText.length - 20), index).replace(/\s+/g, ' ');
-    const suffix = content.slice(index + selected.length, index + selected.length + annotation.anchor.suffixText.length + 20).replace(/\s+/g, ' ');
-    const prefixMatches = !annotation.anchor.prefixText || prefix.includes(annotation.anchor.prefixText);
-    const suffixMatches = !annotation.anchor.suffixText || suffix.includes(annotation.anchor.suffixText);
+    const prefix = normalizedContent.text.slice(Math.max(0, index - prefixText.length - 20), index);
+    const suffix = normalizedContent.text.slice(index + selected.length, index + selected.length + suffixText.length + 20);
+    const prefixMatches = !prefixText || prefix.includes(prefixText);
+    const suffixMatches = !suffixText || suffix.includes(suffixText);
     if ((prefixMatches && suffixMatches) || occurrence === annotation.anchor.occurrence) {
-      return { start: index, end: index + selected.length };
+      const start = normalizedContent.starts[index];
+      const end = normalizedContent.ends[index + selected.length - 1];
+      if (start != null && end != null && end > start) {
+        return { start, end };
+      }
     }
-    index = content.indexOf(selected, index + selected.length);
+    index = normalizedContent.text.indexOf(selected, index + selected.length);
   }
   return undefined;
 }
@@ -157,6 +221,10 @@ function wrapTextRange(node: Text, start: number, end: number, annotation: TechD
   node.parentNode?.replaceChild(fragment, node);
 }
 
+function containsVisibleText(value: string): boolean {
+  return /\S/.test(value.replace(zeroWidthChars, ''));
+}
+
 function applyHighlight(root: HTMLElement, annotation: TechDesignAnnotation, range: { start: number; end: number }): void {
   const nodes = textNodes(root);
   let cursor = 0;
@@ -167,7 +235,8 @@ function applyHighlight(root: HTMLElement, annotation: TechDesignAnnotation, ran
     const nodeEnd = cursor + length;
     const start = Math.max(range.start, nodeStart);
     const end = Math.min(range.end, nodeEnd);
-    if (end > start) {
+    const selected = node.textContent?.slice(start - nodeStart, end - nodeStart) || '';
+    if (end > start && containsVisibleText(selected)) {
       segments.push({ node, start: start - nodeStart, end: end - nodeStart });
     }
     cursor = nodeEnd;

@@ -18,6 +18,8 @@ import com.opp.aidelivery.center.model.entity.RequirementEntity;
 import com.opp.aidelivery.center.model.vo.ArtifactSharePublicVO;
 import com.opp.aidelivery.center.model.vo.ArtifactShareVO;
 import java.time.LocalDateTime;
+import java.util.Arrays;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -131,6 +133,67 @@ class ArtifactShareServiceTest {
     }
 
     @Test
+    void resolvePublicShareForAnnotationsRejectsHiddenAnnotations() {
+        ArtifactShareEntity share = share();
+        share.setShowAnnotations(0);
+        when(artifactShareMapper.selectOne(any())).thenReturn(share);
+
+        assertThatThrownBy(() -> artifactShareService.resolvePublicShareForAnnotations("public-token"))
+            .isInstanceOfSatisfying(BusinessException.class, ex ->
+                assertThat(ex.getErrorCode()).isEqualTo(AiDeliveryErrorCode.ARTIFACT_SHARE_ANNOTATIONS_DISABLED)
+            );
+
+        verify(artifactShareMapper, never()).updateById(any());
+    }
+
+    @Test
+    void resolvePublicShareForAnnotationsReturnsShareWhenEnabled() {
+        ArtifactShareEntity share = share();
+        when(artifactShareMapper.selectOne(any())).thenReturn(share);
+
+        ArtifactSharePublicVO result = artifactShareService.resolvePublicShareForAnnotations("public-token");
+
+        assertThat(result.getRequirementPk()).isEqualTo(100L);
+        assertThat(result.getShowAnnotations()).isTrue();
+        assertThat(result.getRealtimeChannel()).isEqualTo(share.getTokenHash());
+        verify(artifactShareMapper, never()).updateById(any());
+    }
+
+    @Test
+    void realtimeSubscriptionRequiresMatchingActiveTokenChannel() {
+        ArtifactShareEntity share = share();
+        when(artifactShareMapper.selectOne(any())).thenReturn(share);
+
+        artifactShareService.assertRealtimeAnnotationSubscription("public-token", 300L, share.getTokenHash());
+
+        assertThatThrownBy(() -> artifactShareService.assertRealtimeAnnotationSubscription("public-token", 301L, share.getTokenHash()))
+            .isInstanceOfSatisfying(BusinessException.class, ex ->
+                assertThat(ex.getErrorCode()).isEqualTo(AiDeliveryErrorCode.WEBSOCKET_SUBSCRIBE_DENIED)
+            );
+        assertThatThrownBy(() -> artifactShareService.assertRealtimeAnnotationSubscription("public-token", 300L, "old-channel"))
+            .isInstanceOfSatisfying(BusinessException.class, ex ->
+                assertThat(ex.getErrorCode()).isEqualTo(AiDeliveryErrorCode.WEBSOCKET_SUBSCRIBE_DENIED)
+            );
+    }
+
+    @Test
+    void realtimeChannelsExcludeExpiredAndNonTechnicalDesignShares() {
+        ArtifactShareEntity valid = share();
+        ArtifactShareEntity expired = share();
+        expired.setId(301L);
+        expired.setExpireAt(LocalDateTime.now().minusMinutes(1));
+        ArtifactShareEntity prd = share();
+        prd.setId(302L);
+        prd.setArtifactPath("docs/172014/prd/analysis.md");
+        when(artifactShareMapper.selectList(any())).thenReturn(Arrays.asList(valid, expired, prd));
+
+        Map<Long, String> channels = artifactShareService.listRealtimeAnnotationChannels(100L);
+
+        assertThat(channels).containsOnlyKeys(300L);
+        assertThat(channels.get(300L)).isEqualTo(valid.getTokenHash());
+    }
+
+    @Test
     void regeneratePublicShareTokenReplacesHashAndReturnsNewToken() {
         ArtifactShareEntity share = share();
         share.setTokenHash("old-token-hash");
@@ -171,6 +234,7 @@ class ArtifactShareServiceTest {
         share.setRequirementId("172014");
         share.setArtifactPath("docs/172014/technical-design/design_review.md");
         share.setVisibility("PUBLIC");
+        share.setTokenHash("0a11c586276e130d0bcd50c28ea06b6aeb63f2e99d0e41c56cf4e4178ae2590a");
         share.setStatus("ENABLED");
         share.setShowAnnotations(1);
         share.setAllowDownload(1);

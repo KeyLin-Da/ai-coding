@@ -140,4 +140,34 @@ describe('realtime-client', () => {
     expect(createWsTicket).toHaveBeenCalledTimes(2);
     expect(second.sent.some((frame) => frame.includes('destination:/app/projects/2/subscribe') && frame.includes('"lastEventId":12'))).toBe(true);
   });
+
+  it('无需项目成员上下文即可订阅 token 范围的分享批注事件并在断线后恢复', async () => {
+    vi.useFakeTimers();
+    setApiRuntimeConfig({ projectId: '' });
+    const received = vi.fn();
+    const client = new RealtimeClient({ onShareAnnotationEvent: received });
+
+    const subscribing = client.subscribeArtifactShare(300, 'public-token', 'channel-hash');
+    const first = await nextSocket();
+    first.open();
+    first.receive('CONNECTED\nversion:1.2\n\n\0');
+    await subscribing;
+
+    expect(first.sent.some((frame) =>
+      frame.includes('destination:/topic/artifact-shares/300/channel-hash/annotations')
+      && frame.includes('share-token:public-token')
+    )).toBe(true);
+    first.receive(
+      'MESSAGE\ndestination:/topic/artifact-shares/300/channel-hash/annotations\n\n'
+      + '{"shareId":300,"eventId":88,"eventType":"tech-design.annotation.changed","operation":"CREATED"}\0'
+    );
+    expect(received).toHaveBeenCalledWith(expect.objectContaining({ shareId: 300, eventId: 88 }));
+
+    first.close();
+    await vi.advanceTimersByTimeAsync(1000);
+    const second = await nextSocket(1);
+    second.open();
+    second.receive('CONNECTED\nversion:1.2\n\n\0');
+    expect(second.sent.some((frame) => frame.includes('/topic/artifact-shares/300/channel-hash/annotations'))).toBe(true);
+  });
 });

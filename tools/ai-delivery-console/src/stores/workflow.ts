@@ -3,6 +3,7 @@ import { ElMessage } from 'element-plus';
 import type { ActionInput, AgentProvider, RequirementInput, RequirementWorkflow, ReviewInput, RunEvent } from '@shared/workflow';
 import { apiClient, type DeleteTechDesignQuestionInput } from '@/api/client';
 import { getApiRuntimeConfig } from '@/api/runtime';
+import { dispatchTechDesignAnnotationChanged } from '@/services/annotation-realtime';
 import { RealtimeClient, type RealtimeDomainEvent } from '@/services/realtime-client';
 
 let requirementsLoadInFlight: Promise<RequirementWorkflow[]> | undefined;
@@ -274,17 +275,12 @@ export const useWorkflowStore = defineStore('workflow', {
         ElMessage.warning(String(payload.errorMessage || '产物Git同步被阻断'));
       }
       if (event.eventType === 'tech-design.annotation.changed') {
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(
-            new CustomEvent('ai-delivery:tech-design-annotation-changed', {
-              detail: {
-                ...payload,
-                eventId: event.eventId,
-                eventType: event.eventType
-              }
-            })
-          );
-        }
+        dispatchTechDesignAnnotationChanged({
+          ...payload,
+          requirementPk: payload.requirementPk ?? event.aggregateId,
+          eventId: event.eventId,
+          eventType: event.eventType
+        });
       }
       if (event.eventType === 'project.repo.pull-required') {
         const targetUserIds = Array.isArray(payload.targetUserIds) ? payload.targetUserIds.map((item) => String(item)) : [];

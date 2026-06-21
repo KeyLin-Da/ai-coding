@@ -11,7 +11,7 @@ import type {
   TechDesignVersionSource
 } from '../../shared/workflow';
 import type { LocalRequestContext } from './local-request-context';
-import { centerRequest, isCenterEndpointUnavailableError } from './center-client';
+import { centerPublicRequest, centerRequest, isCenterEndpointUnavailableError } from './center-client';
 import { getRunRuntimeDir } from './runtime-paths';
 import { assertInsideWorkspace, hashContent, normalizeRequirementId } from './workspace';
 import { readTechDesignVersionContent } from './tech-design-versions';
@@ -30,6 +30,10 @@ interface CenterAnnotationPayload {
   includeInNextGeneration?: boolean;
   consumedAt?: string | number[] | null;
   consumedRunId?: string;
+  createdBy?: string | number;
+  createdByName?: string;
+  updatedBy?: string | number;
+  updatedByName?: string;
   createdAt?: string | number[] | null;
   updatedAt?: string | number[] | null;
 }
@@ -37,6 +41,12 @@ interface CenterAnnotationPayload {
 interface PreparedCenterAnnotationInput {
   sourceFilePath: string;
   annotations: TechDesignAnnotation[];
+}
+
+interface PublicAnnotationShareContext {
+  requirementPk?: string | number;
+  requirementId: string;
+  artifactPath?: string;
 }
 
 const validStatuses = new Set<TechDesignAnnotationStatus>(['OPEN', 'RESOLVED', 'CARRIED_FORWARD', 'STALE']);
@@ -85,15 +95,19 @@ function centerAnnotationPath(workflow: RequirementWorkflow, suffix = ''): strin
   return `/api/ai-delivery/requirements/${encodeURIComponent(String(workflow.id))}/tech-design-annotations${suffix}`;
 }
 
+function centerPublicAnnotationPath(token: string, suffix = ''): string {
+  return `/api/ai-delivery/public-artifact-shares/${encodeURIComponent(token)}/tech-design-annotations${suffix}`;
+}
+
 export function centerTechDesignAnnotationsEnabled(context: LocalRequestContext, workflow: RequirementWorkflow): boolean {
   return Boolean(workflow.id && (context.accessToken || context.userId));
 }
 
-function toTechDesignAnnotation(workflow: RequirementWorkflow, item: CenterAnnotationPayload): TechDesignAnnotation {
+function toTechDesignAnnotation(requirementId: string, item: CenterAnnotationPayload): TechDesignAnnotation {
   const now = new Date().toISOString();
   return {
     id: String(item.id || ''),
-    requirementId: normalizeRequirementId(workflow.requirementId),
+    requirementId: normalizeRequirementId(requirementId),
     artifactPath: String(item.artifactPath || ''),
     versionId: String(item.versionId || ''),
     versionNo: item.versionNo,
@@ -106,17 +120,40 @@ function toTechDesignAnnotation(workflow: RequirementWorkflow, item: CenterAnnot
     includeInNextGeneration: item.includeInNextGeneration !== false,
     consumedAt: normalizeCenterDate(item.consumedAt),
     consumedRunId: item.consumedRunId,
+    createdBy: item.createdBy,
+    createdByName: normalizeText(item.createdByName, 100),
+    updatedBy: item.updatedBy,
+    updatedByName: normalizeText(item.updatedByName, 100),
     createdAt: normalizeCenterDate(item.createdAt) || now,
     updatedAt: normalizeCenterDate(item.updatedAt) || normalizeCenterDate(item.createdAt) || now
   };
 }
 
-function toAnnotationList(workflow: RequirementWorkflow, payload: CenterAnnotationPayload[]): TechDesignAnnotationList {
-  const annotations = payload.map((item) => toTechDesignAnnotation(workflow, item));
+function toAnnotationListByRequirementId(requirementId: string, payload: CenterAnnotationPayload[]): TechDesignAnnotationList {
+  const annotations = payload.map((item) => toTechDesignAnnotation(requirementId, item));
   return {
     annotations,
     hash: hashContent(JSON.stringify(annotations)),
-    summaryPath: techDesignAnnotationSnapshotDirPath(workflow.requirementId)
+    summaryPath: techDesignAnnotationSnapshotDirPath(requirementId)
+  };
+}
+
+function toAnnotationList(workflow: RequirementWorkflow, payload: CenterAnnotationPayload[]): TechDesignAnnotationList {
+  return toAnnotationListByRequirementId(workflow.requirementId, payload);
+}
+
+export function filterTechDesignAnnotationsByContentHash(
+  list: TechDesignAnnotationList,
+  contentHash?: string
+): TechDesignAnnotationList {
+  if (!contentHash) {
+    return list;
+  }
+  const annotations = list.annotations.filter((annotation) => annotation.contentHash === contentHash);
+  return {
+    ...list,
+    annotations,
+    hash: hashContent(JSON.stringify(annotations))
   };
 }
 
@@ -169,6 +206,17 @@ export async function listCenterTechDesignAnnotations(
   return toAnnotationList(workflow, payload);
 }
 
+export async function listPublicCenterTechDesignAnnotations(
+  context: Pick<LocalRequestContext, 'centerBaseUrl'>,
+  token: string,
+  requirementId: string,
+  versionId?: string
+): Promise<TechDesignAnnotationList> {
+  const suffix = versionId ? `?versionId=${encodeURIComponent(versionId)}` : '';
+  const payload = await centerPublicRequest<CenterAnnotationPayload[]>(context, centerPublicAnnotationPath(token, suffix));
+  return toAnnotationListByRequirementId(requirementId, payload);
+}
+
 export async function createCenterTechDesignAnnotation(
   workspaceRoot: string,
   context: LocalRequestContext,
@@ -199,6 +247,56 @@ export async function createCenterTechDesignAnnotation(
     })
   });
   return toAnnotationList(workflow, payload);
+}
+
+export async function createPublicCenterTechDesignAnnotation(
+  workspaceRoot: string,
+  context: LocalRequestContext,
+  token: string,
+  share: PublicAnnotationShareContext,
+  input: TechDesignAnnotationCreateInput
+): Promise<TechDesignAnnotationList> {
+  const selectedText = normalizeText(input.selectedText, 2000);
+  const comment = normalizeText(input.comment, 4000);
+  if (!selectedText) {
+    throw new Error('请选择需要批注的文案');
+  }
+  if (!comment) {
+    throw new Error('请输入批注内容');
+  }
+  const versionContent = await readTechDesignVersionContent(workspaceRoot, share.requirementId, input.versionId);
+  const payload = await centerRequest<CenterAnnotationPayload[]>(context, centerPublicAnnotationPath(token), {
+    method: 'POST',
+    body: JSON.stringify({
+      artifactPath: versionContent.version.artifactPath,
+      versionId: versionContent.version.id,
+      versionNo: versionContent.version.versionNo,
+      versionSource: versionContent.version.source,
+      contentHash: versionContent.version.contentHash || hashContent(versionContent.content),
+      selectedText,
+      comment,
+      includeInNextGeneration: input.includeInNextGeneration !== false,
+      anchor: normalizeAnchor(input.anchor)
+    })
+  });
+  return toAnnotationListByRequirementId(share.requirementId, payload);
+}
+
+export async function deletePublicCenterTechDesignAnnotation(
+  context: LocalRequestContext,
+  token: string,
+  requirementId: string,
+  annotationId: string
+): Promise<TechDesignAnnotationList> {
+  const payload = await centerRequest<CenterAnnotationPayload[]>(
+    context,
+    centerPublicAnnotationPath(token, `/${encodeURIComponent(annotationId)}/delete`),
+    {
+      method: 'POST',
+      body: JSON.stringify({})
+    }
+  );
+  return toAnnotationListByRequirementId(requirementId, payload);
 }
 
 export async function updateCenterTechDesignAnnotationStatus(
@@ -250,7 +348,7 @@ export async function listConsumableCenterTechDesignAnnotations(
     }
     throw error;
   }
-  return payload.map((item) => toTechDesignAnnotation(workflow, item));
+  return payload.map((item) => toTechDesignAnnotation(workflow.requirementId, item));
 }
 
 export async function prepareCenterTechDesignAnnotationInput(

@@ -213,6 +213,10 @@ export interface TechDesignAnnotation {
   includeInNextGeneration: boolean;
   consumedAt?: string;
   consumedRunId?: string;
+  createdBy?: string | number;
+  createdByName?: string;
+  updatedBy?: string | number;
+  updatedByName?: string;
   createdAt: string;
   updatedAt: string;
 }

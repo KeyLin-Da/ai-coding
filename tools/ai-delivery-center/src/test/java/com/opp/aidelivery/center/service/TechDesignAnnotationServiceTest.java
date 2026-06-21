@@ -1,22 +1,28 @@
 package com.opp.aidelivery.center.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.opp.aidelivery.center.common.error.BusinessException;
 import com.opp.aidelivery.center.mapper.RequirementMapper;
 import com.opp.aidelivery.center.mapper.TechDesignAnnotationMapper;
+import com.opp.aidelivery.center.mapper.UserMapper;
 import com.opp.aidelivery.center.model.dto.TechDesignAnnotationAnchorRequest;
 import com.opp.aidelivery.center.model.dto.TechDesignAnnotationConsumeRequest;
 import com.opp.aidelivery.center.model.dto.TechDesignAnnotationCreateRequest;
 import com.opp.aidelivery.center.model.dto.TechDesignAnnotationStatusRequest;
 import com.opp.aidelivery.center.model.entity.RequirementEntity;
 import com.opp.aidelivery.center.model.entity.TechDesignAnnotationEntity;
+import com.opp.aidelivery.center.model.entity.UserEntity;
 import com.opp.aidelivery.center.model.vo.TechDesignAnnotationVO;
 import java.util.Collections;
 import java.util.List;
@@ -38,6 +44,8 @@ class TechDesignAnnotationServiceTest {
     @Mock
     private TechDesignAnnotationMapper annotationMapper;
     @Mock
+    private UserMapper userMapper;
+    @Mock
     private DomainEventService domainEventService;
 
     private TechDesignAnnotationService service;
@@ -49,8 +57,10 @@ class TechDesignAnnotationServiceTest {
             requirementMapper,
             annotationMapper,
             domainEventService,
+            userMapper,
             new ObjectMapper()
         );
+        lenient().when(userMapper.selectBatchIds(any())).thenReturn(Collections.singletonList(user()));
     }
 
     @Test
@@ -68,12 +78,38 @@ class TechDesignAnnotationServiceTest {
         List<TechDesignAnnotationVO> result = service.create(1L, 100L, createRequest());
 
         assertThat(result).hasSize(1);
+        assertThat(result.get(0).getCreatedByName()).isEqualTo("评审张三");
         assertThat(inserted.get().getRequirementPk()).isEqualTo(100L);
         assertThat(inserted.get().getVersionId()).isEqualTo("current");
         assertThat(inserted.get().getStatus()).isEqualTo("OPEN");
         assertThat(inserted.get().getIncludeInNextGeneration()).isEqualTo(1);
         verify(permissionService, atLeastOnce()).assertProjectMember(1L, 10L);
         verify(domainEventService).publishAfterCommit(eq(10L), eq("tech-design.annotation.changed"), eq("REQUIREMENT"), eq(100L), anyString());
+    }
+
+    @Test
+    void publicShareRecipientCreatesAnnotationWithoutProjectMembership() {
+        AtomicReference<TechDesignAnnotationEntity> inserted = new AtomicReference<>();
+        when(requirementMapper.selectById(100L)).thenReturn(requirement());
+        org.mockito.Mockito.doAnswer(invocation -> {
+            TechDesignAnnotationEntity entity = invocation.getArgument(0);
+            entity.setId(900L);
+            inserted.set(entity);
+            return 1;
+        }).when(annotationMapper).insert(any(TechDesignAnnotationEntity.class));
+        when(annotationMapper.selectList(any())).thenAnswer(invocation -> Collections.singletonList(inserted.get()));
+
+        List<TechDesignAnnotationVO> result = service.createPublic(
+            2L,
+            100L,
+            "docs/172014/technical-design/design_review.md",
+            createRequest()
+        );
+
+        assertThat(result).hasSize(1);
+        assertThat(inserted.get().getCreatedBy()).isEqualTo(2L);
+        assertThat(inserted.get().getArtifactPath()).isEqualTo("docs/172014/technical-design/design_review.md");
+        verify(permissionService, never()).assertProjectMember(any(), any());
     }
 
     @Test
@@ -110,6 +146,44 @@ class TechDesignAnnotationServiceTest {
     }
 
     @Test
+    void publicShareRecipientDeletesOwnAnnotation() {
+        TechDesignAnnotationEntity entity = annotation();
+        entity.setCreatedBy(2L);
+        when(requirementMapper.selectById(100L)).thenReturn(requirement());
+        when(annotationMapper.selectOne(any())).thenReturn(entity);
+        when(annotationMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        List<TechDesignAnnotationVO> result = service.deletePublic(
+            2L,
+            100L,
+            "docs/172014/technical-design/design_review.md",
+            "annotation-1"
+        );
+
+        assertThat(result).isEmpty();
+        verify(annotationMapper).deleteById(900L);
+        verify(permissionService, never()).assertProjectMember(any(), any());
+    }
+
+    @Test
+    void publicShareRecipientCannotDeleteAnotherUsersAnnotation() {
+        TechDesignAnnotationEntity entity = annotation();
+        when(requirementMapper.selectById(100L)).thenReturn(requirement());
+        when(annotationMapper.selectOne(any())).thenReturn(entity);
+
+        assertThatThrownBy(() -> service.deletePublic(
+            2L,
+            100L,
+            "docs/172014/technical-design/design_review.md",
+            "annotation-1"
+        ))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("只能删除本人创建的批注");
+
+        verify(annotationMapper, never()).deleteById(900L);
+    }
+
+    @Test
     void consumeMarksConsumableAnnotationsAndPublishesEvent() {
         TechDesignAnnotationEntity entity = annotation();
         when(requirementMapper.selectById(100L)).thenReturn(requirement());
@@ -126,6 +200,19 @@ class TechDesignAnnotationServiceTest {
         ArgumentCaptor<String> payloadCaptor = ArgumentCaptor.forClass(String.class);
         verify(domainEventService).publishAfterCommit(eq(10L), eq("tech-design.annotation.changed"), eq("REQUIREMENT"), eq(100L), payloadCaptor.capture());
         assertThat(payloadCaptor.getValue()).contains("\"operation\":\"CONSUMED\"");
+    }
+
+    @Test
+    void listPublicReturnsCreatorDisplayNameWithoutPermissionCheck() {
+        TechDesignAnnotationEntity entity = annotation();
+        when(annotationMapper.selectList(any())).thenReturn(Collections.singletonList(entity));
+
+        List<TechDesignAnnotationVO> result = service.listPublic(100L, "current");
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getCreatedBy()).isEqualTo(1L);
+        assertThat(result.get(0).getCreatedByName()).isEqualTo("评审张三");
+        verify(permissionService, never()).assertProjectMember(any(), any());
     }
 
     private TechDesignAnnotationCreateRequest createRequest() {
@@ -176,6 +263,16 @@ class TechDesignAnnotationServiceTest {
         entity.setOccurrence(1);
         entity.setStatus("OPEN");
         entity.setIncludeInNextGeneration(1);
+        entity.setCreatedBy(1L);
+        entity.setUpdatedBy(1L);
         return entity;
+    }
+
+    private UserEntity user() {
+        UserEntity user = new UserEntity();
+        user.setId(1L);
+        user.setAccount("reviewer.zhang");
+        user.setDisplayName("评审张三");
+        return user;
     }
 }

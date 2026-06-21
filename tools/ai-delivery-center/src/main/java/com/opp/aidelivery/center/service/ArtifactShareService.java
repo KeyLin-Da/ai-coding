@@ -16,8 +16,10 @@ import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -131,19 +133,47 @@ public class ArtifactShareService {
 
     @Transactional(rollbackFor = Exception.class)
     public ArtifactSharePublicVO resolvePublicShare(String token) {
-        if (!StringUtils.hasText(token)) {
-            throw new BusinessException(AiDeliveryErrorCode.ARTIFACT_SHARE_INVALID);
-        }
-        ArtifactShareEntity share = artifactShareMapper.selectOne(new LambdaQueryWrapper<ArtifactShareEntity>()
-            .eq(ArtifactShareEntity::getTokenHash, sha256Hex(token.trim()))
-            .last("LIMIT 1"));
-        if (share == null || !STATUS_ENABLED.equals(share.getStatus()) || isExpired(share.getExpireAt())) {
-            throw new BusinessException(AiDeliveryErrorCode.ARTIFACT_SHARE_INVALID);
-        }
+        ArtifactShareEntity share = loadEnabledPublicShare(token);
         share.setAccessCount(share.getAccessCount() == null ? 1L : share.getAccessCount() + 1L);
         share.setLastAccessAt(LocalDateTime.now());
         artifactShareMapper.updateById(share);
         return toPublicVO(share);
+    }
+
+    public ArtifactSharePublicVO resolvePublicShareForAnnotations(String token) {
+        ArtifactShareEntity share = loadEnabledPublicShare(token);
+        if (!intToBoolean(share.getShowAnnotations())) {
+            throw new BusinessException(AiDeliveryErrorCode.ARTIFACT_SHARE_ANNOTATIONS_DISABLED);
+        }
+        return toPublicVO(share);
+    }
+
+    public void assertRealtimeAnnotationSubscription(String token, Long shareId, String realtimeChannel) {
+        ArtifactShareEntity share = loadEnabledPublicShare(token);
+        boolean valid = intToBoolean(share.getShowAnnotations())
+            && share.getId().equals(shareId)
+            && share.getTokenHash().equals(realtimeChannel)
+            && isTechDesignArtifact(share.getArtifactPath());
+        if (!valid) {
+            throw new BusinessException(AiDeliveryErrorCode.WEBSOCKET_SUBSCRIBE_DENIED);
+        }
+    }
+
+    public Map<Long, String> listRealtimeAnnotationChannels(Long requirementPk) {
+        if (requirementPk == null) {
+            return new LinkedHashMap<>();
+        }
+        Map<Long, String> channels = new LinkedHashMap<>();
+        List<ArtifactShareEntity> shares = artifactShareMapper.selectList(new LambdaQueryWrapper<ArtifactShareEntity>()
+            .eq(ArtifactShareEntity::getRequirementPk, requirementPk)
+            .eq(ArtifactShareEntity::getVisibility, VISIBILITY_PUBLIC)
+            .eq(ArtifactShareEntity::getStatus, STATUS_ENABLED));
+        for (ArtifactShareEntity share : shares) {
+            if (intToBoolean(share.getShowAnnotations()) && !isExpired(share.getExpireAt()) && isTechDesignArtifact(share.getArtifactPath())) {
+                channels.put(share.getId(), share.getTokenHash());
+            }
+        }
+        return channels;
     }
 
     private RequirementEntity loadRequirement(ArtifactShareCreateRequest request) {
@@ -165,6 +195,19 @@ public class ArtifactShareService {
             throw new BusinessException(AiDeliveryErrorCode.ACCESS_DENIED, "需求不属于当前项目");
         }
         return requirement;
+    }
+
+    private ArtifactShareEntity loadEnabledPublicShare(String token) {
+        if (!StringUtils.hasText(token)) {
+            throw new BusinessException(AiDeliveryErrorCode.ARTIFACT_SHARE_INVALID);
+        }
+        ArtifactShareEntity share = artifactShareMapper.selectOne(new LambdaQueryWrapper<ArtifactShareEntity>()
+            .eq(ArtifactShareEntity::getTokenHash, sha256Hex(token.trim()))
+            .last("LIMIT 1"));
+        if (share == null || !STATUS_ENABLED.equals(share.getStatus()) || isExpired(share.getExpireAt())) {
+            throw new BusinessException(AiDeliveryErrorCode.ARTIFACT_SHARE_INVALID);
+        }
+        return share;
     }
 
     private String normalizeAndValidateArtifactPath(String requirementId, String artifactPath) {
@@ -260,6 +303,10 @@ public class ArtifactShareService {
         return expireAt != null && expireAt.isBefore(LocalDateTime.now());
     }
 
+    private boolean isTechDesignArtifact(String artifactPath) {
+        return artifactPath != null && artifactPath.matches("^docs/[^/]+/technical-design/design_review\\.md$");
+    }
+
     private int booleanToInt(Boolean value) {
         return Boolean.FALSE.equals(value) ? 0 : 1;
     }
@@ -299,6 +346,7 @@ public class ArtifactShareService {
         vo.setExpireAt(share.getExpireAt());
         vo.setShowAnnotations(intToBoolean(share.getShowAnnotations()));
         vo.setAllowDownload(intToBoolean(share.getAllowDownload()));
+        vo.setRealtimeChannel(share.getTokenHash());
         return vo;
     }
 }

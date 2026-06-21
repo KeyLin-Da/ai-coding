@@ -15,4 +15,5 @@ public class ArtifactSharePublicVO {
     private LocalDateTime expireAt;
     private Boolean showAnnotations;
     private Boolean allowDownload;
+    private String realtimeChannel;
 }

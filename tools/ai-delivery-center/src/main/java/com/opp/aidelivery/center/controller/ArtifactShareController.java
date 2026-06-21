@@ -2,9 +2,13 @@ package com.opp.aidelivery.center.controller;
 
 import com.opp.aidelivery.center.common.api.ApiResponse;
 import com.opp.aidelivery.center.model.dto.ArtifactShareCreateRequest;
+import com.opp.aidelivery.center.model.dto.TechDesignAnnotationCreateRequest;
 import com.opp.aidelivery.center.model.vo.ArtifactSharePublicVO;
 import com.opp.aidelivery.center.model.vo.ArtifactShareVO;
+import com.opp.aidelivery.center.model.vo.TechDesignAnnotationVO;
 import com.opp.aidelivery.center.service.ArtifactShareService;
+import com.opp.aidelivery.center.service.TechDesignAnnotationService;
+import com.opp.aidelivery.center.security.CurrentUser;
 import java.util.List;
 import javax.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -23,6 +27,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class ArtifactShareController {
 
     private final ArtifactShareService artifactShareService;
+    private final TechDesignAnnotationService techDesignAnnotationService;
 
     @PostMapping("/artifact-shares/public")
     public ApiResponse<ArtifactShareVO> createPublicShare(
@@ -61,5 +66,42 @@ public class ArtifactShareController {
     @GetMapping("/public-artifact-shares/{token}")
     public ApiResponse<ArtifactSharePublicVO> resolvePublicShare(@PathVariable String token) {
         return ApiResponse.ok(artifactShareService.resolvePublicShare(token));
+    }
+
+    @GetMapping("/public-artifact-shares/{token}/tech-design-annotations")
+    public ApiResponse<List<TechDesignAnnotationVO>> listPublicShareTechDesignAnnotations(
+        @PathVariable String token,
+        @RequestParam(required = false) String versionId
+    ) {
+        ArtifactSharePublicVO share = artifactShareService.resolvePublicShareForAnnotations(token);
+        return ApiResponse.ok(techDesignAnnotationService.listPublic(share.getRequirementPk(), versionId));
+    }
+
+    @PostMapping("/public-artifact-shares/{token}/tech-design-annotations")
+    public ApiResponse<List<TechDesignAnnotationVO>> createPublicShareTechDesignAnnotation(
+        @PathVariable String token,
+        @Valid @RequestBody TechDesignAnnotationCreateRequest request
+    ) {
+        ArtifactSharePublicVO share = artifactShareService.resolvePublicShareForAnnotations(token);
+        return ApiResponse.ok(techDesignAnnotationService.createPublic(
+            CurrentUser.id(),
+            share.getRequirementPk(),
+            share.getArtifactPath(),
+            request
+        ));
+    }
+
+    @PostMapping("/public-artifact-shares/{token}/tech-design-annotations/{annotationId}/delete")
+    public ApiResponse<List<TechDesignAnnotationVO>> deletePublicShareTechDesignAnnotation(
+        @PathVariable String token,
+        @PathVariable String annotationId
+    ) {
+        ArtifactSharePublicVO share = artifactShareService.resolvePublicShareForAnnotations(token);
+        return ApiResponse.ok(techDesignAnnotationService.deletePublic(
+            CurrentUser.id(),
+            share.getRequirementPk(),
+            share.getArtifactPath(),
+            annotationId
+        ));
     }
 }

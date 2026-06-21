@@ -21,7 +21,9 @@ public class TechDesignAnnotationVO {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private Long createdBy;
+    private String createdByName;
     private Long updatedBy;
+    private String updatedByName;
     private LocalDateTime consumedAt;
     private String consumedRunId;
 }

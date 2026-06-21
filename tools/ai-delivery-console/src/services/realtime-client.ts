@@ -13,6 +13,14 @@ export interface RealtimeDomainEvent {
   createdAt?: string;
 }
 
+export interface RealtimeShareAnnotationEvent {
+  shareId: number;
+  eventId: number;
+  eventType: 'tech-design.annotation.changed';
+  operation?: string;
+  revision?: number;
+}
+
 interface RealtimeEventPage {
   events?: RealtimeDomainEvent[];
   refreshRequired?: boolean;
@@ -48,9 +56,16 @@ interface RunSubscription {
   afterSeq: number;
 }
 
+interface ShareSubscription {
+  shareId: number;
+  token: string;
+  realtimeChannel: string;
+}
+
 export interface RealtimeClientOptions {
   onDomainEvent?: (event: RealtimeDomainEvent) => void;
   onRunEvent?: (event: RunEvent, raw: CenterRunEvent) => void;
+  onShareAnnotationEvent?: (event: RealtimeShareAnnotationEvent) => void;
   onRefreshRequired?: (scope?: string) => void;
   onStatus?: (status: 'CONNECTING' | 'CONNECTED' | 'DISCONNECTED' | 'ERROR') => void;
 }
@@ -65,6 +80,7 @@ export class RealtimeClient {
   private processedEventIds = new Set<number>();
   private projectSubscriptions = new Map<string, ProjectSubscription>();
   private runSubscriptions = new Map<string, RunSubscription>();
+  private shareSubscriptions = new Map<string, ShareSubscription>();
   private activeDestinations = new Set<string>();
   private reconnectTimer?: ReturnType<typeof setTimeout>;
   private reconnectAttempts = 0;
@@ -83,8 +99,8 @@ export class RealtimeClient {
       return this.connectPromise;
     }
     const runtime = getApiRuntimeConfig();
-    if (!runtime.userId || !runtime.projectId || !runtime.clientSessionId) {
-      throw new Error('远程实时协作需要配置 userId、projectId 和 clientSessionId');
+    if (!runtime.userId || !runtime.clientSessionId) {
+      throw new Error('远程实时协作需要配置 userId 和 clientSessionId');
     }
     this.options.onStatus?.('CONNECTING');
     const ticket = await apiClient.createWsTicket(runtime.clientSessionId);
@@ -144,6 +160,20 @@ export class RealtimeClient {
     }
   }
 
+  async subscribeArtifactShare(shareId: string | number, token: string, realtimeChannel: string) {
+    const subscription: ShareSubscription = {
+      shareId: Number(shareId),
+      token,
+      realtimeChannel
+    };
+    this.shareSubscriptions.set(String(subscription.shareId), subscription);
+    const wasConnected = this.connected;
+    await this.connect();
+    if (wasConnected) {
+      this.sendShareSubscription(subscription);
+    }
+  }
+
   ack(projectId: string | number, lastEventId: number) {
     if (!this.connected) {
       return;
@@ -181,14 +211,15 @@ export class RealtimeClient {
     this.connectPromise = undefined;
   }
 
-  private subscribe(destination: string) {
+  private subscribe(destination: string, headers: Record<string, string> = {}) {
     if (this.activeDestinations.has(destination)) {
       return;
     }
     this.activeDestinations.add(destination);
     this.sendFrame('SUBSCRIBE', {
       id: `sub-${this.nextSubscriptionId++}`,
-      destination
+      destination,
+      ...headers
     });
   }
 
@@ -234,6 +265,13 @@ export class RealtimeClient {
     if (!payload) {
       return;
     }
+    if (destination.includes('/topic/artifact-shares/')) {
+      const event = payload as RealtimeShareAnnotationEvent;
+      if (event && typeof event.shareId === 'number' && typeof event.eventId === 'number') {
+        this.options.onShareAnnotationEvent?.(event);
+      }
+      return;
+    }
     if (destination.includes('/run-events') || destination.includes('/topic/runs/')) {
       const events = Array.isArray(payload) ? payload : [payload];
       for (const event of events as CenterRunEvent[]) {
@@ -277,6 +315,9 @@ export class RealtimeClient {
     for (const subscription of this.runSubscriptions.values()) {
       this.sendRunSubscription(subscription);
     }
+    for (const subscription of this.shareSubscriptions.values()) {
+      this.sendShareSubscription(subscription);
+    }
   }
 
   private sendProjectSubscription(subscription: ProjectSubscription) {
@@ -297,8 +338,15 @@ export class RealtimeClient {
     this.sendJson(`/app/runs/${subscription.runId}/subscribe`, { afterSeq: subscription.afterSeq });
   }
 
+  private sendShareSubscription(subscription: ShareSubscription) {
+    this.subscribe(
+      `/topic/artifact-shares/${subscription.shareId}/${subscription.realtimeChannel}/annotations`,
+      { 'share-token': subscription.token }
+    );
+  }
+
   private scheduleReconnect() {
-    if (this.destroyed || this.reconnectTimer || (!this.projectSubscriptions.size && !this.runSubscriptions.size)) {
+    if (this.destroyed || this.reconnectTimer || (!this.projectSubscriptions.size && !this.runSubscriptions.size && !this.shareSubscriptions.size)) {
       return;
     }
     const delay = Math.min(1000 * 2 ** this.reconnectAttempts, 10000);

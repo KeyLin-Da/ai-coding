@@ -41,6 +41,7 @@ public enum AiDeliveryErrorCode {
     ARTIFACT_SHARE_INVALID("B70079", "分享链接无效或已过期"),
     ARTIFACT_SHARE_PATH_DENIED("B70080", "分享产物路径不允许访问"),
     ARTIFACT_SHARE_UNREADABLE("B70081", "分享产物当前不可读取"),
+    ARTIFACT_SHARE_ANNOTATIONS_DISABLED("B70082", "公开分享未开启批注展示"),
     INTERNAL_ERROR("B70999", "系统异常");
 
     private final String code;

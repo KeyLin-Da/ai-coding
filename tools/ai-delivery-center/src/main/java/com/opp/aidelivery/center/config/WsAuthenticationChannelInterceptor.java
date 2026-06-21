@@ -7,6 +7,7 @@ import com.opp.aidelivery.center.mapper.RunMapper;
 import com.opp.aidelivery.center.model.entity.RequirementEntity;
 import com.opp.aidelivery.center.model.entity.RunEntity;
 import com.opp.aidelivery.center.service.PermissionService;
+import com.opp.aidelivery.center.service.ArtifactShareService;
 import com.opp.aidelivery.center.service.WsSessionService;
 import com.opp.aidelivery.center.service.WsTicketService;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +26,7 @@ public class WsAuthenticationChannelInterceptor implements ChannelInterceptor {
     private final WsTicketService wsTicketService;
     private final WsSessionService wsSessionService;
     private final PermissionService permissionService;
+    private final ArtifactShareService artifactShareService;
     private final RequirementMapper requirementMapper;
     private final RunMapper runMapper;
 
@@ -76,6 +78,13 @@ public class WsAuthenticationChannelInterceptor implements ChannelInterceptor {
             permissionService.assertProjectMember(principal.getUserId(), requirement.getProjectId());
             return;
         }
+        if (destination.startsWith("/topic/artifact-shares/")) {
+            Long shareId = segmentAsLong(destination, 3);
+            String realtimeChannel = segment(destination, 4);
+            String shareToken = accessor.getFirstNativeHeader("share-token");
+            artifactShareService.assertRealtimeAnnotationSubscription(shareToken, shareId, realtimeChannel);
+            return;
+        }
         if (destination.startsWith("/topic/runs/")) {
             Long runId = segmentAsLong(destination, 3);
             RunEntity run = runMapper.selectById(runId);
@@ -100,10 +109,14 @@ public class WsAuthenticationChannelInterceptor implements ChannelInterceptor {
     }
 
     private Long segmentAsLong(String destination, int index) {
+        return Long.valueOf(segment(destination, index));
+    }
+
+    private String segment(String destination, int index) {
         String[] segments = destination.split("/");
         if (segments.length <= index) {
             throw new BusinessException(AiDeliveryErrorCode.WEBSOCKET_SUBSCRIBE_DENIED);
         }
-        return Long.valueOf(segments[index]);
+        return segments[index];
     }
 }

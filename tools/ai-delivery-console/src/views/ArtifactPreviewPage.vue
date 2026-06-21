@@ -5,6 +5,8 @@
       :content="content"
       :loading="loading"
       :project-id="projectId"
+      :requirement-pk="workflow.current?.id"
+      can-create-annotation
       can-share
       @share="openShareDialog"
     />
@@ -13,17 +15,19 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import type { ArtifactRef } from '@shared/workflow';
 import { apiClient } from '@/api/client';
 import { useProjectStore } from '@/stores/project';
+import { useWorkflowStore } from '@/stores/workflow';
 import ArtifactPreviewShell from '@/components/ArtifactPreviewShell.vue';
 import ArtifactShareDialog from '@/components/ArtifactShareDialog.vue';
 
 const route = useRoute();
 const project = useProjectStore();
+const workflow = useWorkflowStore();
 const loading = ref(false);
 const artifact = ref<ArtifactRef>();
 const content = ref('');
@@ -48,6 +52,7 @@ async function loadArtifact() {
   }
   loading.value = true;
   try {
+    workflow.stopWorkflowStream();
     if (!project.projects.length) {
       await project.loadProjects();
     }
@@ -61,12 +66,18 @@ async function loadArtifact() {
     const result = await apiClient.readArtifact(artifactPath.value, projectId.value);
     artifact.value = result.artifact;
     content.value = result.content;
+    if (requirementId.value) {
+      await workflow.loadRequirement(requirementId.value);
+      workflow.streamWorkflowEvents();
+    }
   } catch (error: any) {
     ElMessage.error(error.message || '读取分享产物失败');
   } finally {
     loading.value = false;
   }
 }
+
+onUnmounted(() => workflow.stopWorkflowStream());
 
 function openShareDialog() {
   if (!artifact.value) {

@@ -264,6 +264,7 @@ export interface ArtifactShareVO {
   createdAt?: string;
   token?: string;
   publicPath?: string;
+  realtimeChannel?: string;
 }
 
 export interface PublicArtifactPreviewPayload {
@@ -721,6 +722,30 @@ export const apiClient = {
   readPublicArtifactSharePreview(token: string) {
     return runnerRequest<PublicArtifactPreviewPayload>(
       `/api/ai-delivery/public-artifact-shares/${encodeURIComponent(token)}/preview`
+    );
+  },
+  listPublicTechDesignAnnotations(token: string, versionId?: string) {
+    const suffix = versionId ? `?versionId=${encodeURIComponent(versionId)}` : '';
+    return runnerRequest<TechDesignAnnotationList>(
+      `/api/ai-delivery/public-artifact-shares/${encodeURIComponent(token)}/tech-design-annotations${suffix}`
+    );
+  },
+  createPublicTechDesignAnnotation(token: string, input: TechDesignAnnotationCreateInput) {
+    return runnerRequest<TechDesignAnnotationList>(
+      `/api/ai-delivery/public-artifact-shares/${encodeURIComponent(token)}/tech-design-annotations`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input)
+      }
+    );
+  },
+  deletePublicTechDesignAnnotation(token: string, annotationId: string) {
+    return runnerRequest<TechDesignAnnotationList>(
+      `/api/ai-delivery/public-artifact-shares/${encodeURIComponent(token)}/tech-design-annotations/${encodeURIComponent(annotationId)}/delete`,
+      {
+        method: 'POST',
+        body: JSON.stringify({})
+      }
     );
   },
   listTechDesignVersions(requirementId: string) {

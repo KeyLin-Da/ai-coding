@@ -36,8 +36,12 @@ import {
   centerTechDesignAnnotationsEnabled,
   consumeCenterTechDesignAnnotationsAndSnapshot,
   createCenterTechDesignAnnotation,
+  createPublicCenterTechDesignAnnotation,
   deleteCenterTechDesignAnnotation,
+  deletePublicCenterTechDesignAnnotation,
+  filterTechDesignAnnotationsByContentHash,
   listCenterTechDesignAnnotations,
+  listPublicCenterTechDesignAnnotations,
   prepareCenterTechDesignAnnotationInput,
   updateCenterTechDesignAnnotationStatus
 } from './services/center-tech-design-annotations';
@@ -93,6 +97,7 @@ interface ArtifactSharePayload {
   allowDownload?: boolean;
   token?: string;
   publicPath?: string;
+  realtimeChannel?: string;
 }
 
 async function parseBody<T>(request: IncomingMessage): Promise<T> {
@@ -342,7 +347,7 @@ function statusForError(error: any): number {
     return status;
   }
   const unauthorizedCodes = new Set(['B70001', 'B70061', 'B70062']);
-  const forbiddenCodes = new Set(['B70002', 'B70046', 'B70063', 'B70080']);
+  const forbiddenCodes = new Set(['B70002', 'B70046', 'B70063', 'B70080', 'B70082']);
   const notFoundCodes = new Set(['ENOENT', 'B70004', 'B70079', 'B70081']);
   const badRequestCodes = new Set(['VALIDATION_ERROR', 'B70003', 'B70043', 'B70065', 'B70066', 'B70077']);
   const conflictCodes = new Set([
@@ -1536,6 +1541,81 @@ export function createRouter(workspaceRoot: string) {
             allowDownload: share.allowDownload !== false
           }
         });
+        return;
+      }
+
+      const publicAnnotationsMatch = match(pathname, /^\/api\/ai-delivery\/public-artifact-shares\/([^/]+)\/tech-design-annotations$/);
+      if (request.method === 'GET' && publicAnnotationsMatch) {
+        const token = decodeURIComponent(publicAnnotationsMatch[1]);
+        const share = await resolvePublicShare(requestContext, token);
+        if (share.showAnnotations === false) {
+          throw localServiceError('B70082', '公开分享未开启批注展示');
+        }
+        const artifactPath = assertPreviewableArtifactPath(share.requirementId, share.artifactPath);
+        if (!artifactPath.match(/^docs\/[^/]+\/technical-design\/design_review\.md$/)) {
+          throw localServiceError('B70080', '公开分享产物不是技术方案文档');
+        }
+        const artifactRoot = await resolvePublicArtifactRoot(requestContext, { ...share, artifactPath });
+        const artifactResult = await readArtifact(artifactRoot, artifactPath);
+        if (!artifactResult.artifact.exists) {
+          throw localServiceError('B70081', '分享产物当前不可读取');
+        }
+        const result = await listPublicCenterTechDesignAnnotations(
+          requestContext,
+          token,
+          share.requirementId,
+          url.searchParams.get('versionId') || undefined
+        );
+        send(response, 200, { data: filterTechDesignAnnotationsByContentHash(result, artifactResult.artifact.hash) });
+        return;
+      }
+
+      if (request.method === 'POST' && publicAnnotationsMatch) {
+        if (!requestContext.accessToken && !requestContext.userId) {
+          throw localServiceError('B70001', '请先登录后新增批注');
+        }
+        const token = decodeURIComponent(publicAnnotationsMatch[1]);
+        const share = await resolvePublicShare(requestContext, token);
+        if (share.showAnnotations === false) {
+          throw localServiceError('B70082', '公开分享未开启批注展示');
+        }
+        const artifactPath = assertPreviewableArtifactPath(share.requirementId, share.artifactPath);
+        if (!artifactPath.match(/^docs\/[^/]+\/technical-design\/design_review\.md$/)) {
+          throw localServiceError('B70080', '公开分享产物不是技术方案文档');
+        }
+        const artifactRoot = await resolvePublicArtifactRoot(requestContext, { ...share, artifactPath });
+        const input = await parseBody<any>(request);
+        const result = await createPublicCenterTechDesignAnnotation(artifactRoot, requestContext, token, { ...share, artifactPath }, input);
+        const artifactResult = await readArtifact(artifactRoot, artifactPath);
+        send(response, 200, { data: filterTechDesignAnnotationsByContentHash(result, artifactResult.artifact.hash) });
+        return;
+      }
+
+      const publicAnnotationDeleteMatch = match(
+        pathname,
+        /^\/api\/ai-delivery\/public-artifact-shares\/([^/]+)\/tech-design-annotations\/([^/]+)\/delete$/
+      );
+      if (request.method === 'POST' && publicAnnotationDeleteMatch) {
+        if (!requestContext.accessToken && !requestContext.userId) {
+          throw localServiceError('B70001', '请先登录后删除批注');
+        }
+        const token = decodeURIComponent(publicAnnotationDeleteMatch[1]);
+        const annotationId = decodeURIComponent(publicAnnotationDeleteMatch[2]);
+        const share = await resolvePublicShare(requestContext, token);
+        if (share.showAnnotations === false) {
+          throw localServiceError('B70082', '公开分享未开启批注展示');
+        }
+        const artifactPath = assertPreviewableArtifactPath(share.requirementId, share.artifactPath);
+        if (!artifactPath.match(/^docs\/[^/]+\/technical-design\/design_review\.md$/)) {
+          throw localServiceError('B70080', '公开分享产物不是技术方案文档');
+        }
+        const artifactRoot = await resolvePublicArtifactRoot(requestContext, { ...share, artifactPath });
+        const artifactResult = await readArtifact(artifactRoot, artifactPath);
+        if (!artifactResult.artifact.exists) {
+          throw localServiceError('B70081', '分享产物当前不可读取');
+        }
+        const result = await deletePublicCenterTechDesignAnnotation(requestContext, token, share.requirementId, annotationId);
+        send(response, 200, { data: filterTechDesignAnnotationsByContentHash(result, artifactResult.artifact.hash) });
         return;
       }
 
