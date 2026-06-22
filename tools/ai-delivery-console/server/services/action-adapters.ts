@@ -6,6 +6,7 @@ import type { RequirementWorkflow } from '../../shared/workflow';
 import { createRunId, appendRunEvent } from './run-log';
 import { assertInsideWorkspace, normalizeRequirementId } from './workspace';
 import { getAgentProvider, startAgentInTerminal, startAgentProcess } from './agent-providers';
+import type { CenterRunnerConfig } from './center-runner-adapter';
 import { normalizePrdClarification } from './workflow-repository';
 import { hasStagedTrackedChanges, readGitChanges } from './git-changes';
 import { buildArtifactPublishEvents, captureControlledArtifactSnapshot } from './manual-artifact-sharing';
@@ -461,7 +462,7 @@ export async function executeAction(
   workflow: RequirementWorkflow,
   action: ActionInput,
   onRunUpdate: (run: RunRecord) => Promise<void> = async () => undefined,
-  options: { projectPaths?: string[] } = {}
+  options: { projectPaths?: string[]; centerConfig?: CenterRunnerConfig } = {}
 ): Promise<RunRecord> {
   const normalizedAction =
     action.actionType === 'DESIGN_QUESTION' && !asString(action.params?.outputPath)
@@ -585,7 +586,7 @@ export async function executeAction(
   };
   return ['TERMINAL', 'INTERACTIVE_TERMINAL'].includes(executionMode(params))
     ? startAgentInTerminal(workspaceRoot, workflow, run, provider, commandText, projectPaths)
-    : startAgentProcess(workspaceRoot, workflow, run, provider, commandText, onRunUpdateWithArtifacts, projectPaths);
+    : startAgentProcess(workspaceRoot, workflow, run, provider, commandText, onRunUpdateWithArtifacts, projectPaths, options.centerConfig);
 }
 
 export const internalForTests = {

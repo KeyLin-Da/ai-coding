@@ -320,6 +320,99 @@ describe('apiClient Runner docs endpoints', () => {
     });
   });
 
+  it('中心 runId 的 token usage 明细从中心 API 读取并归一化空值', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      okResponse({
+        runId: 100,
+        summary: {
+          runId: 100,
+          totalTokens: 12,
+          inputTokens: 10,
+          outputTokens: 2,
+          detailCount: 1,
+          runCount: 1
+        },
+        details: [
+          {
+            id: 1,
+            runId: 100,
+            sourceEventType: 'turn.completed',
+            inputTokens: 10,
+            outputTokens: 2,
+            totalTokens: 12
+          }
+        ]
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const usage = await apiClient.getRunTokenUsages('172014', '100');
+
+    expect(fetchMock).toHaveBeenCalledWith('/center-api/api/ai-delivery/runs/100/token-usages', expect.any(Object));
+    expect(usage.summary).toMatchObject({
+      totalTokens: 12,
+      cachedInputTokens: 0,
+      reasoningOutputTokens: 0
+    });
+    expect(usage.details[0].sourceEventType).toBe('turn.completed');
+  });
+
+  it('本地字符串 runId 的 token usage 从本地 TOKEN_USAGE 事件汇总', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      okResponse([
+        {
+          time: '2026-06-22T10:20:00.000Z',
+          type: 'INFO',
+          level: 'INFO',
+          message: 'Token usage',
+          text: '{"type":"turn.completed"}',
+          agentId: 'codex',
+          data: {
+            kind: 'TOKEN_USAGE',
+            sourceEventType: 'turn.completed',
+            usage: {
+              inputTokens: 10,
+              cachedInputTokens: 4,
+              outputTokens: 2,
+              reasoningOutputTokens: 1,
+              totalTokens: 12
+            }
+          }
+        }
+      ])
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const usage = await apiClient.getRunTokenUsages('172014', 'run-local');
+
+    expect(fetchMock).toHaveBeenCalledWith('/runner-api/api/ai-delivery/runs/run-local/events?requirementId=172014', expect.any(Object));
+    expect(usage.summary.totalTokens).toBe(12);
+    expect(usage.details[0]).toMatchObject({
+      runId: 'run-local',
+      agentId: 'codex',
+      inputTokens: 10
+    });
+  });
+
+  it('需求 token usage 汇总从中心 API 读取', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      okResponse({
+        requirementPk: 100,
+        summary: { totalTokens: 20, inputTokens: 15, outputTokens: 5, detailCount: 2, runCount: 1 },
+        latestRunSummary: { runId: 900, totalTokens: 12, inputTokens: 10, outputTokens: 2, detailCount: 1, runCount: 1 },
+        stageSummaries: [],
+        agentSummaries: []
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const usage = await apiClient.getRequirementTokenUsageSummary(100);
+
+    expect(fetchMock).toHaveBeenCalledWith('/center-api/api/ai-delivery/requirements/100/token-usage-summary', expect.any(Object));
+    expect(usage.summary.totalTokens).toBe(20);
+    expect(usage.latestRunSummary.runId).toBe(900);
+  });
+
   it('本地 Runner 字符串 runId 的实时日志使用 Runner SSE', () => {
     const eventSource = vi.fn();
     vi.stubGlobal('EventSource', eventSource);

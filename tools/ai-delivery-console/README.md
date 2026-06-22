@@ -413,8 +413,16 @@ CODEX_INTERACTIVE_COMMAND='codex --sandbox workspace-write -C {workspaceRoot} {p
 
 1. Runner 会把技能动作包装成 runtime 下的 `prompts/{runId}.md`
 2. 将 stdout/stderr 写入 runtime 下的 `runs/{runId}.jsonl`
-3. Agent 输出上传为中心 run event，并通过 WebSocket run 订阅追加到页面日志
-4. 用户可以复制生成的命令文本交给 Agent 执行；执行完成后在页面点击「刷新产物」重新索引文件。
+3. Codex 后台执行默认使用 JSON 输出，Runner 会解析 `turn.completed.usage` 并记录 token 明细
+4. Agent 输出上传为中心 run event，并通过 WebSocket run 订阅追加到页面日志
+5. Center runId 场景会把 token usage 入库；本地字符串 runId 仅保留日志展示并跳过中心统计
+6. 用户可以复制生成的命令文本交给 Agent 执行；执行完成后在页面点击「刷新产物」重新索引文件。
+
+### Token 用量统计
+
+Codex 后台执行产生结构化 usage 时，控制台会在需求详情、阶段工具栏、运行日志抽屉和需求列表展示 token 用量。统计字段包括输入 token、缓存输入 token、输出 token、推理输出 token 和总 token。
+
+这里展示的 token 仅表示模型请求/响应的 token 数量，用于排查高消耗运行和做需求维度统计，不代表人民币、美元或任何实际账单金额。费用核算仍以模型供应商或组织账单系统为准。
 
 ### 本地终端执行
 

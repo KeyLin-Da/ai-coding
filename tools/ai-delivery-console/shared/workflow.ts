@@ -126,6 +126,91 @@ export interface RunRecord {
   error?: string;
 }
 
+export interface TokenUsageSummary {
+  runId?: string | number;
+  totalTokens: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  reasoningOutputTokens: number;
+  runCount: number;
+  detailCount: number;
+  latestOccurredAt?: string;
+}
+
+export interface RunTokenUsageDetail {
+  id?: string | number;
+  runId: string | number;
+  requirementPk?: string | number;
+  jobId?: string | number;
+  clientSessionId?: string | number;
+  agentId?: string;
+  stage?: WorkflowStage;
+  implementationStep?: WorkflowImplementationStep;
+  model?: string;
+  sourceEventType: string;
+  usageFingerprint?: string;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  reasoningOutputTokens: number;
+  totalTokens: number;
+  rawUsageJson?: string;
+  occurredAt?: string;
+  createdAt?: string;
+}
+
+export interface RunTokenUsageRun {
+  runId: string | number;
+  summary: TokenUsageSummary;
+  details: RunTokenUsageDetail[];
+}
+
+export interface TokenUsageBucket {
+  bucketType: 'stage' | 'agent' | string;
+  bucketKey: string;
+  summary: TokenUsageSummary;
+}
+
+export interface RequirementTokenUsageSummary {
+  requirementPk?: string | number;
+  summary: TokenUsageSummary;
+  latestRunSummary: TokenUsageSummary;
+  stageSummaries: TokenUsageBucket[];
+  agentSummaries: TokenUsageBucket[];
+}
+
+export function emptyTokenUsageSummary(runId?: string | number): TokenUsageSummary {
+  return {
+    runId,
+    totalTokens: 0,
+    inputTokens: 0,
+    cachedInputTokens: 0,
+    outputTokens: 0,
+    reasoningOutputTokens: 0,
+    runCount: 0,
+    detailCount: 0
+  };
+}
+
+export function emptyRunTokenUsage(runId: string | number): RunTokenUsageRun {
+  return {
+    runId,
+    summary: emptyTokenUsageSummary(runId),
+    details: []
+  };
+}
+
+export function emptyRequirementTokenUsage(requirementPk?: string | number): RequirementTokenUsageSummary {
+  return {
+    requirementPk,
+    summary: emptyTokenUsageSummary(),
+    latestRunSummary: emptyTokenUsageSummary(),
+    stageSummaries: [],
+    agentSummaries: []
+  };
+}
+
 export interface PrdSourceFile {
   id: string;
   name: string;

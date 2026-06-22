@@ -5,7 +5,8 @@ import {
   buildCenterJobCreatePayload,
   createCenterJob,
   mapRunEventToCenter,
-  uploadCenterRunEvent
+  uploadCenterRunEvent,
+  uploadCenterRunTokenUsage
 } from '../../server/services/center-runner-adapter';
 
 function workflow(): RequirementWorkflow {
@@ -106,6 +107,45 @@ describe('center-runner-adapter', () => {
       'http://127.0.0.1:8728/api/ai-delivery/run-events',
       expect.objectContaining({
         method: 'POST'
+      })
+    );
+  });
+
+  it('向中心服务上传 token usage payload', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true, data: { detail: { id: 1 } } })
+    });
+
+    await uploadCenterRunTokenUsage(
+      {
+        centerBaseUrl: 'http://127.0.0.1:8728',
+        userId: 1,
+        clientSessionId: 10,
+        fetchImpl: fetchImpl as unknown as typeof fetch
+      },
+      {
+        runId: 900,
+        seq: 3,
+        stage: 'TECH_DESIGN',
+        agentId: 'codex',
+        sourceEventType: 'turn.completed',
+        usageFingerprint: 'abc',
+        usage: {
+          inputTokens: 10,
+          cachedInputTokens: 4,
+          outputTokens: 2,
+          reasoningOutputTokens: 1
+        },
+        rawUsageJson: '{"input_tokens":10}'
+      }
+    );
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://127.0.0.1:8728/api/ai-delivery/run-token-usages',
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.stringContaining('"sourceEventType":"turn.completed"')
       })
     );
   });

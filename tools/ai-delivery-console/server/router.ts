@@ -1309,7 +1309,15 @@ export function createRouter(workspaceRoot: string) {
               latest.runs.unshift(updatedRun);
             }
             await repository.save(latest);
-          }, { projectPaths });
+          }, {
+            projectPaths,
+            centerConfig: {
+              centerBaseUrl: requestContext.centerBaseUrl || 'http://127.0.0.1:8728',
+              userId: requestContext.userId,
+              clientSessionId: requestContext.clientSessionId || 0,
+              accessToken: requestContext.accessToken
+            }
+          });
           
           const stage = run.stage || stageForAction(effectiveAction.actionType);
           if (stage) {

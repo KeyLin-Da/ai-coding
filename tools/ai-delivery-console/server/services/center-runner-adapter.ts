@@ -24,6 +24,25 @@ export interface CenterRunEventPayload {
   payloadJson?: string;
 }
 
+export interface CenterRunTokenUsagePayload {
+  runId: number;
+  seq?: number;
+  stage?: string;
+  implementationStep?: string;
+  agentId?: string;
+  model?: string;
+  sourceEventType: string;
+  usageFingerprint?: string;
+  usage: {
+    inputTokens: number;
+    cachedInputTokens: number;
+    outputTokens: number;
+    reasoningOutputTokens: number;
+  };
+  rawUsageJson?: string;
+  occurredAt?: string;
+}
+
 export function buildCenterJobCreatePayload(workflow: RequirementWorkflow, action: ActionInput): CenterJobCreatePayload {
   validateActionInput('', action, { skipPathValidation: true });
   const requirementPk = Number(action.params?.requirementPk || action.params?.requirementIdPk || 0);
@@ -58,6 +77,10 @@ export async function createCenterJob(config: CenterRunnerConfig, payload: Cente
 
 export async function uploadCenterRunEvent(config: CenterRunnerConfig, payload: CenterRunEventPayload): Promise<unknown> {
   return postJson(config, '/api/ai-delivery/run-events', payload);
+}
+
+export async function uploadCenterRunTokenUsage(config: CenterRunnerConfig, payload: CenterRunTokenUsagePayload): Promise<unknown> {
+  return postJson(config, '/api/ai-delivery/run-token-usages', payload);
 }
 
 export async function completeCenterJob(config: CenterRunnerConfig, jobId: number): Promise<unknown> {

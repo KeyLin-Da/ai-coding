@@ -81,6 +81,14 @@
           <span :class="{ muted: !row.runs[0] }">{{ recentRunText(row.runs[0]) }}</span>
         </template>
       </el-table-column>
+      <el-table-column label="Token" min-width="130">
+        <template #default="{ row }">
+          <div class="token-cell" :class="{ empty: !tokenUsageFor(row).summary.detailCount }">
+            <strong>{{ tokenUsageFor(row).summary.detailCount ? formatTokenCount(tokenUsageFor(row).summary.totalTokens) : '暂无' }}</strong>
+            <small v-if="tokenUsageFor(row).latestRunSummary.detailCount">最近 {{ formatTokenCount(tokenUsageFor(row).latestRunSummary.totalTokens) }}</small>
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column label="协作" min-width="180">
         <template #default="{ row }">
           <div class="collaboration-tags">
@@ -165,7 +173,8 @@ import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { DocumentAdd, Edit, Plus, Search, View } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
-import type { RequirementInput, RequirementType, RequirementWorkflow, RunRecord, WorkflowProject } from '@shared/workflow';
+import type { RequirementInput, RequirementTokenUsageSummary, RequirementType, RequirementWorkflow, RunRecord, WorkflowProject } from '@shared/workflow';
+import { emptyRequirementTokenUsage } from '@shared/workflow';
 import { actionTypeLabels, defaultBranchName, requirementTypeLabels, shouldSyncBranchName, stageLabels, statusLabels } from '@shared/workflow';
 import { useWorkflowStore } from '@/stores/workflow';
 import { useProjectStore } from '@/stores/project';
@@ -193,6 +202,7 @@ const editingWorkflow = ref<RequirementWorkflow>();
 const savingRequirement = ref(false);
 const openingRequirementId = ref('');
 const projectRepoState = ref<ProjectRepoStateVO | undefined>();
+const tokenUsageByRequirement = ref<Map<string, RequirementTokenUsageSummary>>(new Map());
 const isEditingWorkflow = computed(() => Boolean(editingWorkflow.value));
 const dialogTitle = computed(() => (isEditingWorkflow.value ? '编辑需求' : '创建或导入需求'));
 const filters = reactive<{
@@ -371,6 +381,21 @@ function recentRunText(run?: RunRecord) {
   return `${actionText}（${statusText}）`;
 }
 
+function tokenUsageFor(workflow: RequirementWorkflow) {
+  return tokenUsageByRequirement.value.get(String(workflow.id || '')) || emptyRequirementTokenUsage(workflow.id);
+}
+
+function formatTokenCount(value?: number) {
+  const count = value || 0;
+  if (count >= 1000000) {
+    return `${(count / 1000000).toFixed(1)}M`;
+  }
+  if (count >= 1000) {
+    return `${(count / 1000).toFixed(1)}K`;
+  }
+  return String(count);
+}
+
 function repoStatusText(status: ProjectRepoSyncStatus): string {
   const labels: Record<ProjectRepoSyncStatus, string> = {
     NOT_CLONED: '项目产物仓尚未 clone，请先到个人中心初始化后再推进需求流程',
@@ -434,6 +459,19 @@ async function loadRepoReadiness() {
     projectRepoState.value = await apiClient.getProjectRepositoryStatus(projectStore.current.id);
   } catch {
     projectRepoState.value = undefined;
+  }
+}
+
+async function loadTokenUsageSummaries() {
+  if (!projectStore.current?.id) {
+    tokenUsageByRequirement.value = new Map();
+    return;
+  }
+  try {
+    const items = await apiClient.listProjectTokenUsageSummaries(projectStore.current.id);
+    tokenUsageByRequirement.value = new Map(items.map((item) => [String(item.requirementPk || ''), item]));
+  } catch {
+    tokenUsageByRequirement.value = new Map();
   }
 }
 
@@ -560,6 +598,7 @@ async function openDetail(requirementId: string) {
 
 onMounted(async () => {
   await Promise.all([store.loadRequirements(), loadProjectHistory(), loadRepoReadiness()]);
+  await loadTokenUsageSummaries();
 });
 </script>
 
@@ -577,6 +616,23 @@ onMounted(async () => {
 
 .repo-readiness-alert {
   margin: 0 16px 12px;
+}
+
+.token-cell {
+  display: grid;
+  gap: 2px;
+  line-height: 18px;
+}
+
+.token-cell strong {
+  color: #172033;
+  font-weight: 650;
+}
+
+.token-cell small,
+.token-cell.empty strong {
+  color: #94a3b8;
+  font-weight: 400;
 }
 
 .filter-control {

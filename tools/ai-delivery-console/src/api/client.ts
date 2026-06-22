@@ -5,23 +5,27 @@ import type {
   GitChangeSummary,
   GitStageUntrackedInput,
   OpenSpecSummary,
+  RequirementTokenUsageSummary,
   RequirementInput,
   RequirementWorkflow,
   ReviewInput,
   RunEvent,
   RunRecord,
+  RunTokenUsageDetail,
+  RunTokenUsageRun,
   TechDesignAnnotationCreateInput,
   TechDesignAnnotationDeleteInput,
   TechDesignAnnotationList,
   TechDesignAnnotationReplyCreateInput,
   TechDesignAnnotationStatusInput,
+  TokenUsageSummary,
   TechDesignVersion,
   TechDesignVersionContent,
   TechDesignVersionDiff,
   TechDesignVersionDiffInput,
   WorkflowProject
 } from '@shared/workflow';
-import { createEmptyStages } from '@shared/workflow';
+import { createEmptyStages, emptyRequirementTokenUsage, emptyRunTokenUsage, emptyTokenUsageSummary } from '@shared/workflow';
 import { apiRuntimeHeaders, getApiRuntimeConfig, resolveApiUrl, resolveRunnerApiUrl } from './runtime';
 import { loadWorkflowItemCache, loadWorkflowListCache, saveWorkflowCache, saveWorkflowItemCache } from '@/services/workflow-cache';
 
@@ -397,6 +401,137 @@ function centerRunEventToRunEvent(item: CenterRunEventVO): RunEvent {
 
 export function isCenterRunId(runId: string | number): boolean {
   return /^\d+$/.test(String(runId).trim());
+}
+
+function numberOrZero(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function normalizeTokenUsageSummary(summary?: Partial<TokenUsageSummary>, runId?: string | number): TokenUsageSummary {
+  return {
+    runId: summary?.runId ?? runId,
+    totalTokens: numberOrZero(summary?.totalTokens),
+    inputTokens: numberOrZero(summary?.inputTokens),
+    cachedInputTokens: numberOrZero(summary?.cachedInputTokens),
+    outputTokens: numberOrZero(summary?.outputTokens),
+    reasoningOutputTokens: numberOrZero(summary?.reasoningOutputTokens),
+    runCount: numberOrZero(summary?.runCount),
+    detailCount: numberOrZero(summary?.detailCount),
+    latestOccurredAt: summary?.latestOccurredAt
+  };
+}
+
+function normalizeRunTokenUsage(runId: string | number, value?: Partial<RunTokenUsageRun>): RunTokenUsageRun {
+  const details = (value?.details || []).map((detail) => normalizeRunTokenUsageDetail(runId, detail));
+  return {
+    runId: value?.runId ?? runId,
+    summary: normalizeTokenUsageSummary(value?.summary, value?.runId ?? runId),
+    details
+  };
+}
+
+function normalizeRunTokenUsageDetail(runId: string | number, detail: Partial<RunTokenUsageDetail>): RunTokenUsageDetail {
+  return {
+    runId: detail.runId ?? runId,
+    id: detail.id,
+    requirementPk: detail.requirementPk,
+    jobId: detail.jobId,
+    clientSessionId: detail.clientSessionId,
+    agentId: detail.agentId,
+    stage: detail.stage,
+    implementationStep: detail.implementationStep,
+    model: detail.model,
+    sourceEventType: detail.sourceEventType || 'turn.completed',
+    usageFingerprint: detail.usageFingerprint,
+    inputTokens: numberOrZero(detail.inputTokens),
+    cachedInputTokens: numberOrZero(detail.cachedInputTokens),
+    outputTokens: numberOrZero(detail.outputTokens),
+    reasoningOutputTokens: numberOrZero(detail.reasoningOutputTokens),
+    totalTokens: numberOrZero(detail.totalTokens),
+    rawUsageJson: detail.rawUsageJson,
+    occurredAt: detail.occurredAt,
+    createdAt: detail.createdAt
+  };
+}
+
+function normalizeRequirementTokenUsage(requirementPk: string | number, value?: Partial<RequirementTokenUsageSummary>): RequirementTokenUsageSummary {
+  return {
+    requirementPk: value?.requirementPk ?? requirementPk,
+    summary: normalizeTokenUsageSummary(value?.summary),
+    latestRunSummary: normalizeTokenUsageSummary(value?.latestRunSummary),
+    stageSummaries: (value?.stageSummaries || []).map((bucket) => ({
+      bucketType: bucket.bucketType || 'stage',
+      bucketKey: bucket.bucketKey || 'UNKNOWN',
+      summary: normalizeTokenUsageSummary(bucket.summary)
+    })),
+    agentSummaries: (value?.agentSummaries || []).map((bucket) => ({
+      bucketType: bucket.bucketType || 'agent',
+      bucketKey: bucket.bucketKey || 'UNKNOWN',
+      summary: normalizeTokenUsageSummary(bucket.summary)
+    }))
+  };
+}
+
+function runEventsToTokenUsage(runId: string | number, events: RunEvent[]): RunTokenUsageRun {
+  const details: RunTokenUsageDetail[] = events.flatMap((event, index) => {
+    const data = event.data as
+      | {
+          kind?: string;
+          sourceEventType?: string;
+          model?: string;
+          usageFingerprint?: string;
+          usage?: Partial<TokenUsageSummary>;
+        }
+      | undefined;
+    if (data?.kind !== 'TOKEN_USAGE' || !data.usage) {
+      return [];
+    }
+    const inputTokens = numberOrZero(data.usage.inputTokens);
+    const outputTokens = numberOrZero(data.usage.outputTokens);
+    return [
+      {
+        id: `${runId}:${index}`,
+        runId,
+        agentId: event.agentId,
+        model: data.model,
+        sourceEventType: data.sourceEventType || 'turn.completed',
+        usageFingerprint: data.usageFingerprint,
+        inputTokens,
+        cachedInputTokens: numberOrZero(data.usage.cachedInputTokens),
+        outputTokens,
+        reasoningOutputTokens: numberOrZero(data.usage.reasoningOutputTokens),
+        totalTokens: numberOrZero(data.usage.totalTokens) || inputTokens + outputTokens,
+        rawUsageJson: event.text,
+        occurredAt: event.time,
+        createdAt: event.time
+      }
+    ];
+  });
+  return {
+    runId,
+    summary: summarizeTokenUsageDetails(details, runId),
+    details
+  };
+}
+
+function summarizeTokenUsageDetails(details: RunTokenUsageDetail[], runId?: string | number): TokenUsageSummary {
+  const summary = emptyTokenUsageSummary(runId);
+  const runIds = new Set<string>();
+  for (const detail of details) {
+    summary.totalTokens += detail.totalTokens;
+    summary.inputTokens += detail.inputTokens;
+    summary.cachedInputTokens += detail.cachedInputTokens;
+    summary.outputTokens += detail.outputTokens;
+    summary.reasoningOutputTokens += detail.reasoningOutputTokens;
+    summary.detailCount += 1;
+    runIds.add(String(detail.runId));
+    if (!summary.latestOccurredAt || (detail.occurredAt && detail.occurredAt > summary.latestOccurredAt)) {
+      summary.latestOccurredAt = detail.occurredAt;
+      summary.runId = detail.runId;
+    }
+  }
+  summary.runCount = runIds.size;
+  return summary;
 }
 
 function parseJson(value?: string): unknown {
@@ -852,6 +987,31 @@ export const apiClient = {
       method: 'POST',
       body: JSON.stringify(input)
     });
+  },
+  getRunTokenUsages(requirementId: string, runId: string | number) {
+    if (isCenterRunId(runId)) {
+      return request<RunTokenUsageRun>(`/api/ai-delivery/runs/${encodeURIComponent(String(runId))}/token-usages`)
+        .then((value) => normalizeRunTokenUsage(runId, value));
+    }
+    return runnerRequest<RunEvent[]>(`/api/ai-delivery/runs/${encodeURIComponent(String(runId))}/events?requirementId=${encodeURIComponent(requirementId)}`)
+      .then((events) => runEventsToTokenUsage(runId, events))
+      .catch(() => emptyRunTokenUsage(runId));
+  },
+  getRequirementTokenUsageSummary(requirementPk: string | number) {
+    if (!isCenterRunId(requirementPk)) {
+      return Promise.resolve(emptyRequirementTokenUsage(requirementPk));
+    }
+    return request<RequirementTokenUsageSummary>(
+      `/api/ai-delivery/requirements/${encodeURIComponent(String(requirementPk))}/token-usage-summary`
+    ).then((value) => normalizeRequirementTokenUsage(requirementPk, value));
+  },
+  listProjectTokenUsageSummaries(projectId: string | number) {
+    if (!projectId || !isCenterRunId(projectId)) {
+      return Promise.resolve([] as RequirementTokenUsageSummary[]);
+    }
+    return request<RequirementTokenUsageSummary[]>(
+      `/api/ai-delivery/projects/${encodeURIComponent(String(projectId))}/token-usage-summaries`
+    ).then((items) => items.map((item) => normalizeRequirementTokenUsage(item.requirementPk || '', item)));
   },
   getRunEvents(requirementId: string, runId: string) {
     if (isCenterRunId(runId)) {

@@ -13,13 +13,56 @@
       </div>
     </template>
     <el-empty v-if="!events.length" description="暂无日志" />
-    <div v-else class="terminal">
-      <div v-for="(event, index) in events" :key="index" class="terminal-line" :class="event.level.toLowerCase()">
-        <span class="time">{{ event.time }}</span>
-        <span class="type">{{ event.type || event.level }}</span>
-        <div class="log-message">
-          <pre>{{ event.text || event.message }}</pre>
-          <small v-if="truncatedRef(event)">truncated {{ truncatedRef(event) }}</small>
+    <div v-else class="run-log-content">
+      <section class="usage-panel">
+        <div class="usage-summary">
+          <span>
+            <small>本次 Token</small>
+            <strong>{{ formatTokenCount(displayUsage.summary.totalTokens) }}</strong>
+          </span>
+          <span>
+            <small>输入</small>
+            <strong>{{ formatTokenCount(displayUsage.summary.inputTokens) }}</strong>
+          </span>
+          <span>
+            <small>输出</small>
+            <strong>{{ formatTokenCount(displayUsage.summary.outputTokens) }}</strong>
+          </span>
+          <span>
+            <small>推理输出</small>
+            <strong>{{ formatTokenCount(displayUsage.summary.reasoningOutputTokens) }}</strong>
+          </span>
+          <em>{{ displayUsage.summary.detailCount ? `明细 ${displayUsage.summary.detailCount} 条` : '暂无 token 用量' }}</em>
+        </div>
+        <el-table v-if="displayUsage.details.length" :data="displayUsage.details" size="small" class="usage-table">
+          <el-table-column prop="sourceEventType" label="事件" min-width="130" />
+          <el-table-column prop="model" label="模型" min-width="110" />
+          <el-table-column label="输入" width="90">
+            <template #default="{ row }">{{ formatTokenCount(row.inputTokens) }}</template>
+          </el-table-column>
+          <el-table-column label="缓存输入" width="100">
+            <template #default="{ row }">{{ formatTokenCount(row.cachedInputTokens) }}</template>
+          </el-table-column>
+          <el-table-column label="输出" width="90">
+            <template #default="{ row }">{{ formatTokenCount(row.outputTokens) }}</template>
+          </el-table-column>
+          <el-table-column label="推理输出" width="100">
+            <template #default="{ row }">{{ formatTokenCount(row.reasoningOutputTokens) }}</template>
+          </el-table-column>
+          <el-table-column label="总计" width="90">
+            <template #default="{ row }">{{ formatTokenCount(row.totalTokens) }}</template>
+          </el-table-column>
+          <el-table-column prop="occurredAt" label="时间" min-width="170" />
+        </el-table>
+      </section>
+      <div class="terminal">
+        <div v-for="(event, index) in events" :key="index" class="terminal-line" :class="event.level.toLowerCase()">
+          <span class="time">{{ event.time }}</span>
+          <span class="type">{{ event.type || event.level }}</span>
+          <div class="log-message">
+            <pre>{{ event.text || event.message }}</pre>
+            <small v-if="truncatedRef(event)">truncated {{ truncatedRef(event) }}</small>
+          </div>
         </div>
       </div>
     </div>
@@ -29,10 +72,12 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { FullScreen, Minus } from '@element-plus/icons-vue';
-import type { RunEvent } from '@shared/workflow';
+import type { RunEvent, RunTokenUsageDetail, RunTokenUsageRun } from '@shared/workflow';
+import { emptyTokenUsageSummary } from '@shared/workflow';
 
-defineProps<{
+const props = defineProps<{
   events: RunEvent[];
+  usage?: RunTokenUsageRun;
 }>();
 
 const visible = ref(false);
@@ -40,6 +85,69 @@ const isFullscreen = ref(false);
 
 const drawerSize = computed(() => isFullscreen.value ? '100%' : '42%');
 const drawerTitle = computed(() => isFullscreen.value ? '运行日志（全屏）' : '运行日志');
+const derivedUsage = computed<RunTokenUsageRun>(() => {
+  const details: RunTokenUsageDetail[] = props.events.flatMap((event, index) => {
+    const data = event.data as
+      | {
+          kind?: string;
+          sourceEventType?: string;
+          model?: string;
+          usageFingerprint?: string;
+          usage?: {
+            inputTokens?: number;
+            cachedInputTokens?: number;
+            outputTokens?: number;
+            reasoningOutputTokens?: number;
+            totalTokens?: number;
+          };
+        }
+      | undefined;
+    if (data?.kind !== 'TOKEN_USAGE' || !data.usage) {
+      return [];
+    }
+    const inputTokens = data.usage.inputTokens || 0;
+    const outputTokens = data.usage.outputTokens || 0;
+    return [
+      {
+        id: index,
+        runId: props.usage?.runId || 'local',
+        agentId: event.agentId,
+        model: data.model,
+        sourceEventType: data.sourceEventType || 'turn.completed',
+        usageFingerprint: data.usageFingerprint,
+        inputTokens,
+        cachedInputTokens: data.usage.cachedInputTokens || 0,
+        outputTokens,
+        reasoningOutputTokens: data.usage.reasoningOutputTokens || 0,
+        totalTokens: data.usage.totalTokens || inputTokens + outputTokens,
+        rawUsageJson: event.text,
+        occurredAt: event.time,
+        createdAt: event.time
+      }
+    ];
+  });
+  const summary = emptyTokenUsageSummary(props.usage?.runId);
+  for (const detail of details) {
+    summary.totalTokens += detail.totalTokens;
+    summary.inputTokens += detail.inputTokens;
+    summary.cachedInputTokens += detail.cachedInputTokens;
+    summary.outputTokens += detail.outputTokens;
+    summary.reasoningOutputTokens += detail.reasoningOutputTokens;
+    summary.detailCount += 1;
+  }
+  summary.runCount = details.length ? 1 : 0;
+  return {
+    runId: props.usage?.runId || 'local',
+    summary,
+    details
+  };
+});
+const displayUsage = computed(() => {
+  if (props.usage && (props.usage.details.length || props.usage.summary.detailCount)) {
+    return props.usage;
+  }
+  return derivedUsage.value;
+});
 
 function open() {
   visible.value = true;
@@ -52,6 +160,17 @@ function toggleFullscreen() {
 function truncatedRef(event: RunEvent): string {
   const data = event.data as { truncated?: boolean; originalLength?: string | number } | undefined;
   return data?.truncated && data.originalLength ? String(data.originalLength) : '';
+}
+
+function formatTokenCount(value?: number) {
+  const count = value || 0;
+  if (count >= 1000000) {
+    return `${(count / 1000000).toFixed(1)}M`;
+  }
+  if (count >= 1000) {
+    return `${(count / 1000).toFixed(1)}K`;
+  }
+  return String(count);
 }
 
 defineExpose({ open });
@@ -68,6 +187,56 @@ defineExpose({ open });
 .drawer-title {
   font-size: 16px;
   font-weight: 500;
+}
+
+.run-log-content {
+  display: grid;
+  gap: 12px;
+}
+
+.usage-panel {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.usage-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.usage-summary span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid #dbe3ef;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
+}
+
+.usage-summary small {
+  color: #64748b;
+}
+
+.usage-summary strong {
+  color: #172033;
+  font-weight: 650;
+}
+
+.usage-summary em {
+  color: #64748b;
+  font-size: 12px;
+  font-style: normal;
+}
+
+.usage-table {
+  max-width: 100%;
 }
 
 .terminal {

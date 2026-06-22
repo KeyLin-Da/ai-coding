@@ -58,6 +58,7 @@ describe('agent-providers', () => {
     expect(codex?.command).toEqual([
       'codex',
       'exec',
+      '--json',
       '--sandbox',
       'workspace-write',
       '-C',
@@ -192,6 +193,83 @@ describe('agent-providers', () => {
     const events = await readRunEvents(root, '172014', run.id);
     expect(updated.status).toBe('SUCCEEDED');
     expect(events.some((event) => event.type === 'STDOUT' && event.text?.includes('stdin-envelope-ok'))).toBe(true);
+  });
+
+  it('后台 Codex JSON 输出记录 token usage 并跳过本地字符串 runId 上报', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-agent-'));
+    const provider: AgentProvider = {
+      id: 'codex',
+      name: 'Codex',
+      inputMode: 'PROMPT_FILE',
+      command: [
+        process.execPath,
+        '-e',
+        'process.stdout.write(JSON.stringify({type:"turn.completed",id:"turn-1",usage:{input_tokens:10,cached_input_tokens:4,output_tokens:2,reasoning_output_tokens:1}}));'
+      ],
+      available: true,
+      supportsStreaming: true
+    };
+    const run = { ...runRecord('run-codex-usage'), agentId: 'codex' };
+    let resolveUpdate!: (run: RunRecord) => void;
+    const updatedPromise = new Promise<RunRecord>((resolve) => {
+      resolveUpdate = resolve;
+    });
+
+    await startAgentProcess(root, workflow(), run, provider, '/coding-prd-analyzer id=172014', async (nextRun) => resolveUpdate(nextRun));
+    const updated = await updatedPromise;
+    const events = await readRunEvents(root, '172014', run.id);
+    const usageEvent = events.find((event) => (event.data as any)?.kind === 'TOKEN_USAGE');
+
+    expect(updated.status).toBe('SUCCEEDED');
+    expect(usageEvent?.message).toContain('Token usage');
+    expect((usageEvent?.data as any).usage.totalTokens).toBe(12);
+    expect((usageEvent?.data as any).centerUpload).toBe('SKIPPED_LOCAL_RUN_ID');
+  });
+
+  it('Center token usage 上报失败不影响 Agent 成功状态', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-agent-'));
+    const fetchImpl = async () => ({
+      ok: false,
+      json: async () => ({ success: false, message: 'center down' })
+    });
+    const provider: AgentProvider = {
+      id: 'codex',
+      name: 'Codex',
+      inputMode: 'PROMPT_FILE',
+      command: [
+        process.execPath,
+        '-e',
+        'console.log(JSON.stringify({type:"turn.completed",id:"turn-1",usage:{input_tokens:10,output_tokens:2}}));'
+      ],
+      available: true,
+      supportsStreaming: true
+    };
+    const run = { ...runRecord('700'), agentId: 'codex' };
+    let resolveUpdate!: (run: RunRecord) => void;
+    const updatedPromise = new Promise<RunRecord>((resolve) => {
+      resolveUpdate = resolve;
+    });
+
+    await startAgentProcess(
+      root,
+      workflow(),
+      run,
+      provider,
+      '/coding-prd-analyzer id=172014',
+      async (nextRun) => resolveUpdate(nextRun),
+      [],
+      {
+        centerBaseUrl: 'http://127.0.0.1:8728',
+        userId: 1,
+        clientSessionId: 10,
+        fetchImpl: fetchImpl as unknown as typeof fetch
+      }
+    );
+    const updated = await updatedPromise;
+    const events = await readRunEvents(root, '172014', run.id);
+
+    expect(updated.status).toBe('SUCCEEDED');
+    expect(events.some((event) => (event.data as any)?.kind === 'TOKEN_USAGE_UPLOAD_FAILED')).toBe(true);
   });
 
   it('终端模式下 Codex STDIN 命令改为 prompt 参数以保留终端交互', () => {

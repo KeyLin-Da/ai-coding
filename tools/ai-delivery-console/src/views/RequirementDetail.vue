@@ -22,6 +22,25 @@
         <el-tag size="small" :type="realtimeStatusType" effect="plain">{{ realtimeStatusText }}</el-tag>
         <span class="branch-pill">{{ workflow.branchName || '未绑定分支' }}</span>
       </div>
+      <div class="token-summary-strip">
+        <span class="token-summary-item">
+          <small>累计 Token</small>
+          <strong>{{ formatTokenCount(requirementTokenSummary.totalTokens) }}</strong>
+        </span>
+        <span class="token-summary-item">
+          <small>输入</small>
+          <strong>{{ formatTokenCount(requirementTokenSummary.inputTokens) }}</strong>
+        </span>
+        <span class="token-summary-item">
+          <small>输出</small>
+          <strong>{{ formatTokenCount(requirementTokenSummary.outputTokens) }}</strong>
+        </span>
+        <span class="token-summary-item">
+          <small>推理输出</small>
+          <strong>{{ formatTokenCount(requirementTokenSummary.reasoningOutputTokens) }}</strong>
+        </span>
+        <span class="token-summary-note">{{ requirementTokenSummary.detailCount ? `明细 ${requirementTokenSummary.detailCount} 条` : '暂无 token 用量' }}</span>
+      </div>
       <el-alert
         v-if="workspaceBlockerText"
         type="warning"
@@ -55,6 +74,9 @@
               </el-select>
               <el-button v-if="activeStage !== 'IMPLEMENTATION'" :icon="DocumentChecked" @click="openReview">审核</el-button>
               <el-button v-if="currentStageRun" :icon="Tickets" @click="openRunLog(currentStageRun.id)">本步骤日志</el-button>
+              <el-button v-if="currentStageRun" link class="stage-token-button" @click="openRunLog(currentStageRun.id)">
+                Token {{ currentRunTokenText }}
+              </el-button>
               <el-button v-if="currentStageRun?.status === 'RUNNING'" type="danger" @click="cancelRun(currentStageRun.id)">取消</el-button>
             </div>
           </div>
@@ -385,7 +407,7 @@
       @delete="deleteDesignQuestion"
       @submit="runDesignQuestion"
     />
-    <RunLogDrawer ref="runLogDrawer" :events="store.runEvents" />
+    <RunLogDrawer ref="runLogDrawer" :events="store.runEvents" :usage="selectedRunTokenUsage" />
     <ArtifactPreviewDialog ref="artifactPreviewDialog" />
   </div>
   <el-empty v-else description="需求加载中" />
@@ -404,12 +426,18 @@ import type {
   ImplementationStep,
   OpenSpecSummary,
   OpenSpecTaskItem,
+  RequirementTokenUsageSummary,
   RequirementType,
   RunRecord,
+  RunTokenUsageRun,
+  TokenUsageSummary,
   WorkflowStage,
   WorkflowStatus
 } from '@shared/workflow';
 import {
+  emptyRequirementTokenUsage,
+  emptyRunTokenUsage,
+  emptyTokenUsageSummary,
   ensureImplementationSteps,
   findFirstPendingImplementationStep,
   implementationStepLabels,
@@ -478,6 +506,9 @@ const activeImplementationStep = ref<ImplementationStep>('START_CHANGE');
 const gitChanges = ref<GitChangeSummary>();
 const workspaceStates = ref<RequirementWorkspaceStateVO[]>([]);
 const actionRunning = ref(false);
+const requirementTokenUsage = ref<RequirementTokenUsageSummary>(emptyRequirementTokenUsage());
+const currentRunTokenUsage = ref<RunTokenUsageRun>();
+const selectedRunTokenUsage = ref<RunTokenUsageRun>();
 
 const workflow = computed(() => store.current);
 const currentProjectId = computed(() => projectStore.current?.id || '');
@@ -554,6 +585,12 @@ const openIssueCount = computed(() => workflow.value?.issues.filter((item) => it
 const implementationOpenSpecPath = computed(() => openSpecSummary.value?.rootPath || stageArtifactPath('IMPLEMENTATION') || '未关联');
 const implementationArchiveStatus = computed(() => (openSpecSummary.value?.archived ? '已归档' : '进行中'));
 const requirementTypeText = computed(() => requirementTypeLabels[workflow.value?.requirementType || 'REQUIREMENT']);
+const requirementTokenSummary = computed(() => requirementTokenUsage.value?.summary || emptyTokenUsageSummary());
+const currentRunUsageSummary = computed<TokenUsageSummary>(() => currentRunTokenUsage.value?.summary || emptyTokenUsageSummary(currentStageRun.value?.id));
+const currentRunTokenText = computed(() => {
+  const summary = currentRunUsageSummary.value;
+  return summary.detailCount ? formatTokenCount(summary.totalTokens) : '0';
+});
 const junitArtifact = computed(
   () =>
     workflow.value?.artifacts.find((artifact) => artifact.stage === 'IMPLEMENTATION' && artifact.exists && artifact.kind !== 'directory' && artifact.path.includes('/junit/'))
@@ -781,6 +818,29 @@ async function loadWorkspaceStates() {
     }
   })();
   await workspaceStatesInFlight;
+}
+
+async function loadRequirementTokenUsage() {
+  if (!workflow.value?.id) {
+    requirementTokenUsage.value = emptyRequirementTokenUsage();
+    return;
+  }
+  try {
+    requirementTokenUsage.value = await apiClient.getRequirementTokenUsageSummary(workflow.value.id);
+  } catch {
+    requirementTokenUsage.value = emptyRequirementTokenUsage(workflow.value.id);
+  }
+}
+
+async function loadRunTokenUsage(runId: string): Promise<RunTokenUsageRun> {
+  if (!workflow.value) {
+    return emptyRunTokenUsage(runId);
+  }
+  try {
+    return await apiClient.getRunTokenUsages(workflow.value.requirementId, runId);
+  } catch {
+    return emptyRunTokenUsage(runId);
+  }
 }
 
 async function loadOpenSpecSummary() {
@@ -1018,6 +1078,17 @@ function formatFileSize(size: number) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function formatTokenCount(value?: number) {
+  const count = value || 0;
+  if (count >= 1000000) {
+    return `${(count / 1000000).toFixed(1)}M`;
+  }
+  if (count >= 1000) {
+    return `${(count / 1000).toFixed(1)}K`;
+  }
+  return String(count);
+}
+
 function agentActionParams() {
   return {
     agentId: selectedAgentId.value,
@@ -1149,6 +1220,7 @@ async function runOrCopyAction(action: ActionInput, afterRun?: () => Promise<voi
     if (result?.run?.id) {
       await openRunLog(result.run.id);
     }
+    await loadRequirementTokenUsage();
     await afterRun?.();
   } catch (error: any) {
     ElMessage.error(error.message || '流程动作执行失败');
@@ -1446,7 +1518,9 @@ async function handleArtifactGitSynced(result: { commitSha?: string; pushed?: bo
 }
 
 async function openRunLog(runId: string) {
+  selectedRunTokenUsage.value = emptyRunTokenUsage(runId);
   await store.loadRunEvents(runId);
+  selectedRunTokenUsage.value = await loadRunTokenUsage(runId);
   store.streamRunEvents(runId);
   if (typeof runLogDrawer.value?.open === 'function') {
     runLogDrawer.value.open();
@@ -1471,6 +1545,7 @@ watch(
     branchName.value = value.branchName || '';
     designClarification.value = value.techDesignClarification || '';
     void loadOpenSpecSummary();
+    void loadRequirementTokenUsage();
     const stages = applicableStages.value;
     const nextActiveStage = value.currentStage === 'DONE' ? stages[stages.length - 1] : value.currentStage;
     activeStage.value = stages.includes(nextActiveStage as WorkflowStage) ? (nextActiveStage as WorkflowStage) : stages[0] || 'PRD';
@@ -1488,6 +1563,18 @@ watch(activeImplementationStep, (step) => {
     void loadGitChanges();
   }
 });
+
+watch(
+  () => currentStageRun.value?.id || '',
+  async (runId) => {
+    if (!runId) {
+      currentRunTokenUsage.value = undefined;
+      return;
+    }
+    currentRunTokenUsage.value = await loadRunTokenUsage(runId);
+  },
+  { immediate: true }
+);
 
 watch(
   () => techDesignQuestionReadPaths.value.join('|'),
@@ -1573,6 +1660,46 @@ onUnmounted(() => {
   flex-wrap: wrap;
   gap: 8px;
   padding: 10px 16px 14px;
+}
+
+.token-summary-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 16px 14px;
+}
+
+.token-summary-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid #dbe3ef;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
+}
+
+.token-summary-item small {
+  color: #64748b;
+}
+
+.token-summary-item strong {
+  color: #172033;
+  font-weight: 650;
+}
+
+.token-summary-note {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.stage-token-button {
+  padding: 0 4px;
+  color: #475569;
 }
 
 .branch-pill {

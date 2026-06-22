@@ -656,6 +656,7 @@ describe('agent-providers', () => {
     expect(codex?.command).toEqual([
       'codex',
       'exec',
+      '--json',
       '--sandbox',
       'workspace-write',
       '-C',

@@ -26,6 +26,8 @@ vi.mock('@/api/client', () => ({
     runAction: vi.fn(),
     getGitChanges: vi.fn(),
     getRunEvents: vi.fn(),
+    getRunTokenUsages: vi.fn(),
+    getRequirementTokenUsageSummary: vi.fn(),
     openRunEventStream: vi.fn(),
     previewActionCommand: vi.fn(),
     readArtifact: vi.fn(),
@@ -243,6 +245,43 @@ async function mountDetail(current: RequirementWorkflow, openSpecSummary: OpenSp
     deletions: 0
   });
   vi.mocked(apiClient.getRunEvents).mockResolvedValue([]);
+  vi.mocked(apiClient.getRunTokenUsages).mockResolvedValue({
+    runId: 'run-auto-log',
+    summary: {
+      runId: 'run-auto-log',
+      totalTokens: 0,
+      inputTokens: 0,
+      cachedInputTokens: 0,
+      outputTokens: 0,
+      reasoningOutputTokens: 0,
+      runCount: 0,
+      detailCount: 0
+    },
+    details: []
+  });
+  vi.mocked(apiClient.getRequirementTokenUsageSummary).mockResolvedValue({
+    requirementPk: current.id,
+    summary: {
+      totalTokens: 0,
+      inputTokens: 0,
+      cachedInputTokens: 0,
+      outputTokens: 0,
+      reasoningOutputTokens: 0,
+      runCount: 0,
+      detailCount: 0
+    },
+    latestRunSummary: {
+      totalTokens: 0,
+      inputTokens: 0,
+      cachedInputTokens: 0,
+      outputTokens: 0,
+      reasoningOutputTokens: 0,
+      runCount: 0,
+      detailCount: 0
+    },
+    stageSummaries: [],
+    agentSummaries: []
+  });
   const run: RunRecord = {
     id: 'run-auto-log',
     requirementId: current.requirementId,
@@ -417,6 +456,73 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     expect(wrapper.text()).not.toContain('生成 PRD');
     expect(wrapper.text()).not.toContain('澄清 PRD');
     expect(designButton(wrapper).attributes('disabled')).toBeUndefined();
+  });
+
+  it('展示需求累计 token 和当前步骤 run token 摘要', async () => {
+    const current = {
+      ...workflow([]),
+      id: 100,
+      runs: [
+        {
+          id: 'run-token',
+          requirementId: '172014',
+          actionType: 'OPENSPEC_APPLY' as const,
+          stage: 'IMPLEMENTATION' as const,
+          implementationStep: 'APPLY' as const,
+          status: 'SUCCEEDED' as const,
+          startedAt: '2026-06-22T10:20:00.000Z',
+          params: {}
+        }
+      ]
+    };
+    current.implementationSteps!.ARTIFACT_REVIEW.status = 'APPROVED';
+    current.implementationSteps!.APPLY.status = 'DRAFT';
+    const wrapper = await mountDetail(current);
+    vi.mocked(apiClient.getRequirementTokenUsageSummary).mockResolvedValue({
+      requirementPk: 100,
+      summary: {
+        totalTokens: 61129,
+        inputTokens: 60835,
+        cachedInputTokens: 32512,
+        outputTokens: 294,
+        reasoningOutputTokens: 171,
+        runCount: 1,
+        detailCount: 1
+      },
+      latestRunSummary: {
+        runId: 'run-token',
+        totalTokens: 61129,
+        inputTokens: 60835,
+        cachedInputTokens: 32512,
+        outputTokens: 294,
+        reasoningOutputTokens: 171,
+        runCount: 1,
+        detailCount: 1
+      },
+      stageSummaries: [],
+      agentSummaries: []
+    });
+    vi.mocked(apiClient.getRunTokenUsages).mockResolvedValue({
+      runId: 'run-token',
+      summary: {
+        runId: 'run-token',
+        totalTokens: 61129,
+        inputTokens: 60835,
+        cachedInputTokens: 32512,
+        outputTokens: 294,
+        reasoningOutputTokens: 171,
+        runCount: 1,
+        detailCount: 1
+      },
+      details: []
+    });
+    await (wrapper.vm as any).loadRequirementTokenUsage();
+    (wrapper.vm as any).currentRunTokenUsage = await (wrapper.vm as any).loadRunTokenUsage('run-token');
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('累计 Token');
+    expect(wrapper.text()).toContain('61.1K');
+    expect(wrapper.text()).toContain('Token 61.1K');
   });
 
   it('未生成 PRD 时禁用澄清入口并提示先生成文档', async () => {

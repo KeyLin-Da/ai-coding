@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { execSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { AgentProvider, RequirementWorkflow, RunRecord, RunStatus } from '../../shared/workflow';
 import { serverConfig } from '../config';
@@ -7,6 +8,8 @@ import { appendRunEvent } from './run-log';
 import { normalizeRequirementId } from './workspace';
 import { normalizeProjectBasePaths, resolveWorkflowProjects } from './project-resolver';
 import { getPromptRuntimeDir, getRunRuntimeDir, getRunnerRuntimeRoot, getScriptRuntimeDir, resolveWorkspaceOrRuntimePath, toRuntimePathRef } from './runtime-paths';
+import { CodexUsageNdjsonParser, type CodexUsageEvent } from './codex-usage-parser';
+import { uploadCenterRunTokenUsage, type CenterRunnerConfig } from './center-runner-adapter';
 
 const activeProcesses = new Map<string, ChildProcessWithoutNullStreams>();
 const cancelledRunIds = new Set<string>();
@@ -472,7 +475,8 @@ export async function startAgentProcess(
   provider: AgentProvider,
   commandText: string,
   onUpdate: (run: RunRecord) => Promise<void>,
-  projectPaths?: string[]
+  projectPaths?: string[],
+  centerConfig?: CenterRunnerConfig
 ): Promise<RunRecord> {
   if (provider.inputMode === 'MANUAL' || !provider.command?.length) {
     run.status = 'WAITING_FOR_AGENT';
@@ -549,6 +553,82 @@ export async function startAgentProcess(
     child.stdin.end();
   }
 
+  const codexUsageParser = provider.id === 'codex' ? new CodexUsageNdjsonParser() : undefined;
+  const usageTasks = new Set<Promise<void>>();
+
+  const recordCodexUsageEvents = async (events: CodexUsageEvent[]) => {
+    for (const event of events) {
+      const usageFingerprint = buildTokenUsageFingerprint(run.id, event);
+      const centerRunId = parseCenterRunId(run.id);
+      const uploadState = centerRunId ? 'PENDING' : 'SKIPPED_LOCAL_RUN_ID';
+      await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
+        type: 'INFO',
+        level: 'INFO',
+        message: `Token usage: total ${event.usage.totalTokens}, input ${event.usage.inputTokens}, output ${event.usage.outputTokens}`,
+        text: event.rawEventJson,
+        agentId: provider.id,
+        data: {
+          kind: 'TOKEN_USAGE',
+          sourceEventType: event.sourceEventType,
+          model: event.model,
+          usageFingerprint,
+          centerUpload: uploadState,
+          usage: event.usage
+        }
+      });
+      if (!centerRunId) {
+        continue;
+      }
+      if (!centerConfig?.centerBaseUrl) {
+        await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
+          type: 'WARN',
+          level: 'WARN',
+          message: 'Token usage 已记录本地日志，跳过 Center 上报：缺少中心服务配置',
+          agentId: provider.id,
+          data: { kind: 'TOKEN_USAGE_UPLOAD_SKIPPED', reason: 'MISSING_CENTER_CONFIG' }
+        });
+        continue;
+      }
+      try {
+        await uploadCenterRunTokenUsage(centerConfig, {
+          runId: centerRunId,
+          seq: event.seq,
+          stage: run.stage,
+          implementationStep: run.implementationStep,
+          agentId: provider.id,
+          model: event.model,
+          sourceEventType: event.sourceEventType,
+          usageFingerprint,
+          usage: {
+            inputTokens: event.usage.inputTokens,
+            cachedInputTokens: event.usage.cachedInputTokens,
+            outputTokens: event.usage.outputTokens,
+            reasoningOutputTokens: event.usage.reasoningOutputTokens
+          },
+          rawUsageJson: event.rawUsageJson,
+          occurredAt: new Date().toISOString()
+        });
+      } catch (error: any) {
+        await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
+          type: 'WARN',
+          level: 'WARN',
+          message: `Token usage Center 上报失败：${error?.message || 'unknown error'}`,
+          agentId: provider.id,
+          data: { kind: 'TOKEN_USAGE_UPLOAD_FAILED', usageFingerprint }
+        });
+      }
+    }
+  };
+
+  const enqueueCodexUsageEvents = (events: CodexUsageEvent[]) => {
+    if (!events.length) {
+      return;
+    }
+    const task = recordCodexUsageEvents(events).catch(() => undefined);
+    usageTasks.add(task);
+    task.finally(() => usageTasks.delete(task)).catch(() => undefined);
+  };
+
   child.stdout.on('data', (chunk) => {
     const text = String(chunk);
     appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
@@ -558,6 +638,8 @@ export async function startAgentProcess(
       text,
       agentId: provider.id
     }).catch(() => undefined);
+    const usageEvents = codexUsageParser?.push(text) || [];
+    enqueueCodexUsageEvents(usageEvents);
   });
 
   child.stderr.on('data', (chunk) => {
@@ -587,21 +669,24 @@ export async function startAgentProcess(
   });
 
   child.on('close', (code) => {
-    activeProcesses.delete(run.id);
-    const wasCancelled = cancelledRunIds.has(run.id);
-    cancelledRunIds.delete(run.id);
-    run.status = wasCancelled ? 'CANCELLED' : code === 0 ? 'SUCCEEDED' : 'FAILED';
-    run.error = wasCancelled ? undefined : code === 0 ? undefined : `Agent 退出码: ${code}`;
-    run.finishedAt = new Date().toISOString();
-    appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
-      type: wasCancelled ? 'CANCELLED' : 'EXIT',
-      level: wasCancelled ? 'WARN' : code === 0 ? 'INFO' : 'ERROR',
-      message: wasCancelled ? 'Agent 运行已取消' : code === 0 ? 'Agent 执行完成' : `Agent 执行失败，退出码 ${code}`,
-      agentId: provider.id,
-      data: { code }
-    })
-      .then(() => onUpdate(run))
-      .catch(() => undefined);
+    (async () => {
+      activeProcesses.delete(run.id);
+      enqueueCodexUsageEvents(codexUsageParser?.flush() || []);
+      await Promise.allSettled([...usageTasks]);
+      const wasCancelled = cancelledRunIds.has(run.id);
+      cancelledRunIds.delete(run.id);
+      run.status = wasCancelled ? 'CANCELLED' : code === 0 ? 'SUCCEEDED' : 'FAILED';
+      run.error = wasCancelled ? undefined : code === 0 ? undefined : `Agent 退出码: ${code}`;
+      run.finishedAt = new Date().toISOString();
+      await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
+        type: wasCancelled ? 'CANCELLED' : 'EXIT',
+        level: wasCancelled ? 'WARN' : code === 0 ? 'INFO' : 'ERROR',
+        message: wasCancelled ? 'Agent 运行已取消' : code === 0 ? 'Agent 执行完成' : `Agent 执行失败，退出码 ${code}`,
+        agentId: provider.id,
+        data: { code }
+      });
+      await onUpdate(run);
+    })().catch(() => undefined);
   });
 
   const timeout = setTimeout(() => {
@@ -625,6 +710,21 @@ export async function startAgentProcess(
   child.on('close', () => clearTimeout(timeout));
 
   return run;
+}
+
+function parseCenterRunId(runId: string): number | undefined {
+  if (!/^\d+$/.test(runId)) {
+    return undefined;
+  }
+  const numeric = Number(runId);
+  return Number.isSafeInteger(numeric) && numeric > 0 ? numeric : undefined;
+}
+
+function buildTokenUsageFingerprint(runId: string, event: CodexUsageEvent): string {
+  const seed = event.eventId
+    ? `${runId}|${event.eventId}`
+    : `${runId}|${event.seq}|${event.rawUsageJson}`;
+  return createHash('sha256').update(seed).digest('hex');
 }
 
 export async function startAgentInTerminal(

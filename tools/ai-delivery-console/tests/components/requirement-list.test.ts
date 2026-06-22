@@ -6,6 +6,7 @@ import { createEmptyStages } from '../../shared/workflow';
 import RequirementList from '../../src/views/RequirementList.vue';
 import { apiClient } from '@/api/client';
 import { useSettingsStore } from '@/stores/settings';
+import { useProjectStore } from '@/stores/project';
 import { ElMessage } from 'element-plus';
 
 const routerPush = vi.fn();
@@ -21,7 +22,8 @@ vi.mock('@/api/client', () => ({
     listRequirements: vi.fn(),
     listProjectHistory: vi.fn(),
     listProjects: vi.fn(),
-    createRequirement: vi.fn()
+    createRequirement: vi.fn(),
+    listProjectTokenUsageSummaries: vi.fn()
   }
 }));
 
@@ -87,6 +89,9 @@ function componentStubs() {
     ElOption: {
       props: ['label', 'value'],
       template: '<option :value="value">{{ label }}</option>'
+    },
+    ElOptionGroup: {
+      template: '<optgroup><slot /></optgroup>'
     },
     ElRadioButton: {
       props: ['value'],
@@ -160,6 +165,7 @@ async function mountList(current: RequirementWorkflow | RequirementWorkflow[] = 
       }
     ]
   });
+  vi.mocked(apiClient.listProjectTokenUsageSummaries).mockResolvedValue([]);
 
   const wrapper = mount(RequirementList, {
     global: {
@@ -249,6 +255,53 @@ describe('RequirementList', () => {
     expect(vm.stageText('SKIPPED')).toBe('已跳过');
     expect(vm.recentRunText(current.runs[0])).toBe('代码评审（成功）');
     expect(vm.recentRunText()).toBe('暂无');
+  });
+
+  it('展示需求累计 token 和最近一次 token 用量', async () => {
+    const current = {
+      ...workflow(),
+      id: 100
+    };
+    const wrapper = await mountList(current);
+    const projectStore = useProjectStore();
+    projectStore.current = {
+      id: 10,
+      name: 'AI Delivery',
+      code: 'AI',
+      status: 'ACTIVE',
+      role: 'OWNER'
+    };
+    vi.mocked(apiClient.listProjectTokenUsageSummaries).mockResolvedValue([
+      {
+        requirementPk: 100,
+        summary: {
+          totalTokens: 61129,
+          inputTokens: 60835,
+          cachedInputTokens: 32512,
+          outputTokens: 294,
+          reasoningOutputTokens: 171,
+          runCount: 1,
+          detailCount: 1
+        },
+        latestRunSummary: {
+          runId: 700,
+          totalTokens: 61129,
+          inputTokens: 60835,
+          cachedInputTokens: 32512,
+          outputTokens: 294,
+          reasoningOutputTokens: 171,
+          runCount: 1,
+          detailCount: 1
+        },
+        stageSummaries: [],
+        agentSummaries: []
+      }
+    ]);
+
+    await (wrapper.vm as any).loadTokenUsageSummaries();
+
+    expect((wrapper.vm as any).tokenUsageFor(current).summary.totalTokens).toBe(61129);
+    expect((wrapper.vm as any).formatTokenCount(61129)).toBe('61.1K');
   });
 
   it('支持按标题或需求号、需求类型、阶段和涉及工程过滤并清空', async () => {
