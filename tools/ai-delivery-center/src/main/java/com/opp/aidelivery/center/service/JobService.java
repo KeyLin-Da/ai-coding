@@ -89,6 +89,34 @@ public class JobService {
     }
 
     @Transactional(rollbackFor = Exception.class)
+    public JobVO claimById(Long userId, Long jobId, JobClaimRequest request) {
+        ClientSessionEntity session = clientSessionService.loadOwnedSession(userId, request.getClientSessionId());
+        JobEntity job = loadJob(jobId);
+        RequirementEntity requirement = loadRequirementAndCheckPermission(userId, job.getRequirementPk());
+        if (!"QUEUED".equals(job.getStatus())) {
+            throw new BusinessException(AiDeliveryErrorCode.JOB_ALREADY_CLAIMED);
+        }
+        Set<String> capabilities = normalizeCapabilities(
+            request.getCapabilities() == null || request.getCapabilities().isEmpty()
+                ? parseCapabilities(session.getCapabilities())
+                : request.getCapabilities()
+        );
+        if (!matchesCapabilities(job.getActionType(), capabilities)) {
+            throw new BusinessException(AiDeliveryErrorCode.VALIDATION_FAILED, "当前客户端不支持该 Job");
+        }
+        if (!jobLeaseService.claim(job.getId(), session.getId())) {
+            throw new BusinessException(AiDeliveryErrorCode.JOB_ALREADY_CLAIMED);
+        }
+        RunEntity run = createRun(job, session);
+        job.setStatus("CLAIMED");
+        job.setClaimedBy(session.getId());
+        job.setLeaseExpireAt(LocalDateTime.now().plus(properties.getJob().getLeaseTtl()));
+        jobMapper.updateById(job);
+        publishJobEvent(requirement, job, run, "job.claimed");
+        return toVO(job, run.getId());
+    }
+
+    @Transactional(rollbackFor = Exception.class)
     public JobVO renew(Long userId, Long jobId, JobLeaseRequest request) {
         JobEntity job = loadJob(jobId);
         ClientSessionEntity session = clientSessionService.loadOwnedSession(userId, request.getClientSessionId());

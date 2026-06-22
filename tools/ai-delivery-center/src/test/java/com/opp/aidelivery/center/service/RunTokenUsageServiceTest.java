@@ -13,6 +13,7 @@ import static org.mockito.Mockito.when;
 
 import com.opp.aidelivery.center.common.error.AiDeliveryErrorCode;
 import com.opp.aidelivery.center.common.error.BusinessException;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.opp.aidelivery.center.mapper.RequirementMapper;
 import com.opp.aidelivery.center.mapper.RunMapper;
 import com.opp.aidelivery.center.model.dto.RunTokenUsageCreateRequest;
@@ -21,10 +22,13 @@ import com.opp.aidelivery.center.model.entity.RequirementEntity;
 import com.opp.aidelivery.center.model.entity.RunEntity;
 import com.opp.aidelivery.center.model.entity.RunTokenUsageEntity;
 import com.opp.aidelivery.center.model.vo.RequirementTokenUsageSummaryVO;
+import com.opp.aidelivery.center.model.vo.RequirementTokenUsagePageVO;
 import com.opp.aidelivery.center.model.vo.RunTokenUsageRunVO;
 import com.opp.aidelivery.center.model.vo.RunTokenUsageSaveVO;
 import com.opp.aidelivery.center.repository.RunTokenUsageRepository;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.concurrent.atomic.AtomicReference;
@@ -78,6 +82,25 @@ class RunTokenUsageServiceTest {
         assertThat(result.getRunSummary().getTotalTokens()).isEqualTo(61129L);
         assertThat(result.getRunSummary().getDetailCount()).isEqualTo(1L);
         verify(permissionService).assertProjectMember(1L, 10L);
+    }
+
+    @Test
+    void appendConvertsUtcOccurrenceToCenterLocalTime() {
+        stubAuthorizedRun();
+        AtomicReference<RunTokenUsageEntity> saved = new AtomicReference<>();
+        doAnswer(invocation -> {
+            RunTokenUsageEntity entity = invocation.getArgument(0);
+            entity.setId(1L);
+            saved.set(entity);
+            return entity;
+        }).when(runTokenUsageRepository).append(any(RunTokenUsageEntity.class));
+        when(runTokenUsageRepository.listByRunId(700L)).thenAnswer(invocation -> Collections.singletonList(saved.get()));
+        RunTokenUsageCreateRequest request = request();
+        request.setOccurredAt(OffsetDateTime.parse("2026-06-22T05:39:05.113Z"));
+
+        runTokenUsageService.append(1L, request);
+
+        assertThat(saved.get().getOccurredAt()).isEqualTo(LocalDateTime.of(2026, 6, 22, 13, 39, 5, 113_000_000));
     }
 
     @Test
@@ -145,6 +168,37 @@ class RunTokenUsageServiceTest {
     }
 
     @Test
+    void pageRequirementDetailsChecksPermissionAndReturnsNewestPage() {
+        when(requirementMapper.selectById(100L)).thenReturn(requirement());
+        Page<RunTokenUsageEntity> page = new Page<>(1L, 20L, 2L);
+        page.setRecords(Arrays.asList(
+            usageEntity(2L, 701L, 100L, 8L, "IMPLEMENTATION", "codex", LocalDateTime.of(2026, 6, 22, 10, 30)),
+            usageEntity(1L, 700L, 100L, 12L, "TECH_DESIGN", "codex", LocalDateTime.of(2026, 6, 22, 10, 20))));
+        when(runTokenUsageRepository.pageByRequirementPk(100L, 1L, 20L)).thenReturn(page);
+
+        RequirementTokenUsagePageVO result = runTokenUsageService.pageRequirementDetails(1L, 100L, 1, 20);
+
+        assertThat(result.getRequirementPk()).isEqualTo(100L);
+        assertThat(result.getTotal()).isEqualTo(2L);
+        assertThat(result.getItems()).extracting("id").containsExactly(2L, 1L);
+        verify(permissionService).assertProjectMember(1L, 10L);
+    }
+
+    @Test
+    void pageRequirementDetailsRejectsUnauthorizedUserBeforeQuery() {
+        when(requirementMapper.selectById(100L)).thenReturn(requirement());
+        doThrow(new BusinessException(AiDeliveryErrorCode.ACCESS_DENIED))
+            .when(permissionService).assertProjectMember(2L, 10L);
+
+        assertThatThrownBy(() -> runTokenUsageService.pageRequirementDetails(2L, 100L, 1, 20))
+            .isInstanceOf(BusinessException.class)
+            .extracting("errorCode")
+            .isEqualTo(AiDeliveryErrorCode.ACCESS_DENIED);
+
+        verify(runTokenUsageRepository, never()).pageByRequirementPk(any(), any(Long.class), any(Long.class));
+    }
+
+    @Test
     void appendRejectsNegativeTokenValues() {
         stubAuthorizedRun();
         RunTokenUsageCreateRequest request = request();
@@ -179,7 +233,7 @@ class RunTokenUsageServiceTest {
         request.setUsageFingerprint(FINGERPRINT);
         request.setUsage(usage(60835L, 32512L, 294L, 171L));
         request.setRawUsageJson("{\"input_tokens\":60835}");
-        request.setOccurredAt(LocalDateTime.of(2026, 6, 22, 10, 20));
+        request.setOccurredAt(OffsetDateTime.of(2026, 6, 22, 2, 20, 0, 0, ZoneOffset.UTC));
         return request;
     }
 

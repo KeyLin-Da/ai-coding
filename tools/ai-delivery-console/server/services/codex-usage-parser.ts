@@ -14,6 +14,7 @@ export interface CodexUsageEvent {
   usage: NormalizedCodexUsage;
   rawUsageJson: string;
   rawEventJson: string;
+  occurredAt?: string;
 }
 
 export class CodexUsageNdjsonParser {

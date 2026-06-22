@@ -15,6 +15,14 @@ export interface CenterJobCreatePayload {
   paramsJson: string;
 }
 
+export interface CenterJobVO {
+  id: number;
+  requirementPk: number;
+  actionType: string;
+  status: string;
+  runId?: number;
+}
+
 export interface CenterRunEventPayload {
   runId: number;
   seq?: number;
@@ -43,9 +51,9 @@ export interface CenterRunTokenUsagePayload {
   occurredAt?: string;
 }
 
-export function buildCenterJobCreatePayload(workflow: RequirementWorkflow, action: ActionInput): CenterJobCreatePayload {
+export function buildCenterJobCreatePayload(workflow: RequirementWorkflow, action: ActionInput, localRunId?: string): CenterJobCreatePayload {
   validateActionInput('', action, { skipPathValidation: true });
-  const requirementPk = Number(action.params?.requirementPk || action.params?.requirementIdPk || 0);
+  const requirementPk = Number(action.params?.requirementPk || action.params?.requirementIdPk || workflow.id || 0);
   if (!Number.isFinite(requirementPk) || requirementPk <= 0) {
     throw new Error('缺少中心服务 requirementPk，无法创建远程 Job');
   }
@@ -55,6 +63,7 @@ export function buildCenterJobCreatePayload(workflow: RequirementWorkflow, actio
     paramsJson: JSON.stringify({
       requirementId: workflow.requirementId,
       title: workflow.title,
+      ...(localRunId ? { localRunId } : {}),
       ...(action.params || {})
     })
   };
@@ -71,8 +80,21 @@ export function mapRunEventToCenter(runId: number, event: RunEvent, seq?: number
   };
 }
 
-export async function createCenterJob(config: CenterRunnerConfig, payload: CenterJobCreatePayload): Promise<unknown> {
-  return postJson(config, '/api/ai-delivery/jobs', payload);
+export async function createCenterJob(config: CenterRunnerConfig, payload: CenterJobCreatePayload): Promise<CenterJobVO> {
+  return postJson(config, '/api/ai-delivery/jobs', payload) as Promise<CenterJobVO>;
+}
+
+export async function claimCenterJob(config: CenterRunnerConfig, jobId: number): Promise<CenterJobVO> {
+  return postJson(config, `/api/ai-delivery/jobs/${jobId}/claim`, {
+    clientSessionId: Number(config.clientSessionId),
+    capabilities: ['ALL']
+  }) as Promise<CenterJobVO>;
+}
+
+export async function renewCenterJob(config: CenterRunnerConfig, jobId: number): Promise<CenterJobVO> {
+  return postJson(config, `/api/ai-delivery/jobs/${jobId}/renew`, {
+    clientSessionId: Number(config.clientSessionId)
+  }) as Promise<CenterJobVO>;
 }
 
 export async function uploadCenterRunEvent(config: CenterRunnerConfig, payload: CenterRunEventPayload): Promise<unknown> {
@@ -94,6 +116,10 @@ export async function failCenterJob(config: CenterRunnerConfig, jobId: number, e
     clientSessionId: Number(config.clientSessionId),
     errorMessage
   });
+}
+
+export async function cancelCenterJob(config: CenterRunnerConfig, jobId: number): Promise<unknown> {
+  return postJson(config, `/api/ai-delivery/jobs/${jobId}/cancel`, {});
 }
 
 function mapRunEventType(type: RunEvent['type']): CenterRunEventPayload['type'] {

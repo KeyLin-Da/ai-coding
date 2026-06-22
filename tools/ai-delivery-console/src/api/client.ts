@@ -6,6 +6,7 @@ import type {
   GitStageUntrackedInput,
   OpenSpecSummary,
   RequirementTokenUsageSummary,
+  RequirementTokenUsagePage,
   RequirementInput,
   RequirementWorkflow,
   ReviewInput,
@@ -469,6 +470,21 @@ function normalizeRequirementTokenUsage(requirementPk: string | number, value?: 
       bucketKey: bucket.bucketKey || 'UNKNOWN',
       summary: normalizeTokenUsageSummary(bucket.summary)
     }))
+  };
+}
+
+function normalizeRequirementTokenUsagePage(
+  requirementPk: string | number,
+  page: number,
+  pageSize: number,
+  value?: Partial<RequirementTokenUsagePage>
+): RequirementTokenUsagePage {
+  return {
+    requirementPk: value?.requirementPk ?? requirementPk,
+    page: numberOrZero(value?.page) || page,
+    pageSize: numberOrZero(value?.pageSize) || pageSize,
+    total: numberOrZero(value?.total),
+    items: (value?.items || []).map((detail) => normalizeRunTokenUsageDetail(detail.runId || '', detail))
   };
 }
 
@@ -1004,6 +1020,15 @@ export const apiClient = {
     return request<RequirementTokenUsageSummary>(
       `/api/ai-delivery/requirements/${encodeURIComponent(String(requirementPk))}/token-usage-summary`
     ).then((value) => normalizeRequirementTokenUsage(requirementPk, value));
+  },
+  getRequirementTokenUsageDetails(requirementPk: string | number, page = 1, pageSize = 20) {
+    if (!isCenterRunId(requirementPk)) {
+      return Promise.resolve({ requirementPk, page, pageSize, total: 0, items: [] } as RequirementTokenUsagePage);
+    }
+    const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+    return request<RequirementTokenUsagePage>(
+      `/api/ai-delivery/requirements/${encodeURIComponent(String(requirementPk))}/token-usages?${params.toString()}`
+    ).then((value) => normalizeRequirementTokenUsagePage(requirementPk, page, pageSize, value));
   },
   listProjectTokenUsageSummaries(projectId: string | number) {
     if (!projectId || !isCenterRunId(projectId)) {

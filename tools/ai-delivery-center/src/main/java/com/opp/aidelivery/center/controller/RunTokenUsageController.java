@@ -3,6 +3,7 @@ package com.opp.aidelivery.center.controller;
 import com.opp.aidelivery.center.common.api.ApiResponse;
 import com.opp.aidelivery.center.model.dto.RunTokenUsageCreateRequest;
 import com.opp.aidelivery.center.model.vo.RequirementTokenUsageSummaryVO;
+import com.opp.aidelivery.center.model.vo.RequirementTokenUsagePageVO;
 import com.opp.aidelivery.center.model.vo.RunTokenUsageRunVO;
 import com.opp.aidelivery.center.model.vo.RunTokenUsageSaveVO;
 import com.opp.aidelivery.center.service.RunTokenUsageService;
@@ -53,6 +54,16 @@ public class RunTokenUsageController {
         @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to
     ) {
         return ApiResponse.ok(runTokenUsageService.summarizeRequirement(userId, requirementPk, stage, agentId, from, to));
+    }
+
+    @GetMapping("/requirements/{requirementPk}/token-usages")
+    public ApiResponse<RequirementTokenUsagePageVO> pageRequirementDetails(
+        @RequestHeader("X-User-Id") Long userId,
+        @PathVariable Long requirementPk,
+        @RequestParam(defaultValue = "1") Integer page,
+        @RequestParam(defaultValue = "20") Integer pageSize
+    ) {
+        return ApiResponse.ok(runTokenUsageService.pageRequirementDetails(userId, requirementPk, page, pageSize));
     }
 
     @GetMapping("/projects/{projectId}/token-usage-summaries")

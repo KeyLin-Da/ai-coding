@@ -413,14 +413,17 @@ CODEX_INTERACTIVE_COMMAND='codex --sandbox workspace-write -C {workspaceRoot} {p
 
 1. Runner 会把技能动作包装成 runtime 下的 `prompts/{runId}.md`
 2. 将 stdout/stderr 写入 runtime 下的 `runs/{runId}.jsonl`
-3. Codex 后台执行默认使用 JSON 输出，Runner 会解析 `turn.completed.usage` 并记录 token 明细
-4. Agent 输出上传为中心 run event，并通过 WebSocket run 订阅追加到页面日志
-5. Center runId 场景会把 token usage 入库；本地字符串 runId 仅保留日志展示并跳过中心统计
-6. 用户可以复制生成的命令文本交给 Agent 执行；执行完成后在页面点击「刷新产物」重新索引文件。
+3. 平台发起 Codex 动作时先创建并认领 Center Job/Run，本地 `run-...` 与 Center 数字 Run ID 会同时保存在运行记录中
+4. Codex 后台执行解析 `turn.completed.usage`；本地终端和交互终端解析 Codex 原生 Session JSONL 的 `token_count`
+5. Token 明细先写入本地 run event，再上传 Center；上传失败时进入本地 outbox，后续打开需求或轮询运行状态时自动补传
+6. Agent 输出上传为中心 run event，并通过 WebSocket run 订阅追加到页面日志
+7. 用户可以复制生成的命令文本交给 Agent 执行；执行完成后在页面点击「刷新产物」重新索引文件。
 
 ### Token 用量统计
 
-Codex 后台执行产生结构化 usage 时，控制台会在需求详情、阶段工具栏、运行日志抽屉和需求列表展示 token 用量。统计字段包括输入 token、缓存输入 token、输出 token、推理输出 token 和总 token。
+交付平台发起的 Codex 后台、本地终端和交互终端执行都会采集 token，并在需求详情、阶段工具栏、运行日志抽屉和需求列表展示。统计字段包括输入 token、缓存输入 token、输出 token、推理输出 token 和总 token。
+
+终端模式读取 `$CODEX_HOME/sessions/` 下 Codex 原生 Session JSONL，通过 Prompt 中的本地 Run ID 精确关联运行；系统不会解析终端屏幕文本估算 token。平台外手工启动、且 Prompt 中没有交付平台 Run ID 的 Codex Session 不属于交付平台统计范围。
 
 这里展示的 token 仅表示模型请求/响应的 token 数量，用于排查高消耗运行和做需求维度统计，不代表人民币、美元或任何实际账单金额。费用核算仍以模型供应商或组织账单系统为准。
 

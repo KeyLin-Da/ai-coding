@@ -5,8 +5,19 @@ import { implementationStepForAction, stageForAction } from '../../shared/workfl
 import type { RequirementWorkflow } from '../../shared/workflow';
 import { createRunId, appendRunEvent } from './run-log';
 import { assertInsideWorkspace, normalizeRequirementId } from './workspace';
-import { getAgentProvider, startAgentInTerminal, startAgentProcess } from './agent-providers';
-import type { CenterRunnerConfig } from './center-runner-adapter';
+import {
+  beginCenterJobLease,
+  finishCenterJobForRun,
+  getAgentProvider,
+  startAgentInTerminal,
+  startAgentProcess
+} from './agent-providers';
+import {
+  buildCenterJobCreatePayload,
+  claimCenterJob,
+  createCenterJob,
+  type CenterRunnerConfig
+} from './center-runner-adapter';
 import { normalizePrdClarification } from './workflow-repository';
 import { hasStagedTrackedChanges, readGitChanges } from './git-changes';
 import { buildArtifactPublishEvents, captureControlledArtifactSnapshot } from './manual-artifact-sharing';
@@ -580,13 +591,86 @@ export async function executeAction(
     return run;
   }
 
+  if (provider.id === 'codex' && workflow.id && options.centerConfig) {
+    try {
+      const centerJob = await createCenterJob(
+        options.centerConfig,
+        buildCenterJobCreatePayload(workflow, normalizedAction, run.id)
+      );
+      const claimedJob = await claimCenterJob(options.centerConfig, centerJob.id);
+      if (!claimedJob.runId) {
+        throw new Error('中心服务未返回 Run ID');
+      }
+      run.centerJobId = claimedJob.id;
+      run.centerRunId = claimedJob.runId;
+      await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
+        type: 'INFO',
+        level: 'INFO',
+        message: `已建立 Center Run 映射: ${claimedJob.runId}`,
+        agentId,
+        data: {
+          kind: 'CENTER_RUN_MAPPED',
+          centerJobId: claimedJob.id,
+          centerRunId: claimedJob.runId
+        }
+      });
+      beginCenterJobLease(run, options.centerConfig);
+    } catch (error: any) {
+      run.status = 'FAILED';
+      run.error = `无法建立 Center Run，已阻止 Codex 启动：${error?.message || 'unknown error'}`;
+      run.finishedAt = new Date().toISOString();
+      await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
+        type: 'ERROR',
+        level: 'ERROR',
+        message: run.error,
+        agentId
+      });
+      return run;
+    }
+  }
+
   const onRunUpdateWithArtifacts = async (updatedRun: RunRecord) => {
+    if (
+      updatedRun.centerJobId
+      && options.centerConfig
+      && ['SUCCEEDED', 'FAILED', 'CANCELLED', 'COMPLETED'].includes(updatedRun.status)
+      && !updatedRun.centerSyncedAt
+    ) {
+      try {
+        await finishCenterJobForRun(updatedRun, options.centerConfig);
+        updatedRun.centerSyncedAt = new Date().toISOString();
+      } catch {
+        // 状态保留为未同步，后续需求刷新会继续补偿。
+      }
+    }
     await appendChangedArtifactEvents(updatedRun);
     await onRunUpdate(updatedRun);
   };
-  return ['TERMINAL', 'INTERACTIVE_TERMINAL'].includes(executionMode(params))
-    ? startAgentInTerminal(workspaceRoot, workflow, run, provider, commandText, projectPaths)
-    : startAgentProcess(workspaceRoot, workflow, run, provider, commandText, onRunUpdateWithArtifacts, projectPaths, options.centerConfig);
+  if (['TERMINAL', 'INTERACTIVE_TERMINAL'].includes(executionMode(params))) {
+    const terminalRun = await startAgentInTerminal(
+      workspaceRoot,
+      workflow,
+      run,
+      provider,
+      commandText,
+      projectPaths,
+      options.centerConfig
+    );
+    if (['FAILED', 'CANCELLED'].includes(terminalRun.status)) {
+      await onRunUpdateWithArtifacts(terminalRun);
+    }
+    return terminalRun;
+  }
+  return startAgentProcess(
+    workspaceRoot,
+    workflow,
+    run,
+    provider,
+    commandText,
+    onRunUpdateWithArtifacts,
+    projectPaths,
+    options.centerConfig
+  );
 }
 
 export const internalForTests = {

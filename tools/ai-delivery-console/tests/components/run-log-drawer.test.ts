@@ -119,4 +119,47 @@ describe('RunLogDrawer', () => {
       model: 'gpt-5'
     });
   });
+
+  it('终端日志过滤结构化 Token 明细事件', async () => {
+    const wrapper = mount(RunLogDrawer, {
+      props: {
+        events: [
+          {
+            time: '2026-06-22T10:20:00.000Z',
+            type: 'INFO',
+            level: 'INFO',
+            message: 'Token usage',
+            text: '{"type":"token_count"}',
+            data: {
+              kind: 'TOKEN_USAGE',
+              usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 }
+            }
+          },
+          {
+            time: '2026-06-22T10:21:00.000Z',
+            type: 'STDOUT',
+            level: 'INFO',
+            message: '正常运行日志'
+          }
+        ]
+      },
+      global: {
+        stubs: {
+          ElDrawer: {
+            props: ['modelValue'],
+            template: '<div v-if="modelValue"><slot name="header" /><slot /></div>'
+          },
+          ElButton: { template: '<button><slot /></button>' },
+          ElEmpty: { template: '<div />' }
+        }
+      }
+    });
+
+    (wrapper.vm as any).open();
+    await nextTick();
+
+    expect(wrapper.text()).toContain('正常运行日志');
+    expect(wrapper.text()).not.toContain('{"type":"token_count"}');
+    expect((wrapper.vm as any).terminalEvents).toHaveLength(1);
+  });
 });

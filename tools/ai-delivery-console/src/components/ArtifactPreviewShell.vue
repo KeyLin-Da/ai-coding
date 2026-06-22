@@ -7,6 +7,17 @@
         <p v-if="versionText" class="version-text">{{ versionText }}</p>
       </div>
       <div class="preview-actions">
+        <el-radio-group
+          v-if="isMarkdown"
+          class="preview-reading-mode"
+          :model-value="readingMode"
+          size="small"
+          aria-label="产物阅读模式"
+          @change="changeReadingMode"
+        >
+          <el-radio-button value="RICH" @click="changeReadingMode('RICH')">HTML 预览</el-radio-button>
+          <el-radio-button value="CLASSIC" @click="changeReadingMode('CLASSIC')">Markdown 预览</el-radio-button>
+        </el-radio-group>
         <TechDesignVersionSelector
           v-if="isPrivateTechDesignMarkdown"
           v-model="selectedVersionId"
@@ -97,6 +108,7 @@
               v-if="isMarkdown"
               ref="markdownPreviewRef"
               class="markdown-preview artifact-markdown"
+              :class="readingModeClass"
               v-html="previewHtml"
               @mouseup="captureSelection"
               @keyup="captureSelection"
@@ -154,10 +166,19 @@ import MarkdownOutlineNav from '@/components/MarkdownOutlineNav.vue';
 import TechDesignAnnotationPanel from '@/components/TechDesignAnnotationPanel.vue';
 import TechDesignVersionSelector from '@/components/TechDesignVersionSelector.vue';
 import { TECH_DESIGN_ANNOTATION_CHANGED_EVENT, type TechDesignAnnotationChangedDetail } from '@/services/annotation-realtime';
+import {
+  artifactMarkdownRenderCache,
+  artifactMermaidSvgCache,
+  createPreviewCacheKey,
+  escapePreviewHtml,
+  renderMarkdownSafely,
+  stableTextHash
+} from '@/utils/artifact-preview-rendering';
 import { artifactReadUrl, publicArtifactAssetUrl, rewriteMarkdownImageSources } from '@/utils/markdown-assets';
 import { applyAnnotationHighlights, createAnnotationAnchor } from '@/utils/tech-design-annotations';
 
 type DownloadFormat = 'markdown' | 'html' | 'pdf';
+type ReadingMode = 'RICH' | 'CLASSIC';
 
 interface MarkdownOutlineItem {
   id: string;
@@ -226,7 +247,11 @@ const zoomStepPercent = 10;
 const sequenceReadableZoomThreshold = 130;
 const sequenceReadableScale = 0.1;
 const sequenceReadableMinWidth = 2300;
+const markdownRendererVersion = 'markdown-v1';
+const mermaidRendererVersion = 'mermaid-v1';
+const mermaidTheme = 'default';
 const zoomPercent = ref(defaultZoomPercent);
+const readingMode = ref<ReadingMode>('RICH');
 const internalContent = ref('');
 const internalLoading = ref(false);
 const loadingVersions = ref(false);
@@ -241,6 +266,9 @@ const annotationPanelVisible = ref(true);
 const outlineItems = ref<MarkdownOutlineItem[]>([]);
 const activeOutlineId = ref('');
 let outlineObserver: IntersectionObserver | undefined;
+let renderGeneration = 0;
+let richPreviewWarningPath = '';
+let markdownFallbackWarningKey = '';
 
 function readEyeCareMode() {
   try {
@@ -263,7 +291,7 @@ const outlineCollapsed = ref(readOutlineCollapsed());
 
 mermaid.initialize({
   startOnLoad: false,
-  theme: 'default',
+  theme: mermaidTheme,
   securityLevel: 'loose'
 });
 
@@ -300,6 +328,9 @@ const isTechDesignMarkdown = computed(() =>
 );
 const isPublicPreview = computed(() => Boolean(props.publicToken));
 const isPrivateTechDesignMarkdown = computed(() => isTechDesignMarkdown.value && !isPublicPreview.value);
+const readingModeClass = computed(() =>
+  readingMode.value === 'RICH' ? 'artifact-markdown--rich' : 'artifact-markdown--classic'
+);
 const effectiveContent = computed(() => internalContent.value || props.content || '');
 const effectiveLoading = computed(() => props.loading || internalLoading.value || loadingVersions.value);
 const zoomScale = computed(() => zoomPercent.value / 100);
@@ -313,8 +344,19 @@ const assetUrl = computed(() => {
   }
   return props.publicToken ? publicArtifactAssetUrl(props.publicToken, props.artifact.path) : artifactReadUrl(props.artifact.path, props.projectId);
 });
+const markdownRenderResult = computed(() => {
+  if (!isMarkdown.value) {
+    return { html: '', cacheKey: '', fromCache: false, degraded: false, error: undefined };
+  }
+  return renderMarkdownSafely({
+    content: effectiveContent.value || '',
+    rendererVersion: markdownRendererVersion,
+    cache: artifactMarkdownRenderCache,
+    render: (content) => md.render(content)
+  });
+});
 const previewHtml = computed(() => {
-  const rendered = md.render(effectiveContent.value || '');
+  const rendered = markdownRenderResult.value.html;
   return rewriteMarkdownImageSources(
     rendered,
     props.artifact?.path,
@@ -395,10 +437,33 @@ const selectionMenuStyle = computed<Record<string, string>>(() => ({
 watch(
   previewHtml,
   async () => {
+    const generation = ++renderGeneration;
     await nextTick();
-    await renderMermaidDiagrams().catch((error) => console.error('Mermaid rendering error:', error));
     rebuildOutline();
     applyAnnotationMarks();
+    enhanceRichPreview();
+    void renderMermaidDiagrams(generation)
+      .then(() => {
+        if (generation === renderGeneration) {
+          applyAnnotationMarks();
+          enhanceRichPreview();
+        }
+      })
+      .catch((error) => logPreviewRenderError('mermaid-batch', error));
+  },
+  { immediate: true }
+);
+
+watch(
+  markdownRenderResult,
+  (result) => {
+    if (!result.degraded || !result.cacheKey || result.cacheKey === markdownFallbackWarningKey) {
+      return;
+    }
+    markdownFallbackWarningKey = result.cacheKey;
+    readingMode.value = 'CLASSIC';
+    logPreviewRenderError('markdown-fallback', result.error);
+    ElMessage.warning('文档渲染异常，已使用安全文本模式展示');
   },
   { immediate: true }
 );
@@ -410,6 +475,15 @@ watch(
     void loadTechDesignContext();
   },
   { immediate: true }
+);
+
+watch(
+  () => props.artifact?.path,
+  (nextPath, previousPath) => {
+    if (nextPath !== previousPath) {
+      readingMode.value = 'RICH';
+    }
+  }
 );
 
 watch(selectedVersionId, async () => {
@@ -452,6 +526,21 @@ function zoomOut() {
 
 function resetZoom() {
   setZoom(defaultZoomPercent);
+}
+
+async function changeReadingMode(value: string | number | boolean | undefined) {
+  const nextMode: ReadingMode = value === 'CLASSIC' ? 'CLASSIC' : 'RICH';
+  if (nextMode === readingMode.value) {
+    return;
+  }
+  const scroller = previewScrollRef.value;
+  const scrollTop = scroller?.scrollTop || 0;
+  readingMode.value = nextMode;
+  await nextTick();
+  if (scroller) {
+    scroller.scrollTop = scrollTop;
+  }
+  enhanceRichPreview();
 }
 
 function resetPreviewContext() {
@@ -579,9 +668,84 @@ function handleTechDesignAnnotationChanged(event: Event) {
   });
 }
 
-async function renderMermaidDiagrams() {
-  const nodes = markdownPreviewRef.value ? Array.from(markdownPreviewRef.value.querySelectorAll<HTMLElement>('.mermaid')) : [];
-  await mermaid.run(nodes.length ? { nodes } : undefined);
+function logPreviewRenderError(stage: string, error: unknown) {
+  console.error('Artifact preview rendering error', {
+    stage,
+    path: props.artifact?.path || '',
+    contentHash: props.artifact?.hash || stableTextHash(effectiveContent.value || ''),
+    message: error instanceof Error ? error.message : String(error || 'unknown error')
+  });
+}
+
+function enhanceRichPreview() {
+  if (readingMode.value !== 'RICH' || !markdownPreviewRef.value) {
+    return;
+  }
+  try {
+    markdownPreviewRef.value.querySelectorAll<HTMLElement>('table, blockquote, pre').forEach((element) => {
+      element.dataset.richPreview = 'true';
+    });
+  } catch (error) {
+    readingMode.value = 'CLASSIC';
+    logPreviewRenderError('rich-enhancement', error);
+    const artifactPath = props.artifact?.path || 'unknown';
+    if (richPreviewWarningPath !== artifactPath) {
+      richPreviewWarningPath = artifactPath;
+      ElMessage.warning('HTML 精排加载失败，已切换到 Markdown 预览');
+    }
+  }
+}
+
+function showMermaidError(node: HTMLElement, source: string) {
+  node.classList.add('mermaid-render-error');
+  node.dataset.previewRendered = 'true';
+  node.innerHTML = `<div class="mermaid-error-title">图表渲染失败，已保留原始内容</div><pre><code>${escapePreviewHtml(source)}</code></pre>`;
+}
+
+async function renderMermaidDiagrams(generation = renderGeneration) {
+  const nodes = markdownPreviewRef.value
+    ? Array.from(markdownPreviewRef.value.querySelectorAll<HTMLElement>('.mermaid')).filter(
+        (node) => node.dataset.previewRendered !== 'true'
+      )
+    : [];
+  for (const node of nodes) {
+    if (generation !== renderGeneration || !markdownPreviewRef.value?.contains(node)) {
+      return;
+    }
+    const source = node.textContent?.trim() || '';
+    const cacheKey = createPreviewCacheKey('mermaid', source, `${mermaidTheme}:${mermaidRendererVersion}`);
+    try {
+      const cachedSvg = artifactMermaidSvgCache.get(cacheKey);
+      if (cachedSvg != null) {
+        node.innerHTML = cachedSvg;
+        node.dataset.previewRendered = 'true';
+        continue;
+      }
+    } catch (error) {
+      logPreviewRenderError('mermaid-cache-read', error);
+    }
+    try {
+      await mermaid.run({ nodes: [node] });
+      if (generation !== renderGeneration || !markdownPreviewRef.value?.contains(node)) {
+        return;
+      }
+      node.dataset.previewRendered = 'true';
+      if (node.querySelector('svg')) {
+        try {
+          artifactMermaidSvgCache.set(cacheKey, node.innerHTML);
+        } catch (error) {
+          logPreviewRenderError('mermaid-cache-write', error);
+        }
+      }
+      enhanceMermaidDiagrams();
+    } catch (error) {
+      if (generation !== renderGeneration || !markdownPreviewRef.value?.contains(node)) {
+        return;
+      }
+      logPreviewRenderError('mermaid-diagram', error);
+      showMermaidError(node, source);
+    }
+  }
   enhanceMermaidDiagrams();
 }
 
@@ -1358,7 +1522,8 @@ defineExpose({ downloadMarkdownArtifact, downloadOriginalArtifact });
 
 .preview-actions,
 .preview-zoom-controls,
-.eye-care-toggle {
+.eye-care-toggle,
+.preview-reading-mode {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -1463,6 +1628,156 @@ defineExpose({ downloadMarkdownArtifact, downloadOriginalArtifact });
   background: #ffffff;
 }
 
+.artifact-markdown--classic {
+  border-radius: 0;
+}
+
+.artifact-markdown--rich {
+  width: calc(100% - 48px);
+  max-width: 1080px;
+  min-height: calc(100% - 48px);
+  margin: 24px auto;
+  padding: clamp(32px, 4vw, 56px);
+  color: #24324a;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
+  font-size: 15px;
+  line-height: 1.78;
+}
+
+.artifact-markdown--rich :deep(h1),
+.artifact-markdown--rich :deep(h2),
+.artifact-markdown--rich :deep(h3),
+.artifact-markdown--rich :deep(h4),
+.artifact-markdown--rich :deep(h5),
+.artifact-markdown--rich :deep(h6) {
+  color: #172033;
+  font-weight: 700;
+  line-height: 1.36;
+  scroll-margin-top: 24px;
+}
+
+.artifact-markdown--rich :deep(h1) {
+  margin: 0 0 32px;
+  padding-bottom: 18px;
+  border-bottom: 2px solid #dbe5f3;
+  font-size: clamp(28px, 3vw, 38px);
+  letter-spacing: -0.025em;
+}
+
+.artifact-markdown--rich :deep(h2) {
+  margin: 44px 0 18px;
+  padding-left: 12px;
+  border-left: 4px solid #3b82f6;
+  font-size: 24px;
+}
+
+.artifact-markdown--rich :deep(h3) {
+  margin: 32px 0 14px;
+  font-size: 19px;
+}
+
+.artifact-markdown--rich :deep(h4),
+.artifact-markdown--rich :deep(h5),
+.artifact-markdown--rich :deep(h6) {
+  margin: 24px 0 10px;
+  font-size: 16px;
+}
+
+.artifact-markdown--rich :deep(p),
+.artifact-markdown--rich :deep(ul),
+.artifact-markdown--rich :deep(ol) {
+  margin: 0 0 16px;
+}
+
+.artifact-markdown--rich :deep(li + li) {
+  margin-top: 6px;
+}
+
+.artifact-markdown--rich :deep(a) {
+  color: #2563eb;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.artifact-markdown--rich :deep(blockquote) {
+  margin: 24px 0;
+  padding: 14px 18px;
+  color: #44546a;
+  border-left: 4px solid #93c5fd;
+  border-radius: 0 8px 8px 0;
+  background: #eff6ff;
+}
+
+.artifact-markdown--rich :deep(blockquote > :last-child) {
+  margin-bottom: 0;
+}
+
+.artifact-markdown--rich :deep(code) {
+  padding: 2px 6px;
+  color: #be185d;
+  border-radius: 5px;
+  background: #f1f5f9;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.9em;
+}
+
+.artifact-markdown--rich :deep(pre) {
+  margin: 22px 0;
+  padding: 18px 20px;
+  overflow: auto;
+  color: #dbeafe;
+  border: 1px solid #1e293b;
+  border-radius: 10px;
+  background: #0f172a;
+  line-height: 1.65;
+}
+
+.artifact-markdown--rich :deep(pre code) {
+  padding: 0;
+  color: inherit;
+  background: transparent;
+}
+
+.artifact-markdown--rich :deep(table) {
+  display: block;
+  width: 100%;
+  margin: 24px 0;
+  overflow-x: auto;
+  border-spacing: 0;
+  border-collapse: collapse;
+}
+
+.artifact-markdown--rich :deep(th),
+.artifact-markdown--rich :deep(td) {
+  min-width: 120px;
+  padding: 11px 14px;
+  border: 1px solid #dbe3ef;
+  text-align: left;
+  vertical-align: top;
+}
+
+.artifact-markdown--rich :deep(th) {
+  color: #1e293b;
+  background: #f1f5f9;
+  font-weight: 700;
+}
+
+.artifact-markdown--rich :deep(tr:nth-child(even) td) {
+  background: #f8fafc;
+}
+
+.artifact-markdown--rich :deep(img) {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 24px auto;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.1);
+}
+
 .artifact-markdown :deep(.mermaid-diagram) {
   width: 100%;
   margin: 24px 0 28px;
@@ -1475,6 +1790,36 @@ defineExpose({ downloadMarkdownArtifact, downloadOriginalArtifact });
   display: block;
   max-width: 100%;
   height: auto;
+}
+
+.artifact-markdown :deep(.mermaid-render-error) {
+  padding: 16px;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fef2f2;
+}
+
+.artifact-markdown :deep(.mermaid-error-title) {
+  margin-bottom: 10px;
+  font-weight: 700;
+}
+
+.artifact-markdown :deep(.mermaid-render-error pre) {
+  margin: 0;
+  color: #7f1d1d;
+  border-color: #fecaca;
+  background: #fff7f7;
+  white-space: pre-wrap;
+}
+
+.artifact-markdown :deep(.markdown-render-fallback) {
+  min-height: 240px;
+  margin: 0;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  white-space: pre-wrap;
 }
 
 .artifact-markdown :deep(.tech-design-annotation-highlight) {
@@ -1563,6 +1908,16 @@ defineExpose({ downloadMarkdownArtifact, downloadOriginalArtifact });
   .preview-layout.with-annotations,
   .preview-layout.with-outline.with-annotations {
     grid-template-columns: 1fr;
+  }
+
+  .artifact-markdown--rich {
+    width: 100%;
+    min-height: 100%;
+    margin: 0;
+    padding: 24px 18px;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
   }
 }
 </style>

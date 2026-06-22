@@ -12,7 +12,7 @@
         />
       </div>
     </template>
-    <el-empty v-if="!events.length" description="暂无日志" />
+    <el-empty v-if="!hasContent" description="暂无日志" />
     <div v-else class="run-log-content">
       <section class="usage-panel">
         <div class="usage-summary">
@@ -34,29 +34,9 @@
           </span>
           <em>{{ displayUsage.summary.detailCount ? `明细 ${displayUsage.summary.detailCount} 条` : '暂无 token 用量' }}</em>
         </div>
-        <el-table v-if="displayUsage.details.length" :data="displayUsage.details" size="small" class="usage-table">
-          <el-table-column prop="sourceEventType" label="事件" min-width="130" />
-          <el-table-column prop="model" label="模型" min-width="110" />
-          <el-table-column label="输入" width="90">
-            <template #default="{ row }">{{ formatTokenCount(row.inputTokens) }}</template>
-          </el-table-column>
-          <el-table-column label="缓存输入" width="100">
-            <template #default="{ row }">{{ formatTokenCount(row.cachedInputTokens) }}</template>
-          </el-table-column>
-          <el-table-column label="输出" width="90">
-            <template #default="{ row }">{{ formatTokenCount(row.outputTokens) }}</template>
-          </el-table-column>
-          <el-table-column label="推理输出" width="100">
-            <template #default="{ row }">{{ formatTokenCount(row.reasoningOutputTokens) }}</template>
-          </el-table-column>
-          <el-table-column label="总计" width="90">
-            <template #default="{ row }">{{ formatTokenCount(row.totalTokens) }}</template>
-          </el-table-column>
-          <el-table-column prop="occurredAt" label="时间" min-width="170" />
-        </el-table>
       </section>
-      <div class="terminal">
-        <div v-for="(event, index) in events" :key="index" class="terminal-line" :class="event.level.toLowerCase()">
+      <div v-if="terminalEvents.length" class="terminal">
+        <div v-for="(event, index) in terminalEvents" :key="index" class="terminal-line" :class="event.level.toLowerCase()">
           <span class="time">{{ event.time }}</span>
           <span class="type">{{ event.type || event.level }}</span>
           <div class="log-message">
@@ -65,6 +45,7 @@
           </div>
         </div>
       </div>
+      <el-empty v-else description="暂无运行日志" />
     </div>
   </el-drawer>
 </template>
@@ -148,6 +129,11 @@ const displayUsage = computed(() => {
   }
   return derivedUsage.value;
 });
+const terminalEvents = computed(() => props.events.filter((event) => {
+  const data = event.data as { kind?: string } | undefined;
+  return data?.kind !== 'TOKEN_USAGE';
+}));
+const hasContent = computed(() => Boolean(props.events.length || displayUsage.value.summary.detailCount));
 
 function open() {
   visible.value = true;
@@ -233,10 +219,6 @@ defineExpose({ open });
   color: #64748b;
   font-size: 12px;
   font-style: normal;
-}
-
-.usage-table {
-  max-width: 100%;
 }
 
 .terminal {

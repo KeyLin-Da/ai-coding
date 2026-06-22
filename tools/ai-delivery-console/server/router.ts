@@ -11,7 +11,13 @@ import { assertPrdClarificationReady, buildActionCommand, executeAction, validat
 import { appendStageCommandLog, readRunEvents, readRunEventsWithTranscript, readTerminalTranscriptChunk, readTerminalTranscriptSize } from './services/run-log';
 import { readArtifact, saveArtifact } from './services/markdown-service';
 import { applyReview, refreshCodeReviewIssues, returnToImplementation } from './services/review-service';
-import { cancelAgentRun, listAgentProviders, refreshTerminalRunStatuses } from './services/agent-providers';
+import {
+  cancelAgentRun,
+  finishCenterJobForRun,
+  listAgentProviders,
+  refreshTerminalRunStatuses,
+  retryWorkflowCenterRunStatuses
+} from './services/agent-providers';
 import { normalizeOpenSpecChangeName, readOpenSpecSummary, updateOpenSpecTaskStatus } from './services/openspec-summary';
 import { readGitChanges, stageUntrackedFiles } from './services/git-changes';
 import { buildArtifactGitSyncPlan, confirmArtifactGitSync, type ArtifactGitSyncConfirmInput, type ArtifactGitSyncPlanInput } from './services/artifact-git-sync';
@@ -19,6 +25,8 @@ import { centerPublicRequest, centerRequest } from './services/center-client';
 import { readProjectHistory, listProjectsFromConfiguredPaths } from './services/project-history';
 import { assertProjectPathsConfigured, loadPrivateProjectSettings, loadSettings, saveSettings, validateSettings } from './services/project-settings';
 import { parseLocalRequestContext, type LocalRequestContext } from './services/local-request-context';
+import type { CenterRunnerConfig } from './services/center-runner-adapter';
+import { retryWorkflowTokenUsageOutboxes } from './services/token-usage-recorder';
 import { localServiceError } from './services/local-errors';
 import { generateLocalGitCredential, regenerateLocalGitCredential, type LocalGitCredentialGenerateInput } from './services/local-git-credentials';
 import { cloneProjectRepository, commitAndPushProjectRepository, inspectProjectRepository, readProjectRepositoryStatus, resolveProjectRepoPath, syncProjectRepository } from './services/project-repository';
@@ -104,6 +112,15 @@ interface ArtifactSharePayload {
   token?: string;
   publicPath?: string;
   realtimeChannel?: string;
+}
+
+function centerRunnerConfig(context: LocalRequestContext): CenterRunnerConfig {
+  return {
+    centerBaseUrl: context.centerBaseUrl || 'http://127.0.0.1:8728',
+    userId: context.userId,
+    clientSessionId: context.clientSessionId || 0,
+    accessToken: context.accessToken
+  };
 }
 
 async function parseBody<T>(request: IncomingMessage): Promise<T> {
@@ -689,7 +706,9 @@ export function createRouter(workspaceRoot: string) {
             if (!localWorkflow) {
               return merged;
             }
-            const refreshed = await refreshTerminalRunStatuses(root, merged);
+            const refreshed = await refreshTerminalRunStatuses(root, merged, centerRunnerConfig(requestContext));
+            await retryWorkflowTokenUsageOutboxes(root, refreshed.workflow, centerRunnerConfig(requestContext));
+            await retryWorkflowCenterRunStatuses(refreshed.workflow, centerRunnerConfig(requestContext));
             return saveWithArtifacts(root, repository, refreshed.workflow);
           }));
         } catch {
@@ -723,9 +742,11 @@ export function createRouter(workspaceRoot: string) {
           return;
         }
         workflow = await mergeTechDesignInputLedgerIntoWorkflow(store.root, workflow);
-        const refreshed = await refreshTerminalRunStatuses(store.root, workflow);
+        const refreshed = await refreshTerminalRunStatuses(store.root, workflow, centerRunnerConfig(requestContext));
         workflow = refreshed.workflow;
-        if (refreshed.changed) {
+        const outboxChanged = await retryWorkflowTokenUsageOutboxes(store.root, workflow, centerRunnerConfig(requestContext));
+        const centerStatusChanged = await retryWorkflowCenterRunStatuses(workflow, centerRunnerConfig(requestContext));
+        if (refreshed.changed || outboxChanged || centerStatusChanged) {
           workflow = await store.repository.save(workflow);
         }
         send(response, 200, { data: workflow });
@@ -1311,12 +1332,7 @@ export function createRouter(workspaceRoot: string) {
             await repository.save(latest);
           }, {
             projectPaths,
-            centerConfig: {
-              centerBaseUrl: requestContext.centerBaseUrl || 'http://127.0.0.1:8728',
-              userId: requestContext.userId,
-              clientSessionId: requestContext.clientSessionId || 0,
-              accessToken: requestContext.accessToken
-            }
+            centerConfig: centerRunnerConfig(requestContext)
           });
           
           const stage = run.stage || stageForAction(effectiveAction.actionType);
@@ -1440,8 +1456,12 @@ export function createRouter(workspaceRoot: string) {
           }
           let workflow = await repository.load(requirementId);
           if (workflow) {
-            const refreshed = await refreshTerminalRunStatuses(root, workflow);
-            workflow = refreshed.changed ? await repository.save(refreshed.workflow) : refreshed.workflow;
+            const refreshed = await refreshTerminalRunStatuses(root, workflow, centerRunnerConfig(requestContext));
+            const outboxChanged = await retryWorkflowTokenUsageOutboxes(root, refreshed.workflow, centerRunnerConfig(requestContext));
+            const centerStatusChanged = await retryWorkflowCenterRunStatuses(refreshed.workflow, centerRunnerConfig(requestContext));
+            workflow = refreshed.changed || outboxChanged || centerStatusChanged
+              ? await repository.save(refreshed.workflow)
+              : refreshed.workflow;
           }
           const run = workflow?.runs.find((item) => item.id === runStreamMatch[1]);
           const events = await readRunEvents(root, requirementId, runStreamMatch[1]);
@@ -1486,6 +1506,15 @@ export function createRouter(workspaceRoot: string) {
           if (run && cancelled) {
             run.status = 'CANCELLED';
             run.finishedAt = new Date().toISOString();
+            run.error = '用户取消运行';
+            try {
+              await finishCenterJobForRun(run, centerRunnerConfig(requestContext));
+              if (run.centerJobId && centerRunnerConfig(requestContext)) {
+                run.centerSyncedAt = new Date().toISOString();
+              }
+            } catch {
+              // 保留未同步状态，后续需求刷新会继续补偿。
+            }
             await repository.save(workflow);
           }
         }

@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { AgentProvider, RequirementWorkflow, RunRecord } from '../../shared/workflow';
 import { createEmptyStages } from '../../shared/workflow';
 import {
@@ -11,6 +11,7 @@ import {
   interactiveTerminalCommandLine,
   listAgentProviders,
   refreshTerminalRunStatuses,
+  retryWorkflowCenterRunStatuses,
   startAgentProcess,
   terminalCommandLine
 } from '../../server/services/agent-providers';
@@ -195,7 +196,7 @@ describe('agent-providers', () => {
     expect(events.some((event) => event.type === 'STDOUT' && event.text?.includes('stdin-envelope-ok'))).toBe(true);
   });
 
-  it('后台 Codex JSON 输出记录 token usage 并跳过本地字符串 runId 上报', async () => {
+  it('后台 Codex JSON 输出记录 token usage，未映射 Center Run 时只保留本地明细', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-agent-'));
     const provider: AgentProvider = {
       id: 'codex',
@@ -223,7 +224,7 @@ describe('agent-providers', () => {
     expect(updated.status).toBe('SUCCEEDED');
     expect(usageEvent?.message).toContain('Token usage');
     expect((usageEvent?.data as any).usage.totalTokens).toBe(12);
-    expect((usageEvent?.data as any).centerUpload).toBe('SKIPPED_LOCAL_RUN_ID');
+    expect((usageEvent?.data as any).centerUpload).toBe('SKIPPED_NO_CENTER_RUN');
   });
 
   it('Center token usage 上报失败不影响 Agent 成功状态', async () => {
@@ -244,7 +245,7 @@ describe('agent-providers', () => {
       available: true,
       supportsStreaming: true
     };
-    const run = { ...runRecord('700'), agentId: 'codex' };
+    const run = { ...runRecord('run-center-upload-failure'), agentId: 'codex', centerRunId: 700 };
     let resolveUpdate!: (run: RunRecord) => void;
     const updatedPromise = new Promise<RunRecord>((resolve) => {
       resolveUpdate = resolve;
@@ -270,6 +271,7 @@ describe('agent-providers', () => {
 
     expect(updated.status).toBe('SUCCEEDED');
     expect(events.some((event) => (event.data as any)?.kind === 'TOKEN_USAGE_UPLOAD_FAILED')).toBe(true);
+    expect(updated.tokenUsageOutboxPath).toContain('token-usage-outbox');
   });
 
   it('终端模式下 Codex STDIN 命令改为 prompt 参数以保留终端交互', () => {
@@ -522,6 +524,126 @@ describe('agent-providers', () => {
     expect(refreshed.workflow.runs[0].executionMode).toBe('INTERACTIVE_TERMINAL');
     expect(refreshed.workflow.runs[0].status).toBe('SUCCEEDED');
     expect(events.some((event) => event.type === 'EXIT' && event.message.includes('交互终端 Agent'))).toBe(true);
+  });
+
+  it.each(['TERMINAL', 'INTERACTIVE_TERMINAL'] as const)(
+    '%s 模式从 Codex Session 采集 token、上传 Center 并完成 Job',
+    async (executionMode) => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-terminal-token-'));
+      const codexHome = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-home-'));
+      const originalCodexHome = process.env.CODEX_HOME;
+      process.env.CODEX_HOME = codexHome;
+      const item = workflow();
+      const run: RunRecord = {
+        ...runRecord(`run-${executionMode.toLowerCase()}-token`),
+        agentId: 'codex',
+        status: 'TERMINAL_OPENED',
+        executionMode,
+        centerJobId: 500,
+        centerRunId: 900,
+        terminalStatusPath: `.ai-delivery-runtime/requirements/172014/runs/run-${executionMode.toLowerCase()}-token.terminal-status.json`,
+        terminalTranscriptPath: `.ai-delivery-runtime/requirements/172014/runs/run-${executionMode.toLowerCase()}-token.terminal.log`
+      };
+      item.runs.push(run);
+      const sessionDir = path.join(codexHome, 'sessions', '2026', '06', '22');
+      await fs.mkdir(sessionDir, { recursive: true });
+      await fs.writeFile(
+        path.join(sessionDir, `rollout-${executionMode.toLowerCase()}.jsonl`),
+        [
+          JSON.stringify({ timestamp: '2026-06-22T03:00:00.000Z', type: 'session_meta', payload: { id: `session-${executionMode}` } }),
+          JSON.stringify({ timestamp: '2026-06-22T03:00:01.000Z', type: 'turn_context', payload: { model: 'gpt-5.5' } }),
+          JSON.stringify({ timestamp: '2026-06-22T03:00:02.000Z', type: 'event_msg', payload: { type: 'user_message', message: run.id } }),
+          JSON.stringify({
+            timestamp: '2026-06-22T03:00:03.000Z',
+            type: 'event_msg',
+            payload: {
+              type: 'token_count',
+              info: {
+                total_token_usage: {
+                  input_tokens: 10,
+                  cached_input_tokens: 4,
+                  output_tokens: 2,
+                  reasoning_output_tokens: 1,
+                  total_tokens: 12
+                }
+              }
+            }
+          })
+        ].join('\n') + '\n',
+        'utf8'
+      );
+      await fs.mkdir(path.dirname(resolveWorkspaceOrRuntimePath(root, run.terminalStatusPath)), { recursive: true });
+      await fs.writeFile(
+        resolveWorkspaceOrRuntimePath(root, run.terminalStatusPath),
+        JSON.stringify({
+          status: 'SUCCEEDED',
+          exitCode: 0,
+          finishedAt: '2026-06-22T03:00:04.000Z',
+          transcriptPath: run.terminalTranscriptPath
+        })
+      );
+      const fetchImpl = vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ success: true, data: {} })
+      }));
+
+      try {
+        const refreshed = await refreshTerminalRunStatuses(root, item, {
+          centerBaseUrl: 'http://127.0.0.1:8728',
+          userId: 1,
+          clientSessionId: 10,
+          fetchImpl: fetchImpl as unknown as typeof fetch
+        });
+        const events = await readRunEvents(root, '172014', run.id);
+
+        expect(refreshed.workflow.runs[0].status).toBe('SUCCEEDED');
+        expect(events.some((event) => (event.data as any)?.kind === 'TOKEN_USAGE')).toBe(true);
+        const usageCall = fetchImpl.mock.calls.find(([url]) => String(url).endsWith('/run-token-usages'));
+        expect(String(usageCall?.[1]?.body)).toContain('"runId":900');
+        expect(fetchImpl.mock.calls.some(([url]) => String(url).endsWith('/jobs/500/complete'))).toBe(true);
+      } finally {
+        if (originalCodexHome === undefined) {
+          delete process.env.CODEX_HOME;
+        } else {
+          process.env.CODEX_HOME = originalCodexHome;
+        }
+      }
+    }
+  );
+
+  it('Center 状态同步失败后保留待同步状态，并在后续刷新补偿成功', async () => {
+    const item = workflow();
+    const run: RunRecord = {
+      ...runRecord('run-center-status-retry'),
+      status: 'CANCELLED',
+      centerJobId: 500,
+      centerRunId: 900,
+      error: '用户取消运行'
+    };
+    item.runs.push(run);
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ success: false, message: 'center down' })
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ success: true, data: { id: 500, status: 'CANCELLED' } })
+      });
+    const config = {
+      centerBaseUrl: 'http://127.0.0.1:8728',
+      userId: 1,
+      clientSessionId: 10,
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    };
+
+    expect(await retryWorkflowCenterRunStatuses(item, config)).toBe(false);
+    expect(run.centerSyncedAt).toBeUndefined();
+
+    expect(await retryWorkflowCenterRunStatuses(item, config)).toBe(true);
+    expect(run.centerSyncedAt).toBeTruthy();
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl.mock.calls.every(([url]) => String(url).endsWith('/jobs/500/cancel'))).toBe(true);
   });
 
   it('可以取消正在运行的 Agent', async () => {

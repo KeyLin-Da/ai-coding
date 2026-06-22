@@ -357,6 +357,36 @@ describe('apiClient Runner docs endpoints', () => {
     expect(usage.details[0].sourceEventType).toBe('turn.completed');
   });
 
+  it('需求 token usage 明细使用中心分页接口', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      okResponse({
+        requirementPk: 100,
+        page: 2,
+        pageSize: 20,
+        total: 21,
+        items: [
+          {
+            id: 21,
+            runId: 900,
+            sourceEventType: 'token_count',
+            inputTokens: 10,
+            totalTokens: 10
+          }
+        ]
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const page = await apiClient.getRequirementTokenUsageDetails(100, 2, 20);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/center-api/api/ai-delivery/requirements/100/token-usages?page=2&pageSize=20',
+      expect.any(Object)
+    );
+    expect(page).toMatchObject({ page: 2, pageSize: 20, total: 21 });
+    expect(page.items[0]).toMatchObject({ runId: 900, cachedInputTokens: 0, reasoningOutputTokens: 0 });
+  });
+
   it('本地字符串 runId 的 token usage 从本地 TOKEN_USAGE 事件汇总', async () => {
     const fetchMock = vi.fn().mockImplementation(() =>
       okResponse([

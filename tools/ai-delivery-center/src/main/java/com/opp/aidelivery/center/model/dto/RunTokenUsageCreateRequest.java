@@ -1,6 +1,6 @@
 package com.opp.aidelivery.center.model.dto;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import javax.validation.Valid;
 import javax.validation.constraints.NotBlank;
 import javax.validation.constraints.NotNull;
@@ -40,5 +40,5 @@ public class RunTokenUsageCreateRequest {
 
     private String rawUsageJson;
 
-    private LocalDateTime occurredAt;
+    private OffsetDateTime occurredAt;
 }

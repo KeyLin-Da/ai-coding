@@ -3,9 +3,12 @@ import type { RequirementWorkflow } from '../../shared/workflow';
 import { createEmptyStages } from '../../shared/workflow';
 import {
   buildCenterJobCreatePayload,
+  cancelCenterJob,
+  claimCenterJob,
   createCenterJob,
   mapRunEventToCenter,
   uploadCenterRunEvent,
+  renewCenterJob,
   uploadCenterRunTokenUsage
 } from '../../server/services/center-runner-adapter';
 
@@ -107,6 +110,61 @@ describe('center-runner-adapter', () => {
       'http://127.0.0.1:8728/api/ai-delivery/run-events',
       expect.objectContaining({
         method: 'POST'
+      })
+    );
+  });
+
+  it('按指定 Job 建立 Center Run 并续租', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ success: true, data: { id: 500, runId: 900, status: 'CLAIMED' } })
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ success: true, data: { id: 500, runId: 900, status: 'CLAIMED' } })
+      });
+    const config = {
+      centerBaseUrl: 'http://127.0.0.1:8728',
+      userId: 1,
+      clientSessionId: 10,
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    };
+
+    const claimed = await claimCenterJob(config, 500);
+    await renewCenterJob(config, 500);
+
+    expect(claimed.runId).toBe(900);
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      'http://127.0.0.1:8728/api/ai-delivery/jobs/500/claim',
+      expect.objectContaining({ body: expect.stringContaining('"capabilities":["ALL"]') })
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      'http://127.0.0.1:8728/api/ai-delivery/jobs/500/renew',
+      expect.objectContaining({ body: expect.stringContaining('"clientSessionId":10') })
+    );
+  });
+
+  it('取消运行时调用 Center cancel 接口', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true, data: { id: 500, status: 'CANCELLED' } })
+    });
+
+    await cancelCenterJob({
+      centerBaseUrl: 'http://127.0.0.1:8728',
+      userId: 1,
+      clientSessionId: 10,
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    }, 500);
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://127.0.0.1:8728/api/ai-delivery/jobs/500/cancel',
+      expect.objectContaining({
+        method: 'POST',
+        body: '{}'
       })
     );
   });

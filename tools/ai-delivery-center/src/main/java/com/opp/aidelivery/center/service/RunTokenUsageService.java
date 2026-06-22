@@ -1,6 +1,7 @@
 package com.opp.aidelivery.center.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.opp.aidelivery.center.common.error.AiDeliveryErrorCode;
 import com.opp.aidelivery.center.common.error.BusinessException;
 import com.opp.aidelivery.center.mapper.RequirementMapper;
@@ -11,6 +12,7 @@ import com.opp.aidelivery.center.model.entity.RequirementEntity;
 import com.opp.aidelivery.center.model.entity.RunEntity;
 import com.opp.aidelivery.center.model.entity.RunTokenUsageEntity;
 import com.opp.aidelivery.center.model.vo.RequirementTokenUsageSummaryVO;
+import com.opp.aidelivery.center.model.vo.RequirementTokenUsagePageVO;
 import com.opp.aidelivery.center.model.vo.RunTokenUsageDetailVO;
 import com.opp.aidelivery.center.model.vo.RunTokenUsageRunVO;
 import com.opp.aidelivery.center.model.vo.RunTokenUsageSaveVO;
@@ -21,6 +23,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -36,6 +39,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @RequiredArgsConstructor
 public class RunTokenUsageService {
+
+    private static final ZoneOffset CENTER_ZONE_OFFSET = ZoneOffset.ofHours(8);
 
     private final PermissionService permissionService;
     private final RunMapper runMapper;
@@ -69,7 +74,9 @@ public class RunTokenUsageService {
         entity.setReasoningOutputTokens(usage.reasoningOutputTokens);
         entity.setTotalTokens(usage.totalTokens);
         entity.setRawUsageJson(trimToNull(request.getRawUsageJson()));
-        entity.setOccurredAt(request.getOccurredAt() == null ? LocalDateTime.now() : request.getOccurredAt());
+        entity.setOccurredAt(request.getOccurredAt() == null
+            ? LocalDateTime.now(CENTER_ZONE_OFFSET)
+            : request.getOccurredAt().withOffsetSameInstant(CENTER_ZONE_OFFSET).toLocalDateTime());
 
         try {
             runTokenUsageRepository.append(entity);
@@ -101,6 +108,26 @@ public class RunTokenUsageService {
         List<RunTokenUsageEntity> details = runTokenUsageRepository.listByRequirementPk(
             requirement.getId(), stage, agentId, from, to);
         return requirementSummaryVO(requirement.getId(), details);
+    }
+
+    public RequirementTokenUsagePageVO pageRequirementDetails(
+        Long userId,
+        Long requirementPk,
+        Integer page,
+        Integer pageSize
+    ) {
+        RequirementEntity requirement = loadRequirementAndCheckPermission(userId, requirementPk);
+        long normalizedPage = page == null ? 1L : Math.max(1L, page.longValue());
+        long normalizedPageSize = pageSize == null ? 20L : Math.min(100L, Math.max(1L, pageSize.longValue()));
+        IPage<RunTokenUsageEntity> result = runTokenUsageRepository.pageByRequirementPk(
+            requirement.getId(), normalizedPage, normalizedPageSize);
+        RequirementTokenUsagePageVO vo = new RequirementTokenUsagePageVO();
+        vo.setRequirementPk(requirement.getId());
+        vo.setPage(result.getCurrent());
+        vo.setPageSize(result.getSize());
+        vo.setTotal(result.getTotal());
+        vo.setItems(result.getRecords().stream().map(this::toDetailVO).collect(Collectors.toList()));
+        return vo;
     }
 
     public List<RequirementTokenUsageSummaryVO> summarizeProject(Long userId, Long projectId) {

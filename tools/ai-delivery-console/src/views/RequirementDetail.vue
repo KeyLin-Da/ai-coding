@@ -39,7 +39,15 @@
           <small>推理输出</small>
           <strong>{{ formatTokenCount(requirementTokenSummary.reasoningOutputTokens) }}</strong>
         </span>
-        <span class="token-summary-note">{{ requirementTokenSummary.detailCount ? `明细 ${requirementTokenSummary.detailCount} 条` : '暂无 token 用量' }}</span>
+        <el-button
+          v-if="requirementTokenSummary.detailCount"
+          link
+          class="token-summary-note token-detail-trigger"
+          @click="openTokenUsageDetails"
+        >
+          明细 {{ requirementTokenSummary.detailCount }} 条
+        </el-button>
+        <span v-else class="token-summary-note">暂无 token 用量</span>
       </div>
       <el-alert
         v-if="workspaceBlockerText"
@@ -408,6 +416,7 @@
       @submit="runDesignQuestion"
     />
     <RunLogDrawer ref="runLogDrawer" :events="store.runEvents" :usage="selectedRunTokenUsage" />
+    <TokenUsageDetailDialog ref="tokenUsageDetailDialog" :requirement-pk="workflow.id" />
     <ArtifactPreviewDialog ref="artifactPreviewDialog" />
   </div>
   <el-empty v-else description="需求加载中" />
@@ -452,6 +461,7 @@ import MarkdownEditor from '@/components/MarkdownEditor.vue';
 import OpenSpecDocuments from '@/components/OpenSpecDocuments.vue';
 import ReviewDialog from '@/components/ReviewDialog.vue';
 import RunLogDrawer from '@/components/RunLogDrawer.vue';
+import TokenUsageDetailDialog from '@/components/TokenUsageDetailDialog.vue';
 import ArtifactSidebar from '@/components/ArtifactSidebar.vue';
 import ArtifactPreviewDialog from '@/components/ArtifactPreviewDialog.vue';
 import ArtifactGitSyncDialog from '@/components/ArtifactGitSyncDialog.vue';
@@ -479,6 +489,7 @@ const reviewDialog = ref<InstanceType<typeof ReviewDialog>>();
 const artifactGitSyncDialog = ref<InstanceType<typeof ArtifactGitSyncDialog>>();
 const designQuestionDialog = ref<InstanceType<typeof DesignQuestionDialog>>();
 const runLogDrawer = ref<InstanceType<typeof RunLogDrawer>>();
+const tokenUsageDetailDialog = ref<InstanceType<typeof TokenUsageDetailDialog>>();
 const artifactPreviewDialog = ref<InstanceType<typeof ArtifactPreviewDialog>>();
 const prdFileInput = ref<HTMLInputElement>();
 const techDesignFileInput = ref<HTMLInputElement>();
@@ -836,10 +847,12 @@ async function loadRunTokenUsage(runId: string): Promise<RunTokenUsageRun> {
   if (!workflow.value) {
     return emptyRunTokenUsage(runId);
   }
+  const run = workflow.value.runs.find((item) => item.id === runId);
+  const usageRunId = run?.centerRunId || runId;
   try {
-    return await apiClient.getRunTokenUsages(workflow.value.requirementId, runId);
+    return await apiClient.getRunTokenUsages(workflow.value.requirementId, usageRunId);
   } catch {
-    return emptyRunTokenUsage(runId);
+    return emptyRunTokenUsage(usageRunId);
   }
 }
 
@@ -1527,6 +1540,10 @@ async function openRunLog(runId: string) {
   }
 }
 
+function openTokenUsageDetails() {
+  tokenUsageDetailDialog.value?.open();
+}
+
 async function cancelRun(runId: string) {
   await store.cancelRun(runId);
   ElMessage.success('已发送取消请求');
@@ -1695,6 +1712,11 @@ onUnmounted(() => {
 .token-summary-note {
   color: #64748b;
   font-size: 12px;
+}
+
+.token-detail-trigger {
+  height: auto;
+  padding: 0;
 }
 
 .stage-token-button {

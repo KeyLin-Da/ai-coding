@@ -119,6 +119,32 @@ class JobServiceTest {
     }
 
     @Test
+    void claimByIdClaimsTheCreatedJobAndReturnsRunId() {
+        JobEntity job = queuedJob(503L, "CODE_REVIEW");
+        when(clientSessionService.loadOwnedSession(1L, 10L)).thenReturn(session());
+        when(jobMapper.selectById(503L)).thenReturn(job);
+        when(requirementMapper.selectById(100L)).thenReturn(requirement());
+        when(jobLeaseService.claim(503L, 10L)).thenReturn(true);
+        doAnswer(invocation -> {
+            RunEntity run = invocation.getArgument(0);
+            run.setId(901L);
+            return 1;
+        }).when(runMapper).insert(any(RunEntity.class));
+
+        JobClaimRequest request = new JobClaimRequest();
+        request.setClientSessionId(10L);
+        request.setCapabilities(Collections.singletonList("CODEX"));
+
+        JobVO result = jobService.claimById(1L, 503L, request);
+
+        assertThat(result.getId()).isEqualTo(503L);
+        assertThat(result.getRunId()).isEqualTo(901L);
+        assertThat(job.getStatus()).isEqualTo("CLAIMED");
+        verify(jobLeaseService).claim(503L, 10L);
+        verify(jobMapper).updateById(job);
+    }
+
+    @Test
     void renewRejectsExpiredRedisLease() {
         JobEntity job = claimedJob();
         when(jobMapper.selectById(500L)).thenReturn(job);

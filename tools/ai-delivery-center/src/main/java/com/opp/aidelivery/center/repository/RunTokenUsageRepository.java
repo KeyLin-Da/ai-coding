@@ -1,6 +1,8 @@
 package com.opp.aidelivery.center.repository;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.opp.aidelivery.center.mapper.RunTokenUsageMapper;
 import com.opp.aidelivery.center.model.entity.RunTokenUsageEntity;
 import java.time.LocalDateTime;
@@ -32,6 +34,16 @@ public class RunTokenUsageRepository {
             .eq(RunTokenUsageEntity::getRunId, runId)
             .orderByAsc(RunTokenUsageEntity::getOccurredAt)
             .orderByAsc(RunTokenUsageEntity::getId));
+    }
+
+    public IPage<RunTokenUsageEntity> pageByRequirementPk(Long requirementPk, long page, long pageSize) {
+        return runTokenUsageMapper.selectPage(
+            new Page<>(page, pageSize),
+            new LambdaQueryWrapper<RunTokenUsageEntity>()
+                .eq(RunTokenUsageEntity::getRequirementPk, requirementPk)
+                .orderByDesc(RunTokenUsageEntity::getOccurredAt)
+                .orderByDesc(RunTokenUsageEntity::getId)
+        );
     }
 
     public List<RunTokenUsageEntity> listByRequirementPk(

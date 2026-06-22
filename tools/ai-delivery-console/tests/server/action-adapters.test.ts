@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { AgentProvider, RequirementWorkflow, RunRecord } from '../../shared/workflow';
 import { createEmptyStages } from '../../shared/workflow';
 import {
@@ -23,6 +23,7 @@ import {
 } from '../../server/services/agent-providers';
 import { readRunEvents } from '../../server/services/run-log';
 import { resolveWorkspaceOrRuntimePath } from '../../server/services/runtime-paths';
+import { serverConfig } from '../../server/config';
 
 const exec = promisify(execFile);
 
@@ -62,6 +63,125 @@ function runRecord(id: string): RunRecord {
 }
 
 describe('action-adapters', () => {
+  it('Center 需求中的 Codex 动作先创建精确 Run，再上传 token 并完成 Job', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-center-run-'));
+    const originalProvidersJson = serverConfig.agentProvidersJson;
+    serverConfig.agentProvidersJson = JSON.stringify([
+      {
+        id: 'codex',
+        name: 'Test Codex',
+        inputMode: 'PROMPT_FILE',
+        command: [
+          process.execPath,
+          '-e',
+          'console.log(JSON.stringify({type:"turn.completed",id:"turn-1",usage:{input_tokens:10,cached_input_tokens:4,output_tokens:2,reasoning_output_tokens:1}}));'
+        ],
+        available: true,
+        supportsStreaming: true
+      }
+    ]);
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (url.endsWith('/api/ai-delivery/jobs')) {
+        return response({ id: 500, requirementPk: 100, actionType: 'PRD_ANALYZE', status: 'QUEUED' });
+      }
+      if (url.endsWith('/api/ai-delivery/jobs/500/claim')) {
+        return response({ id: 500, requirementPk: 100, actionType: 'PRD_ANALYZE', status: 'CLAIMED', runId: 900 });
+      }
+      if (url.endsWith('/api/ai-delivery/run-token-usages')) {
+        return response({ detail: { id: 1 } });
+      }
+      if (url.endsWith('/api/ai-delivery/jobs/500/complete')) {
+        return response({ id: 500, status: 'SUCCEEDED', runId: 900 });
+      }
+      return response({});
+    });
+    const item = { ...workflow(), id: 100 };
+    let resolveUpdate!: (run: RunRecord) => void;
+    const updatedPromise = new Promise<RunRecord>((resolve) => {
+      resolveUpdate = resolve;
+    });
+
+    try {
+      const started = await executeAction(
+        root,
+        item,
+        {
+          actionType: 'PRD_ANALYZE',
+          params: { agentId: 'codex', executionMode: 'BACKGROUND' }
+        },
+        async (run) => resolveUpdate(run),
+        {
+          centerConfig: {
+            centerBaseUrl: 'http://127.0.0.1:8728',
+            userId: 1,
+            clientSessionId: 10,
+            fetchImpl: fetchImpl as unknown as typeof fetch
+          }
+        }
+      );
+      const completed = await updatedPromise;
+
+      expect(started.centerJobId).toBe(500);
+      expect(started.centerRunId).toBe(900);
+      expect(completed.status).toBe('SUCCEEDED');
+      expect(fetchImpl.mock.calls.map(([url]) => String(url))).toEqual(expect.arrayContaining([
+        'http://127.0.0.1:8728/api/ai-delivery/jobs',
+        'http://127.0.0.1:8728/api/ai-delivery/jobs/500/claim',
+        'http://127.0.0.1:8728/api/ai-delivery/run-token-usages',
+        'http://127.0.0.1:8728/api/ai-delivery/jobs/500/complete'
+      ]));
+      const usageCall = fetchImpl.mock.calls.find(([url]) => String(url).endsWith('/run-token-usages'));
+      expect(String(usageCall?.[1]?.body)).toContain('"runId":900');
+    } finally {
+      serverConfig.agentProvidersJson = originalProvidersJson;
+    }
+  });
+
+  it('Center Run 建立失败时阻止 Codex 启动', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-center-run-'));
+    const markerPath = path.join(root, 'agent-started.txt');
+    const originalProvidersJson = serverConfig.agentProvidersJson;
+    serverConfig.agentProvidersJson = JSON.stringify([
+      {
+        id: 'codex',
+        name: 'Test Codex',
+        inputMode: 'PROMPT_FILE',
+        command: [process.execPath, '-e', `require("node:fs").writeFileSync(${JSON.stringify(markerPath)}, "started")`],
+        available: true,
+        supportsStreaming: true
+      }
+    ]);
+
+    try {
+      const run = await executeAction(
+        root,
+        { ...workflow(), id: 100 },
+        {
+          actionType: 'PRD_ANALYZE',
+          params: { agentId: 'codex', executionMode: 'BACKGROUND' }
+        },
+        async () => undefined,
+        {
+          centerConfig: {
+            centerBaseUrl: 'http://127.0.0.1:8728',
+            userId: 1,
+            clientSessionId: 10,
+            fetchImpl: (async () => ({
+              ok: false,
+              json: async () => ({ success: false, message: 'center down' })
+            })) as unknown as typeof fetch
+          }
+        }
+      );
+
+      expect(run.status).toBe('FAILED');
+      expect(run.error).toContain('已阻止 Codex 启动');
+      await expect(fs.access(markerPath)).rejects.toThrow();
+    } finally {
+      serverConfig.agentProvidersJson = originalProvidersJson;
+    }
+  });
+
   it('生成 PRD 澄清命令时不携带来源参数', () => {
     const item = {
       ...workflow(),
@@ -629,6 +749,13 @@ describe('action-adapters', () => {
     expect(run.commandText).toContain('p=opp-learn');
   });
 });
+
+function response(data: unknown) {
+  return {
+    ok: true,
+    json: async () => ({ success: true, data })
+  };
+}
 
 describe('agent-providers', () => {
   it('内置 CLI 执行时实时追加 stdout 和 stderr 事件', async () => {

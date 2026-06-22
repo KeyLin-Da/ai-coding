@@ -33,9 +33,14 @@ export function getStageLogPath(workspaceRoot: string, requirementId: string, st
   return path.join(getStageLogDir(workspaceRoot, requirementId, stage), 'command.log');
 }
 
-export async function appendRunEvent(workspaceRoot: string, requirementId: string, runId: string, event: Omit<RunEvent, 'time'>): Promise<void> {
+export async function appendRunEvent(
+  workspaceRoot: string,
+  requirementId: string,
+  runId: string,
+  event: Omit<RunEvent, 'time'> & { time?: string }
+): Promise<void> {
   await fs.mkdir(getRunDir(workspaceRoot, requirementId), { recursive: true });
-  const line = JSON.stringify({ ...event, time: new Date().toISOString() });
+  const line = JSON.stringify({ ...event, time: event.time || new Date().toISOString() });
   await fs.appendFile(getRunPath(workspaceRoot, requirementId, runId), `${line}\n`, 'utf8');
 }
 

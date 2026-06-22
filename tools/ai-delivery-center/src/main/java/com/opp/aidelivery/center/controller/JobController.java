@@ -39,6 +39,15 @@ public class JobController {
         return ApiResponse.ok(jobService.claim(userId, request));
     }
 
+    @PostMapping("/{jobId}/claim")
+    public ApiResponse<JobVO> claimById(
+        @RequestHeader("X-User-Id") Long userId,
+        @PathVariable Long jobId,
+        @Valid @RequestBody JobClaimRequest request
+    ) {
+        return ApiResponse.ok(jobService.claimById(userId, jobId, request));
+    }
+
     @PostMapping("/{jobId}/renew")
     public ApiResponse<JobVO> renew(
         @RequestHeader("X-User-Id") Long userId,

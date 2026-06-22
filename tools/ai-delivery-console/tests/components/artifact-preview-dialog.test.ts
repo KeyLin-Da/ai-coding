@@ -153,7 +153,7 @@ describe('ArtifactPreviewDialog', () => {
 
     expect(wrapper.text()).toContain('PRD 分析文档');
     expect(wrapper.text()).toContain('docs/172014/prd/analysis.md');
-    expect(wrapper.html()).toContain('<h1>PRD</h1>');
+    expect(wrapper.find('.artifact-markdown h1').text()).toBe('PRD');
     expect(wrapper.text()).toContain('产物内容');
     expect(wrapper.find('.artifact-markdown img').attributes('src')).toBe(
       '/runner-api/api/artifacts/read?path=docs%2F172014%2Fprd%2Ffiles%2Fscreenshots%2Franking_main_20260610.png&projectId=42&centerBaseUrl=http%3A%2F%2F127.0.0.1%3A8728'

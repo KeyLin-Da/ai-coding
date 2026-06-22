@@ -1,6 +1,5 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
 import { execSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { AgentProvider, RequirementWorkflow, RunRecord, RunStatus } from '../../shared/workflow';
 import { serverConfig } from '../config';
@@ -9,10 +8,19 @@ import { normalizeRequirementId } from './workspace';
 import { normalizeProjectBasePaths, resolveWorkflowProjects } from './project-resolver';
 import { getPromptRuntimeDir, getRunRuntimeDir, getRunnerRuntimeRoot, getScriptRuntimeDir, resolveWorkspaceOrRuntimePath, toRuntimePathRef } from './runtime-paths';
 import { CodexUsageNdjsonParser, type CodexUsageEvent } from './codex-usage-parser';
-import { uploadCenterRunTokenUsage, type CenterRunnerConfig } from './center-runner-adapter';
+import {
+  cancelCenterJob,
+  completeCenterJob,
+  failCenterJob,
+  renewCenterJob,
+  type CenterRunnerConfig
+} from './center-runner-adapter';
+import { collectCodexSessionUsage } from './codex-session-usage';
+import { recordCodexUsageEvents, retryTokenUsageOutbox } from './token-usage-recorder';
 
 const activeProcesses = new Map<string, ChildProcessWithoutNullStreams>();
 const cancelledRunIds = new Set<string>();
+const centerLeaseTimers = new Map<string, NodeJS.Timeout>();
 
 type CommandContext = Record<string, string | string[]>;
 
@@ -431,13 +439,39 @@ async function launchTerminalScript(workspaceRoot: string, absoluteScriptPath: s
 
 export async function refreshTerminalRunStatuses(
   workspaceRoot: string,
-  workflow: RequirementWorkflow
+  workflow: RequirementWorkflow,
+  centerConfig?: CenterRunnerConfig
 ): Promise<{ workflow: RequirementWorkflow; changed: boolean }> {
   let changed = false;
   const finalStatuses = new Set<RunStatus>(['SUCCEEDED', 'FAILED', 'CANCELLED']);
   for (const run of workflow.runs) {
-    if (!isTerminalExecutionMode(run) || !run.terminalStatusPath || finalStatuses.has(run.status)) {
+    if (!isTerminalExecutionMode(run) || !run.terminalStatusPath) {
       continue;
+    }
+    if (run.agentId === 'codex') {
+      const sessionUsage = await collectCodexSessionUsage(run);
+      if (sessionUsage.events.length) {
+        await recordCodexUsageEvents(workspaceRoot, workflow, run, 'codex', sessionUsage.events, centerConfig);
+      }
+      if (await retryTokenUsageOutbox(workspaceRoot, workflow, run, centerConfig)) {
+        changed = true;
+      }
+      changed = sessionUsage.changed || changed;
+    }
+    if (finalStatuses.has(run.status)) {
+      if (run.centerJobId && centerConfig && !run.centerSyncedAt) {
+        try {
+          await finishCenterJobForRun(run, centerConfig);
+          run.centerSyncedAt = new Date().toISOString();
+          changed = true;
+        } catch {
+          // 保留未同步状态，由后续轮询或服务恢复流程重试。
+        }
+      }
+      continue;
+    }
+    if (run.centerJobId && centerConfig) {
+      await renewCenterJob(centerConfig, run.centerJobId).catch(() => undefined);
     }
     const absoluteStatusPath = resolveWorkspaceOrRuntimePath(workspaceRoot, run.terminalStatusPath);
     const raw = await fs.readFile(absoluteStatusPath, 'utf8').catch(() => '');
@@ -463,9 +497,85 @@ export async function refreshTerminalRunStatuses(
         statusPath: run.terminalStatusPath
       }
     });
+    if (run.centerJobId && centerConfig) {
+      try {
+        await finishCenterJobForRun(run, centerConfig);
+        run.centerSyncedAt = new Date().toISOString();
+      } catch (error: any) {
+        await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
+          type: 'WARN',
+          level: 'WARN',
+          message: `Center Run 状态同步失败：${error?.message || 'unknown error'}`,
+          agentId: run.agentId
+        });
+      }
+    }
     changed = true;
   }
   return { workflow, changed };
+}
+
+export async function retryWorkflowCenterRunStatuses(
+  workflow: RequirementWorkflow,
+  centerConfig?: CenterRunnerConfig
+): Promise<boolean> {
+  if (!centerConfig) {
+    return false;
+  }
+  let changed = false;
+  const finalStatuses = new Set<RunStatus>(['SUCCEEDED', 'FAILED', 'CANCELLED', 'COMPLETED']);
+  for (const run of workflow.runs) {
+    if (!run.centerJobId || run.centerSyncedAt || !finalStatuses.has(run.status)) {
+      continue;
+    }
+    try {
+      await finishCenterJobForRun(run, centerConfig);
+      run.centerSyncedAt = new Date().toISOString();
+      changed = true;
+    } catch {
+      // Center 暂不可用时保留未同步状态，下一次需求刷新继续补偿。
+    }
+  }
+  return changed;
+}
+
+export function beginCenterJobLease(run: RunRecord, centerConfig?: CenterRunnerConfig): void {
+  if (!run.centerJobId || !centerConfig) {
+    return;
+  }
+  const centerJobId = run.centerJobId;
+  clearCenterJobLease(run.id);
+  const timer = setInterval(() => {
+    renewCenterJob(centerConfig, centerJobId).catch(() => undefined);
+  }, 20_000);
+  timer.unref();
+  centerLeaseTimers.set(run.id, timer);
+}
+
+export async function finishCenterJobForRun(run: RunRecord, centerConfig?: CenterRunnerConfig): Promise<void> {
+  if (!run.centerJobId || !centerConfig) {
+    return;
+  }
+  clearCenterJobLease(run.id);
+  if (run.status === 'SUCCEEDED' || run.status === 'COMPLETED') {
+    await completeCenterJob(centerConfig, run.centerJobId);
+    return;
+  }
+  if (run.status === 'CANCELLED') {
+    await cancelCenterJob(centerConfig, run.centerJobId);
+    return;
+  }
+  if (run.status === 'FAILED') {
+    await failCenterJob(centerConfig, run.centerJobId, run.error || `Agent 运行状态: ${run.status}`);
+  }
+}
+
+function clearCenterJobLease(localRunId: string): void {
+  const timer = centerLeaseTimers.get(localRunId);
+  if (timer) {
+    clearInterval(timer);
+    centerLeaseTimers.delete(localRunId);
+  }
 }
 
 export async function startAgentProcess(
@@ -556,75 +666,11 @@ export async function startAgentProcess(
   const codexUsageParser = provider.id === 'codex' ? new CodexUsageNdjsonParser() : undefined;
   const usageTasks = new Set<Promise<void>>();
 
-  const recordCodexUsageEvents = async (events: CodexUsageEvent[]) => {
-    for (const event of events) {
-      const usageFingerprint = buildTokenUsageFingerprint(run.id, event);
-      const centerRunId = parseCenterRunId(run.id);
-      const uploadState = centerRunId ? 'PENDING' : 'SKIPPED_LOCAL_RUN_ID';
-      await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
-        type: 'INFO',
-        level: 'INFO',
-        message: `Token usage: total ${event.usage.totalTokens}, input ${event.usage.inputTokens}, output ${event.usage.outputTokens}`,
-        text: event.rawEventJson,
-        agentId: provider.id,
-        data: {
-          kind: 'TOKEN_USAGE',
-          sourceEventType: event.sourceEventType,
-          model: event.model,
-          usageFingerprint,
-          centerUpload: uploadState,
-          usage: event.usage
-        }
-      });
-      if (!centerRunId) {
-        continue;
-      }
-      if (!centerConfig?.centerBaseUrl) {
-        await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
-          type: 'WARN',
-          level: 'WARN',
-          message: 'Token usage 已记录本地日志，跳过 Center 上报：缺少中心服务配置',
-          agentId: provider.id,
-          data: { kind: 'TOKEN_USAGE_UPLOAD_SKIPPED', reason: 'MISSING_CENTER_CONFIG' }
-        });
-        continue;
-      }
-      try {
-        await uploadCenterRunTokenUsage(centerConfig, {
-          runId: centerRunId,
-          seq: event.seq,
-          stage: run.stage,
-          implementationStep: run.implementationStep,
-          agentId: provider.id,
-          model: event.model,
-          sourceEventType: event.sourceEventType,
-          usageFingerprint,
-          usage: {
-            inputTokens: event.usage.inputTokens,
-            cachedInputTokens: event.usage.cachedInputTokens,
-            outputTokens: event.usage.outputTokens,
-            reasoningOutputTokens: event.usage.reasoningOutputTokens
-          },
-          rawUsageJson: event.rawUsageJson,
-          occurredAt: new Date().toISOString()
-        });
-      } catch (error: any) {
-        await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
-          type: 'WARN',
-          level: 'WARN',
-          message: `Token usage Center 上报失败：${error?.message || 'unknown error'}`,
-          agentId: provider.id,
-          data: { kind: 'TOKEN_USAGE_UPLOAD_FAILED', usageFingerprint }
-        });
-      }
-    }
-  };
-
   const enqueueCodexUsageEvents = (events: CodexUsageEvent[]) => {
     if (!events.length) {
       return;
     }
-    const task = recordCodexUsageEvents(events).catch(() => undefined);
+    const task = recordCodexUsageEvents(workspaceRoot, workflow, run, provider.id, events, centerConfig).catch(() => undefined);
     usageTasks.add(task);
     task.finally(() => usageTasks.delete(task)).catch(() => undefined);
   };
@@ -712,28 +758,14 @@ export async function startAgentProcess(
   return run;
 }
 
-function parseCenterRunId(runId: string): number | undefined {
-  if (!/^\d+$/.test(runId)) {
-    return undefined;
-  }
-  const numeric = Number(runId);
-  return Number.isSafeInteger(numeric) && numeric > 0 ? numeric : undefined;
-}
-
-function buildTokenUsageFingerprint(runId: string, event: CodexUsageEvent): string {
-  const seed = event.eventId
-    ? `${runId}|${event.eventId}`
-    : `${runId}|${event.seq}|${event.rawUsageJson}`;
-  return createHash('sha256').update(seed).digest('hex');
-}
-
 export async function startAgentInTerminal(
   workspaceRoot: string,
   workflow: RequirementWorkflow,
   run: RunRecord,
   provider: AgentProvider,
   commandText: string,
-  projectPaths?: string[]
+  projectPaths?: string[],
+  centerConfig?: CenterRunnerConfig
 ): Promise<RunRecord> {
   const requestedMode = isInteractiveTerminalRun(run) ? 'INTERACTIVE_TERMINAL' : 'TERMINAL';
   run.executionMode = requestedMode;
@@ -794,6 +826,7 @@ export async function startAgentInTerminal(
   try {
     await launchTerminalScript(workspaceRoot, resolveWorkspaceOrRuntimePath(workspaceRoot, terminal.scriptPath));
     run.status = 'TERMINAL_OPENED';
+    beginCenterJobLease(run, centerConfig);
     await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
       type: 'INFO',
       level: 'INFO',

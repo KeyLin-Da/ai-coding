@@ -123,7 +123,24 @@ export interface RunRecord {
   terminalScriptPath?: string;
   terminalTranscriptPath?: string;
   terminalStatusPath?: string;
+  centerJobId?: number;
+  centerRunId?: number;
+  codexSessionId?: string;
+  codexSessionPath?: string;
+  codexSessionOffset?: number;
+  codexSessionModel?: string;
+  codexTokenSnapshot?: TokenUsageSnapshot;
+  tokenUsageOutboxPath?: string;
+  centerSyncedAt?: string;
   error?: string;
+}
+
+export interface TokenUsageSnapshot {
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  reasoningOutputTokens: number;
+  totalTokens: number;
 }
 
 export interface TokenUsageSummary {
@@ -164,6 +181,14 @@ export interface RunTokenUsageRun {
   runId: string | number;
   summary: TokenUsageSummary;
   details: RunTokenUsageDetail[];
+}
+
+export interface RequirementTokenUsagePage {
+  requirementPk: string | number;
+  page: number;
+  pageSize: number;
+  total: number;
+  items: RunTokenUsageDetail[];
 }
 
 export interface TokenUsageBucket {

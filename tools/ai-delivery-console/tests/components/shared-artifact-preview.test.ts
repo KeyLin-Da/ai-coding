@@ -1,11 +1,16 @@
 import { flushPromises, mount } from '@vue/test-utils';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { nextTick } from 'vue';
-import { ElMessageBox } from 'element-plus';
+import MarkdownIt from 'markdown-it';
+import mermaid from 'mermaid';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import type { ArtifactRef, TechDesignAnnotation } from '../../shared/workflow';
 import { apiClient } from '../../src/api/client';
 import ArtifactPreviewShell from '../../src/components/ArtifactPreviewShell.vue';
 import artifactPreviewShellSource from '../../src/components/ArtifactPreviewShell.vue?raw';
+import artifactPreviewDialogSource from '../../src/components/ArtifactPreviewDialog.vue?raw';
+import artifactPreviewPageSource from '../../src/views/ArtifactPreviewPage.vue?raw';
+import publicArtifactPreviewPageSource from '../../src/views/PublicArtifactPreviewPage.vue?raw';
 import MarkdownOutlineNav from '../../src/components/MarkdownOutlineNav.vue';
 import TechDesignAnnotationPanel from '../../src/components/TechDesignAnnotationPanel.vue';
 import { createAnnotationAnchor } from '../../src/utils/tech-design-annotations';
@@ -71,6 +76,338 @@ function annotation(overrides: Partial<TechDesignAnnotation> = {}): TechDesignAn
 describe('shared artifact preview', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(mermaid.run).mockImplementation(async (options?: { nodes?: HTMLElement[] }) => {
+      (options?.nodes || []).forEach((node) => {
+        if (!node.querySelector('svg')) {
+          node.innerHTML = '<svg viewBox="0 0 800 400" data-rendered="true"></svg>';
+        }
+      });
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('Markdown 产物默认使用 HTML 精排并可切换到基础预览且保持滚动位置', async () => {
+    // 中文说明：模式切换只改变同一正文 DOM 的主题类，不重新解析正文或渲染图表。
+    const renderSpy = vi.spyOn(MarkdownIt.prototype, 'render');
+    const wrapper = mount(ArtifactPreviewShell, {
+      props: {
+        artifact: {
+          id: 'reading-mode',
+          label: '阅读模式',
+          path: 'docs/180001/prd/analysis.md',
+          stage: 'PRD',
+          kind: 'markdown',
+          exists: true
+        },
+        content: '# 精排标题\n\n正文 reading-mode-unique'
+      }
+    });
+    await flushPromises();
+    const renderCount = renderSpy.mock.calls.length;
+    const mermaidCount = vi.mocked(mermaid.run).mock.calls.length;
+    const versionRequestCount = vi.mocked(apiClient.listTechDesignVersions).mock.calls.length;
+    const annotationRequestCount = vi.mocked(apiClient.listTechDesignAnnotations).mock.calls.length;
+    const scroller = wrapper.find('.preview-scroll').element as HTMLElement;
+    scroller.scrollTop = 180;
+
+    expect(wrapper.text()).toContain('HTML 预览');
+    expect(wrapper.text()).toContain('Markdown 预览');
+    expect(wrapper.find('.artifact-markdown').classes()).toContain('artifact-markdown--rich');
+    await wrapper.findAll('.preview-reading-mode button')[1].trigger('click');
+    await nextTick();
+
+    expect(wrapper.find('.artifact-markdown').classes()).toContain('artifact-markdown--classic');
+    expect(scroller.scrollTop).toBe(180);
+    expect(renderSpy).toHaveBeenCalledTimes(renderCount);
+    expect(mermaid.run).toHaveBeenCalledTimes(mermaidCount);
+    expect(apiClient.listTechDesignVersions).toHaveBeenCalledTimes(versionRequestCount);
+    expect(apiClient.listTechDesignAnnotations).toHaveBeenCalledTimes(annotationRequestCount);
+    renderSpy.mockRestore();
+  });
+
+  it('打开新产物重置 HTML 预览，同一路径内容变化保留当前模式', async () => {
+    // 中文说明：技术方案版本内容变化不应重置选择，但真正切换产物必须恢复默认精排。
+    const baseArtifact: ArtifactRef = {
+      id: 'artifact-a',
+      label: '产物 A',
+      path: 'docs/180002/prd/analysis.md',
+      stage: 'PRD',
+      kind: 'markdown',
+      exists: true
+    };
+    const wrapper = mount(ArtifactPreviewShell, { props: { artifact: baseArtifact, content: '# A' } });
+    await flushPromises();
+    await wrapper.findAll('.preview-reading-mode button')[1].trigger('click');
+    await wrapper.setProps({ content: '# A 的另一个版本' });
+    await flushPromises();
+    expect(wrapper.find('.artifact-markdown').classes()).toContain('artifact-markdown--classic');
+
+    await wrapper.setProps({
+      artifact: { ...baseArtifact, id: 'artifact-b', path: 'docs/180002/reports/verification-report.md' },
+      content: '# B'
+    });
+    await flushPromises();
+    expect(wrapper.find('.artifact-markdown').classes()).toContain('artifact-markdown--rich');
+  });
+
+  it('非 Markdown 产物不展示阅读模式切换', async () => {
+    // 中文说明：原生 HTML 等既有产物类型继续沿用各自预览分支。
+    const wrapper = mount(ArtifactPreviewShell, {
+      props: {
+        artifact: {
+          id: 'html-report',
+          label: 'HTML 报告',
+          path: 'docs/180003/junit/index.html',
+          stage: 'IMPLEMENTATION',
+          kind: 'html',
+          exists: true
+        },
+        content: '<!doctype html><title>report</title>'
+      }
+    });
+    await nextTick();
+    expect(wrapper.find('.preview-reading-mode').exists()).toBe(false);
+    expect(wrapper.find('iframe').exists()).toBe(true);
+  });
+
+  it('三类预览入口统一复用共享 ArtifactPreviewShell', () => {
+    // 中文说明：需求详情、登录分享和公开分享不得复制阅读模式实现。
+    expect(artifactPreviewDialogSource).toContain('<ArtifactPreviewShell');
+    expect(artifactPreviewPageSource).toContain('<ArtifactPreviewShell');
+    expect(publicArtifactPreviewPageSource).toContain('<ArtifactPreviewShell');
+  });
+
+  it('HTML 精排覆盖常见文档结构且不执行 Markdown 原始 HTML', async () => {
+    // 中文说明：精排只增强安全 Markdown 结果，脚本标记必须被转义。
+    const wrapper = mount(ArtifactPreviewShell, {
+      props: {
+        artifact: {
+          id: 'rich-structure',
+          label: '精排结构',
+          path: 'docs/180004/technical-design/overview.md',
+          stage: 'TECH_DESIGN',
+          kind: 'markdown',
+          exists: true
+        },
+        content:
+          '# 标题\n\n> 引用\n\n| 列 | 值 |\n| --- | --- |\n| A | B |\n\n```ts\nconst ok = true\n```\n\n![图](files/a.png)\n\n<script>window.hacked = true</script>'
+      }
+    });
+    await flushPromises();
+
+    const article = wrapper.find('.artifact-markdown');
+    expect(article.classes()).toContain('artifact-markdown--rich');
+    expect(article.find('table').attributes('data-rich-preview')).toBe('true');
+    expect(article.find('blockquote').attributes('data-rich-preview')).toBe('true');
+    expect(article.find('pre').attributes('data-rich-preview')).toBe('true');
+    expect(article.find('img').exists()).toBe(true);
+    expect(article.find('script').exists()).toBe(false);
+    expect(article.text()).toContain('<script>window.hacked = true</script>');
+  });
+
+  it('单个 Mermaid 失败不影响正文和其他图表', async () => {
+    // 中文说明：逐图隔离错误，失败图保留源码，后续图仍生成 SVG。
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.mocked(mermaid.run)
+      .mockRejectedValueOnce(new Error('bad diagram'))
+      .mockImplementationOnce(async (options?: { nodes?: HTMLElement[] }) => {
+        const node = options?.nodes?.[0];
+        if (node) node.innerHTML = '<svg data-second-diagram="true"></svg>';
+      });
+    const wrapper = mount(ArtifactPreviewShell, {
+      props: {
+        artifact: {
+          id: 'mermaid-isolation',
+          label: '图表隔离',
+          path: 'docs/180005/prd/analysis.md',
+          stage: 'PRD',
+          kind: 'markdown',
+          exists: true
+        },
+        content:
+          '# 正文仍可读\n\n```mermaid\ngraph LR\n  isolation-bad --> B\n```\n\n```mermaid\ngraph LR\n  isolation-good --> D\n```'
+      }
+    });
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('正文仍可读');
+    expect(wrapper.find('.mermaid-render-error').text()).toContain('isolation-bad');
+    expect(wrapper.find('svg[data-second-diagram="true"]').exists()).toBe(true);
+    expect(mermaid.run).toHaveBeenCalledTimes(2);
+  });
+
+  it('相同 Mermaid 再次打开复用 SVG 缓存，源码变化后重新渲染', async () => {
+    // 中文说明：缓存只复用成功 SVG，并以图表源码和渲染版本作为失效边界。
+    const artifact: ArtifactRef = {
+      id: 'mermaid-cache',
+      label: '图表缓存',
+      path: 'docs/180006/prd/analysis.md',
+      stage: 'PRD',
+      kind: 'markdown',
+      exists: true
+    };
+    const first = mount(ArtifactPreviewShell, {
+      props: { artifact, content: '```mermaid\ngraph LR\n cache-unique-a --> B\n```' }
+    });
+    await flushPromises();
+    expect(mermaid.run).toHaveBeenCalledTimes(1);
+    first.unmount();
+
+    const second = mount(ArtifactPreviewShell, {
+      props: { artifact, content: '```mermaid\ngraph LR\n cache-unique-a --> B\n```' }
+    });
+    await flushPromises();
+    expect(mermaid.run).toHaveBeenCalledTimes(1);
+    expect(second.find('svg[data-rendered="true"]').exists()).toBe(true);
+
+    await second.setProps({ content: '```mermaid\ngraph LR\n cache-unique-c --> D\n```' });
+    await flushPromises();
+    expect(mermaid.run).toHaveBeenCalledTimes(2);
+  });
+
+  it('版本快速切换时旧 Mermaid 任务不会覆盖新正文', async () => {
+    // 中文说明：旧任务允许自然完成，但 generation 不匹配时不得操作当前 DOM。
+    let resolveOld: (() => void) | undefined;
+    vi.mocked(mermaid.run)
+      .mockImplementationOnce(
+        (options?: { nodes?: HTMLElement[] }) =>
+          new Promise<void>((resolve) => {
+            resolveOld = () => {
+              const node = options?.nodes?.[0];
+              if (node) node.innerHTML = '<svg data-old="true"></svg>';
+              resolve();
+            };
+          })
+      )
+      .mockImplementationOnce(async (options?: { nodes?: HTMLElement[] }) => {
+        const node = options?.nodes?.[0];
+        if (node) node.innerHTML = '<svg data-new="true"></svg>';
+      });
+    const wrapper = mount(ArtifactPreviewShell, {
+      props: {
+        artifact: {
+          id: 'mermaid-race',
+          label: '竞态测试',
+          path: 'docs/180007/prd/analysis.md',
+          stage: 'PRD',
+          kind: 'markdown',
+          exists: true
+        },
+        content: '```mermaid\ngraph LR\n race-old --> B\n```'
+      }
+    });
+    await nextTick();
+    await Promise.resolve();
+    await wrapper.setProps({ content: '```mermaid\ngraph LR\n race-new --> D\n```' });
+    await nextTick();
+    await Promise.resolve();
+    resolveOld?.();
+    await flushPromises();
+
+    expect(wrapper.find('svg[data-new="true"]').exists()).toBe(true);
+    expect(wrapper.find('svg[data-old="true"]').exists()).toBe(false);
+  });
+
+  it('HTML 精排增强异常时回退 Markdown 预览', async () => {
+    // 中文说明：结构增强失败只降级主题，不清空正文。
+    const originalQuerySelectorAll = Element.prototype.querySelectorAll;
+    const querySpy = vi.spyOn(Element.prototype, 'querySelectorAll').mockImplementation(function querySelectorAll(
+      this: Element,
+      selectors: string
+    ) {
+      if (selectors === 'table, blockquote, pre') {
+        throw new Error('enhancement failed');
+      }
+      return originalQuerySelectorAll.call(this, selectors);
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const warningSpy = vi.spyOn(ElMessage, 'warning').mockImplementation(() => undefined as any);
+    const wrapper = mount(ArtifactPreviewShell, {
+      props: {
+        artifact: {
+          id: 'rich-fallback',
+          label: '精排降级',
+          path: 'docs/180008/prd/analysis.md',
+          stage: 'PRD',
+          kind: 'markdown',
+          exists: true
+        },
+        content: '# 降级后正文仍然存在'
+      }
+    });
+    await flushPromises();
+    querySpy.mockRestore();
+
+    expect(wrapper.find('.artifact-markdown').classes()).toContain('artifact-markdown--classic');
+    expect(wrapper.text()).toContain('降级后正文仍然存在');
+    expect(warningSpy).toHaveBeenCalled();
+  });
+
+  it('Markdown 解析异常时展示转义纯文本', async () => {
+    // 中文说明：解析器异常属于最末级降级，必须保持原始内容可读且不执行脚本。
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.spyOn(ElMessage, 'warning').mockImplementation(() => undefined as any);
+    const renderSpy = vi.spyOn(MarkdownIt.prototype, 'render').mockImplementationOnce(() => {
+      throw new Error('parse failed');
+    });
+    const wrapper = mount(ArtifactPreviewShell, {
+      props: {
+        artifact: {
+          id: 'markdown-fallback',
+          label: '解析降级',
+          path: 'docs/180009/prd/analysis.md',
+          stage: 'PRD',
+          kind: 'markdown',
+          exists: true
+        },
+        content: '<script>fallback-unique</script>'
+      }
+    });
+    await flushPromises();
+
+    expect(wrapper.find('.markdown-render-fallback').exists()).toBe(true);
+    expect(wrapper.find('script').exists()).toBe(false);
+    expect(wrapper.text()).toContain('<script>fallback-unique</script>');
+    expect(wrapper.find('.artifact-markdown').classes()).toContain('artifact-markdown--classic');
+    renderSpy.mockRestore();
+  });
+
+  it('固定规模长文档满足正文出现与模式切换预算', async () => {
+    // 中文说明：墙钟预算辅以“无请求、无重解析、无 Mermaid 重绘”的确定性断言。
+    const content = Array.from({ length: 80 }, (_, index) => `## 章节 ${index}\n\n这是第 ${index} 段固定性能文本。`).join('\n\n');
+    const renderSpy = vi.spyOn(MarkdownIt.prototype, 'render');
+    const startedAt = performance.now();
+    const wrapper = mount(ArtifactPreviewShell, {
+      props: {
+        artifact: {
+          id: 'performance-budget',
+          label: '性能预算',
+          path: 'docs/180010/prd/analysis.md',
+          stage: 'PRD',
+          kind: 'markdown',
+          exists: true
+        },
+        content
+      }
+    });
+    await nextTick();
+    const readableAt = performance.now() - startedAt;
+    const renderCount = renderSpy.mock.calls.length;
+    const switchStartedAt = performance.now();
+    await wrapper.findAll('.preview-reading-mode button')[1].trigger('click');
+    await nextTick();
+    const switchDuration = performance.now() - switchStartedAt;
+
+    expect(wrapper.text()).toContain('这是第 79 段固定性能文本');
+    expect(readableAt).toBeLessThan(300);
+    expect(switchDuration).toBeLessThan(100);
+    expect(renderSpy).toHaveBeenCalledTimes(renderCount);
+    expect(mermaid.run).not.toHaveBeenCalled();
+    renderSpy.mockRestore();
   });
 
   it('MarkdownOutlineNav 支持目录点击和收起事件', async () => {
