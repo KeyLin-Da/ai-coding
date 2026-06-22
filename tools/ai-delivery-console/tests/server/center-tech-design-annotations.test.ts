@@ -60,6 +60,17 @@ function centerAnnotation(overrides: Record<string, unknown> = {}) {
     comment: '补充 Redis key 和过期时间',
     status: 'OPEN',
     includeInNextGeneration: true,
+    replies: [
+      {
+        id: 'reply-center-1',
+        annotationId: 'annotation-center-1',
+        content: '回复也要带入生成',
+        createdBy: 2,
+        createdByName: '回复李四',
+        createdAt: '2026-06-16T01:00:00.000Z',
+        updatedAt: '2026-06-16T01:00:00.000Z'
+      }
+    ],
     createdAt: '2026-06-16T00:00:00.000Z',
     updatedAt: '2026-06-16T00:00:00.000Z',
     ...overrides
@@ -128,6 +139,7 @@ describe('center-tech-design-annotations service', () => {
     const content = await fs.readFile(prepared.sourceFilePath, 'utf8');
     expect(content).toContain('# 技术方案批注摘要');
     expect(content).toContain('补充 Redis key 和过期时间');
+    expect(content).toContain('回复也要带入生成');
     expect(() =>
       validateActionInput(root, {
         actionType: 'DESIGN_GENERATE',

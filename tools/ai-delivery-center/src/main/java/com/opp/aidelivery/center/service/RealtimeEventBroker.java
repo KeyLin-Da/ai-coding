@@ -63,6 +63,8 @@ public class RealtimeEventBroker {
             payload.put("shareId", channel.getKey());
             payload.put("eventId", event.getEventId());
             payload.put("eventType", event.getEventType());
+            copyPayloadField(event.getPayloadJson(), payload, "annotationId");
+            copyPayloadField(event.getPayloadJson(), payload, "replyId");
             copyPayloadField(event.getPayloadJson(), payload, "operation");
             copyPayloadField(event.getPayloadJson(), payload, "revision");
             messagingTemplate.convertAndSend(

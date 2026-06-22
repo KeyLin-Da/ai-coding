@@ -15,13 +15,16 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.opp.aidelivery.center.common.error.BusinessException;
 import com.opp.aidelivery.center.mapper.RequirementMapper;
 import com.opp.aidelivery.center.mapper.TechDesignAnnotationMapper;
+import com.opp.aidelivery.center.mapper.TechDesignAnnotationReplyMapper;
 import com.opp.aidelivery.center.mapper.UserMapper;
 import com.opp.aidelivery.center.model.dto.TechDesignAnnotationAnchorRequest;
 import com.opp.aidelivery.center.model.dto.TechDesignAnnotationConsumeRequest;
 import com.opp.aidelivery.center.model.dto.TechDesignAnnotationCreateRequest;
+import com.opp.aidelivery.center.model.dto.TechDesignAnnotationReplyRequest;
 import com.opp.aidelivery.center.model.dto.TechDesignAnnotationStatusRequest;
 import com.opp.aidelivery.center.model.entity.RequirementEntity;
 import com.opp.aidelivery.center.model.entity.TechDesignAnnotationEntity;
+import com.opp.aidelivery.center.model.entity.TechDesignAnnotationReplyEntity;
 import com.opp.aidelivery.center.model.entity.UserEntity;
 import com.opp.aidelivery.center.model.vo.TechDesignAnnotationVO;
 import java.util.Collections;
@@ -44,6 +47,8 @@ class TechDesignAnnotationServiceTest {
     @Mock
     private TechDesignAnnotationMapper annotationMapper;
     @Mock
+    private TechDesignAnnotationReplyMapper replyMapper;
+    @Mock
     private UserMapper userMapper;
     @Mock
     private DomainEventService domainEventService;
@@ -56,6 +61,7 @@ class TechDesignAnnotationServiceTest {
             permissionService,
             requirementMapper,
             annotationMapper,
+            replyMapper,
             domainEventService,
             userMapper,
             new ObjectMapper()
@@ -143,6 +149,37 @@ class TechDesignAnnotationServiceTest {
         assertThat(result).isEmpty();
         verify(annotationMapper).deleteById(900L);
         verify(domainEventService).publishAfterCommit(eq(10L), eq("tech-design.annotation.changed"), eq("REQUIREMENT"), eq(100L), anyString());
+    }
+
+    @Test
+    void createReplyReturnsReplyMetadataAndPublishesEvent() {
+        TechDesignAnnotationEntity annotation = annotation();
+        AtomicReference<TechDesignAnnotationReplyEntity> inserted = new AtomicReference<>();
+        when(requirementMapper.selectById(100L)).thenReturn(requirement());
+        when(annotationMapper.selectOne(any())).thenReturn(annotation);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            TechDesignAnnotationReplyEntity entity = invocation.getArgument(0);
+            entity.setId(901L);
+            entity.setCreatedAt(java.time.LocalDateTime.of(2026, 6, 21, 10, 0));
+            entity.setUpdatedAt(java.time.LocalDateTime.of(2026, 6, 21, 10, 0));
+            inserted.set(entity);
+            return 1;
+        }).when(replyMapper).insert(any(TechDesignAnnotationReplyEntity.class));
+        when(annotationMapper.selectList(any())).thenReturn(Collections.singletonList(annotation));
+        when(replyMapper.selectList(any())).thenAnswer(invocation -> Collections.singletonList(inserted.get()));
+        TechDesignAnnotationReplyRequest request = new TechDesignAnnotationReplyRequest();
+        request.setContent("这个回复也要带入生成");
+
+        List<TechDesignAnnotationVO> result = service.createReply(1L, 100L, "annotation-1", request);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getReplies()).hasSize(1);
+        assertThat(result.get(0).getReplies().get(0).getContent()).isEqualTo("这个回复也要带入生成");
+        assertThat(result.get(0).getReplies().get(0).getCreatedByName()).isEqualTo("评审张三");
+        ArgumentCaptor<String> payloadCaptor = ArgumentCaptor.forClass(String.class);
+        verify(domainEventService).publishAfterCommit(eq(10L), eq("tech-design.annotation.changed"), eq("REQUIREMENT"), eq(100L), payloadCaptor.capture());
+        assertThat(payloadCaptor.getValue()).contains("\"operation\":\"REPLY_CREATED\"");
+        assertThat(payloadCaptor.getValue()).contains("\"replyId\":\"reply-");
     }
 
     @Test

@@ -3,6 +3,7 @@ package com.opp.aidelivery.center.controller;
 import com.opp.aidelivery.center.common.api.ApiResponse;
 import com.opp.aidelivery.center.model.dto.ArtifactShareCreateRequest;
 import com.opp.aidelivery.center.model.dto.TechDesignAnnotationCreateRequest;
+import com.opp.aidelivery.center.model.dto.TechDesignAnnotationReplyRequest;
 import com.opp.aidelivery.center.model.vo.ArtifactSharePublicVO;
 import com.opp.aidelivery.center.model.vo.ArtifactShareVO;
 import com.opp.aidelivery.center.model.vo.TechDesignAnnotationVO;
@@ -102,6 +103,38 @@ public class ArtifactShareController {
             share.getRequirementPk(),
             share.getArtifactPath(),
             annotationId
+        ));
+    }
+
+    @PostMapping("/public-artifact-shares/{token}/tech-design-annotations/{annotationId}/replies")
+    public ApiResponse<List<TechDesignAnnotationVO>> createPublicShareTechDesignAnnotationReply(
+        @PathVariable String token,
+        @PathVariable String annotationId,
+        @Valid @RequestBody TechDesignAnnotationReplyRequest request
+    ) {
+        ArtifactSharePublicVO share = artifactShareService.resolvePublicShareForAnnotations(token);
+        return ApiResponse.ok(techDesignAnnotationService.createPublicReply(
+            CurrentUser.id(),
+            share.getRequirementPk(),
+            share.getArtifactPath(),
+            annotationId,
+            request
+        ));
+    }
+
+    @PostMapping("/public-artifact-shares/{token}/tech-design-annotations/{annotationId}/replies/{replyId}/delete")
+    public ApiResponse<List<TechDesignAnnotationVO>> deletePublicShareTechDesignAnnotationReply(
+        @PathVariable String token,
+        @PathVariable String annotationId,
+        @PathVariable String replyId
+    ) {
+        ArtifactSharePublicVO share = artifactShareService.resolvePublicShareForAnnotations(token);
+        return ApiResponse.ok(techDesignAnnotationService.deletePublicReply(
+            CurrentUser.id(),
+            share.getRequirementPk(),
+            share.getArtifactPath(),
+            annotationId,
+            replyId
         ));
     }
 }

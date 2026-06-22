@@ -3,6 +3,7 @@ package com.opp.aidelivery.center.controller;
 import com.opp.aidelivery.center.common.api.ApiResponse;
 import com.opp.aidelivery.center.model.dto.TechDesignAnnotationConsumeRequest;
 import com.opp.aidelivery.center.model.dto.TechDesignAnnotationCreateRequest;
+import com.opp.aidelivery.center.model.dto.TechDesignAnnotationReplyRequest;
 import com.opp.aidelivery.center.model.dto.TechDesignAnnotationStatusRequest;
 import com.opp.aidelivery.center.model.vo.TechDesignAnnotationVO;
 import com.opp.aidelivery.center.security.CurrentUser;
@@ -61,6 +62,24 @@ public class TechDesignAnnotationController {
         @PathVariable String annotationId
     ) {
         return ApiResponse.ok(techDesignAnnotationService.delete(CurrentUser.id(), requirementPk, annotationId));
+    }
+
+    @PostMapping("/{annotationId}/replies")
+    public ApiResponse<List<TechDesignAnnotationVO>> createReply(
+        @PathVariable Long requirementPk,
+        @PathVariable String annotationId,
+        @Valid @RequestBody TechDesignAnnotationReplyRequest request
+    ) {
+        return ApiResponse.ok(techDesignAnnotationService.createReply(CurrentUser.id(), requirementPk, annotationId, request));
+    }
+
+    @PostMapping("/{annotationId}/replies/{replyId}/delete")
+    public ApiResponse<List<TechDesignAnnotationVO>> deleteReply(
+        @PathVariable Long requirementPk,
+        @PathVariable String annotationId,
+        @PathVariable String replyId
+    ) {
+        return ApiResponse.ok(techDesignAnnotationService.deleteReply(CurrentUser.id(), requirementPk, annotationId, replyId));
     }
 
     @PostMapping("/consume")

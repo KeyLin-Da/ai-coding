@@ -21,11 +21,15 @@ vi.mock('../../src/api/client', () => ({
   apiClient: {
     listPublicTechDesignAnnotations: vi.fn(),
     createPublicTechDesignAnnotation: vi.fn(),
+    createPublicTechDesignAnnotationReply: vi.fn(),
     deletePublicTechDesignAnnotation: vi.fn(),
+    deletePublicTechDesignAnnotationReply: vi.fn(),
     listTechDesignVersions: vi.fn(),
     readTechDesignVersion: vi.fn(),
     listTechDesignAnnotations: vi.fn(),
-    createTechDesignAnnotation: vi.fn()
+    createTechDesignAnnotation: vi.fn(),
+    createTechDesignAnnotationReply: vi.fn(),
+    deleteTechDesignAnnotationReply: vi.fn()
   }
 }));
 
@@ -417,13 +421,86 @@ describe('shared artifact preview', () => {
   it('批注面板展示创建人和创建时间', () => {
     const wrapper = mount(TechDesignAnnotationPanel, {
       props: {
-        annotations: [annotation()]
+        annotations: [
+          annotation({
+            replies: [
+              {
+                id: 'reply-1',
+                annotationId: 'annotation-1',
+                content: '回复也要纳入生成',
+                createdBy: 2,
+                createdByName: '回复李四',
+                createdAt: '2026-06-18T08:00:00.000Z',
+                updatedAt: '2026-06-18T08:00:00.000Z'
+              }
+            ]
+          })
+        ]
       }
     });
 
     expect(wrapper.text()).toContain('评审张三');
     expect(wrapper.text()).toContain('2026-06-18');
     expect(wrapper.text()).toContain('补充 Redis key');
+    expect(wrapper.text()).toContain('回复李四');
+    expect(wrapper.text()).toContain('回复也要纳入生成');
+  });
+
+  it('公开分享登录用户可以回复批注', async () => {
+    vi.mocked(apiClient.listPublicTechDesignAnnotations).mockResolvedValue({
+      annotations: [annotation()],
+      hash: 'annotation-list-hash',
+      summaryPath: ''
+    });
+    vi.mocked(apiClient.createPublicTechDesignAnnotationReply).mockResolvedValue({
+      annotations: [
+        annotation({
+          replies: [
+            {
+              id: 'reply-1',
+              annotationId: 'annotation-1',
+              content: '回复内容',
+              createdBy: 1,
+              createdByName: '评审张三',
+              createdAt: '2026-06-18T08:00:00.000Z',
+              updatedAt: '2026-06-18T08:00:00.000Z'
+            }
+          ]
+        })
+      ],
+      hash: 'annotation-list-after-reply',
+      summaryPath: ''
+    });
+    vi.spyOn(ElMessageBox, 'prompt').mockResolvedValue({ value: '回复内容' } as any);
+    const wrapper = mount(ArtifactPreviewShell, {
+      props: {
+        artifact: {
+          id: 'technical-design',
+          label: '技术方案',
+          path: 'docs/172014/technical-design/design_review.md',
+          stage: 'TECH_DESIGN',
+          kind: 'markdown',
+          exists: true,
+          hash: 'hash'
+        },
+        content: '# 技术方案\n\n缓存策略',
+        publicToken: 'share-token',
+        canCreateAnnotation: true,
+        currentUserId: 1
+      }
+    });
+    await flushPromises();
+
+    const replyButton = wrapper.findAll('button').find((button) => button.text() === '回复');
+    expect(replyButton).toBeTruthy();
+    if (!replyButton) {
+      throw new Error('expected reply button');
+    }
+    await replyButton.trigger('click');
+    await flushPromises();
+
+    expect(apiClient.createPublicTechDesignAnnotationReply).toHaveBeenCalledWith('share-token', 'annotation-1', { content: '回复内容' });
+    expect(wrapper.text()).toContain('回复内容');
   });
 
   it('批注面板只读模式隐藏写操作', () => {

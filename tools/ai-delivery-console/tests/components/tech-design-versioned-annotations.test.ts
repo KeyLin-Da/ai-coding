@@ -196,10 +196,10 @@ describe('tech design versioned annotation UI', () => {
     expect(wrapper.text()).toContain('补充 Redis key');
     expect(wrapper.text()).not.toContain('历史');
     expect(wrapper.text()).not.toContain('已解决');
-    await wrapper.findAll('button')[0].trigger('click');
-    await wrapper.findAll('button')[1].trigger('click');
-    await wrapper.findAll('button')[2].trigger('click');
-    await wrapper.findAll('button')[3].trigger('click');
+    await wrapper.find('button[title="收起批注"]').trigger('click');
+    await wrapper.find('button[title="定位批注"]').trigger('click');
+    await wrapper.find('button[title="标记已解决"]').trigger('click');
+    await wrapper.find('button[title="删除批注"]').trigger('click');
 
     expect(wrapper.emitted('collapse')).toBeTruthy();
     expect(wrapper.emitted('locate')?.[0]?.[0]).toMatchObject({ id: 'annotation-1' });

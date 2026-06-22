@@ -6,6 +6,8 @@ import type {
   TechDesignAnnotationAnchor,
   TechDesignAnnotationCreateInput,
   TechDesignAnnotationList,
+  TechDesignAnnotationReply,
+  TechDesignAnnotationReplyCreateInput,
   TechDesignAnnotationStatus,
   TechDesignAnnotationStatusInput,
   TechDesignVersionSource
@@ -28,6 +30,21 @@ interface CenterAnnotationPayload {
   comment?: string;
   status?: string;
   includeInNextGeneration?: boolean;
+  consumedAt?: string | number[] | null;
+  consumedRunId?: string;
+  createdBy?: string | number;
+  createdByName?: string;
+  updatedBy?: string | number;
+  updatedByName?: string;
+  createdAt?: string | number[] | null;
+  updatedAt?: string | number[] | null;
+  replies?: CenterAnnotationReplyPayload[];
+}
+
+interface CenterAnnotationReplyPayload {
+  id?: string | number;
+  annotationId?: string | number;
+  content?: string;
   consumedAt?: string | number[] | null;
   consumedRunId?: string;
   createdBy?: string | number;
@@ -105,8 +122,9 @@ export function centerTechDesignAnnotationsEnabled(context: LocalRequestContext,
 
 function toTechDesignAnnotation(requirementId: string, item: CenterAnnotationPayload): TechDesignAnnotation {
   const now = new Date().toISOString();
+  const id = String(item.id || '');
   return {
-    id: String(item.id || ''),
+    id,
     requirementId: normalizeRequirementId(requirementId),
     artifactPath: String(item.artifactPath || ''),
     versionId: String(item.versionId || ''),
@@ -118,6 +136,24 @@ function toTechDesignAnnotation(requirementId: string, item: CenterAnnotationPay
     comment: String(item.comment || ''),
     status: normalizeStatus(item.status),
     includeInNextGeneration: item.includeInNextGeneration !== false,
+    consumedAt: normalizeCenterDate(item.consumedAt),
+    consumedRunId: item.consumedRunId,
+    createdBy: item.createdBy,
+    createdByName: normalizeText(item.createdByName, 100),
+    updatedBy: item.updatedBy,
+    updatedByName: normalizeText(item.updatedByName, 100),
+    createdAt: normalizeCenterDate(item.createdAt) || now,
+    updatedAt: normalizeCenterDate(item.updatedAt) || normalizeCenterDate(item.createdAt) || now,
+    replies: Array.isArray(item.replies) ? item.replies.map((reply) => toTechDesignAnnotationReply(id, reply)) : []
+  };
+}
+
+function toTechDesignAnnotationReply(annotationId: string, item: CenterAnnotationReplyPayload): TechDesignAnnotationReply {
+  const now = new Date().toISOString();
+  return {
+    id: String(item.id || ''),
+    annotationId: String(item.annotationId || annotationId),
+    content: String(item.content || ''),
     consumedAt: normalizeCenterDate(item.consumedAt),
     consumedRunId: item.consumedRunId,
     createdBy: item.createdBy,
@@ -176,6 +212,14 @@ function renderAnnotationMarkdown(requirementId: string, annotations: TechDesign
     lines.push('');
     lines.push(`- 选中文案: ${escapeMarkdown(annotation.selectedText)}`);
     lines.push(`- 批注意见: ${escapeMarkdown(annotation.comment)}`);
+    const replies = annotation.replies || [];
+    if (replies.length) {
+      lines.push(`- 回复:`);
+      for (const reply of replies) {
+        const actor = reply.createdByName || (reply.createdBy == null ? '未知用户' : `用户 ${reply.createdBy}`);
+        lines.push(`  - ${escapeMarkdown(actor)} ${reply.createdAt || ''}: ${escapeMarkdown(reply.content)}`);
+      }
+    }
     lines.push(`- 原始版本: ${annotation.versionNo ? `v${annotation.versionNo}` : annotation.versionId || '-'}`);
     lines.push(`- 标题路径: ${annotation.anchor.headingPath.join(' > ') || '-'}`);
     lines.push(`- 批注 ID: ${annotation.id}`);
@@ -299,6 +343,46 @@ export async function deletePublicCenterTechDesignAnnotation(
   return toAnnotationListByRequirementId(requirementId, payload);
 }
 
+export async function createPublicCenterTechDesignAnnotationReply(
+  context: LocalRequestContext,
+  token: string,
+  requirementId: string,
+  annotationId: string,
+  input: TechDesignAnnotationReplyCreateInput
+): Promise<TechDesignAnnotationList> {
+  const content = normalizeText(input.content, 4000);
+  if (!content) {
+    throw new Error('请输入回复内容');
+  }
+  const payload = await centerRequest<CenterAnnotationPayload[]>(
+    context,
+    centerPublicAnnotationPath(token, `/${encodeURIComponent(annotationId)}/replies`),
+    {
+      method: 'POST',
+      body: JSON.stringify({ content })
+    }
+  );
+  return toAnnotationListByRequirementId(requirementId, payload);
+}
+
+export async function deletePublicCenterTechDesignAnnotationReply(
+  context: LocalRequestContext,
+  token: string,
+  requirementId: string,
+  annotationId: string,
+  replyId: string
+): Promise<TechDesignAnnotationList> {
+  const payload = await centerRequest<CenterAnnotationPayload[]>(
+    context,
+    centerPublicAnnotationPath(token, `/${encodeURIComponent(annotationId)}/replies/${encodeURIComponent(replyId)}/delete`),
+    {
+      method: 'POST',
+      body: JSON.stringify({})
+    }
+  );
+  return toAnnotationListByRequirementId(requirementId, payload);
+}
+
 export async function updateCenterTechDesignAnnotationStatus(
   context: LocalRequestContext,
   workflow: RequirementWorkflow,
@@ -314,6 +398,44 @@ export async function updateCenterTechDesignAnnotationStatus(
         status: input.status,
         includeInNextGeneration: input.includeInNextGeneration
       })
+    }
+  );
+  return toAnnotationList(workflow, payload);
+}
+
+export async function createCenterTechDesignAnnotationReply(
+  context: LocalRequestContext,
+  workflow: RequirementWorkflow,
+  annotationId: string,
+  input: TechDesignAnnotationReplyCreateInput
+): Promise<TechDesignAnnotationList> {
+  const content = normalizeText(input.content, 4000);
+  if (!content) {
+    throw new Error('请输入回复内容');
+  }
+  const payload = await centerRequest<CenterAnnotationPayload[]>(
+    context,
+    centerAnnotationPath(workflow, `/${encodeURIComponent(annotationId)}/replies`),
+    {
+      method: 'POST',
+      body: JSON.stringify({ content })
+    }
+  );
+  return toAnnotationList(workflow, payload);
+}
+
+export async function deleteCenterTechDesignAnnotationReply(
+  context: LocalRequestContext,
+  workflow: RequirementWorkflow,
+  annotationId: string,
+  replyId: string
+): Promise<TechDesignAnnotationList> {
+  const payload = await centerRequest<CenterAnnotationPayload[]>(
+    context,
+    centerAnnotationPath(workflow, `/${encodeURIComponent(annotationId)}/replies/${encodeURIComponent(replyId)}/delete`),
+    {
+      method: 'POST',
+      body: JSON.stringify({})
     }
   );
   return toAnnotationList(workflow, payload);
@@ -400,7 +522,7 @@ export async function consumeCenterTechDesignAnnotationsAndSnapshot(
     }
     throw error;
   }
-  const annotations = payload.map((item) => toTechDesignAnnotation(workflow, item));
+  const annotations = payload.map((item) => toTechDesignAnnotation(workflow.requirementId, item));
   if (!annotations.length) {
     return [];
   }

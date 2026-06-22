@@ -275,6 +275,69 @@ describe('artifact share router', () => {
     }
   });
 
+  it('公开技术方案批注登录接收人可通过 token 回复', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-share-annotation-reply-'));
+    const content = '# 技术方案\n当前内容';
+    const contentHash = hashContent(content);
+    await fs.mkdir(path.join(tempDir, 'docs/172014/technical-design'), { recursive: true });
+    await fs.writeFile(path.join(tempDir, 'docs/172014/technical-design/design_review.md'), content, 'utf8');
+    const router = createRouter(tempDir);
+    const requests: Array<{ pathname: string; body?: any }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const parsed = new URL(String(input));
+      requests.push({ pathname: parsed.pathname, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      if (parsed.pathname === '/api/ai-delivery/public-artifact-shares/token-1') {
+        return jsonResponse({ ...publicShare(), showAnnotations: true });
+      }
+      if (parsed.pathname === '/api/ai-delivery/public-artifact-shares/token-1/tech-design-annotations/annotation-1/replies') {
+        return jsonResponse([
+          centerAnnotation({
+            contentHash,
+            replies: [
+              {
+                id: 'reply-1',
+                annotationId: 'annotation-1',
+                content: '回复内容',
+                createdBy: 2,
+                createdByName: '回复李四',
+                createdAt: '2026-06-18T08:00:00.000Z',
+                updatedAt: '2026-06-18T08:00:00.000Z'
+              }
+            ]
+          })
+        ]);
+      }
+      return jsonResponse(null, 404, 'B70004', '接口不存在');
+    }));
+
+    try {
+      const { response, done } = routerResponse();
+      await router(
+        routerRequest(
+          'POST',
+          '/api/ai-delivery/public-artifact-shares/token-1/tech-design-annotations/annotation-1/replies',
+          {
+            'content-type': 'application/json',
+            'x-user-id': '2',
+            'x-center-base-url': 'http://center.local'
+          },
+          JSON.stringify({ content: '回复内容' })
+        ),
+        response
+      );
+      const result = await done;
+
+      expect(result.status).toBe(200);
+      expect(result.body.data.annotations[0].replies[0].content).toBe('回复内容');
+      expect(requests).toContainEqual({
+        pathname: '/api/ai-delivery/public-artifact-shares/token-1/tech-design-annotations/annotation-1/replies',
+        body: { content: '回复内容' }
+      });
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it('公开技术方案批注未登录时拒绝删除', async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-share-annotation-delete-anon-'));
     const router = createRouter(tempDir);

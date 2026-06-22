@@ -1,6 +1,8 @@
 package com.opp.aidelivery.center.model.vo;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import lombok.Data;
 
 @Data
@@ -26,4 +28,5 @@ public class TechDesignAnnotationVO {
     private String updatedByName;
     private LocalDateTime consumedAt;
     private String consumedRunId;
+    private List<TechDesignAnnotationReplyVO> replies = new ArrayList<>();
 }

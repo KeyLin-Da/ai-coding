@@ -17,6 +17,8 @@ export interface RealtimeShareAnnotationEvent {
   shareId: number;
   eventId: number;
   eventType: 'tech-design.annotation.changed';
+  annotationId?: string;
+  replyId?: string;
   operation?: string;
   revision?: number;
 }

@@ -4,6 +4,7 @@ import type {
   TechDesignAnnotation,
   TechDesignAnnotationCreateInput,
   TechDesignAnnotationList,
+  TechDesignAnnotationReplyCreateInput,
   TechDesignAnnotationStatus,
   TechDesignAnnotationStatusInput
 } from '../../shared/workflow';
@@ -112,6 +113,14 @@ function renderSummary(requirementId: string, annotations: TechDesignAnnotation[
     lines.push('');
     lines.push(`- 选中文案: ${escapeMarkdown(annotation.selectedText)}`);
     lines.push(`- 批注意见: ${escapeMarkdown(annotation.comment)}`);
+    const replies = (annotation.replies || []).filter((reply) => !reply.consumedAt);
+    if (replies.length) {
+      lines.push(`- 回复:`);
+      for (const reply of replies) {
+        const actor = reply.createdByName || (reply.createdBy == null ? '未知用户' : `用户 ${reply.createdBy}`);
+        lines.push(`  - ${escapeMarkdown(actor)} ${reply.createdAt || ''}: ${escapeMarkdown(reply.content)}`);
+      }
+    }
     lines.push(`- 原始版本: ${annotation.versionNo ? `v${annotation.versionNo}` : annotation.versionId}`);
     lines.push(`- 标题路径: ${annotation.anchor.headingPath.join(' > ') || '-'}`);
     lines.push('');
@@ -181,6 +190,7 @@ export async function createTechDesignAnnotation(
     comment,
     status: 'OPEN',
     includeInNextGeneration: input.includeInNextGeneration !== false,
+    replies: [],
     createdAt: now,
     updatedAt: now
   };
@@ -189,6 +199,78 @@ export async function createTechDesignAnnotation(
     annotations: [annotation, ...index.annotations]
   };
   await writeIndex(workspaceRoot, requirementId, nextIndex, { expectedHash: input.expectedHash });
+  return rebuildTechDesignAnnotationSummary(workspaceRoot, requirementId);
+}
+
+export async function createTechDesignAnnotationReply(
+  workspaceRoot: string,
+  requirementId: string,
+  annotationId: string,
+  input: TechDesignAnnotationReplyCreateInput
+): Promise<TechDesignAnnotationList> {
+  const content = normalizeText(input.content, 4000);
+  if (!content) {
+    throw new Error('请输入回复内容');
+  }
+  const { index } = await readIndex(workspaceRoot, requirementId);
+  let found = false;
+  const now = new Date().toISOString();
+  const nextAnnotations = index.annotations.map((annotation) => {
+    if (annotation.id !== annotationId) {
+      return annotation;
+    }
+    found = true;
+    return {
+      ...annotation,
+      replies: [
+        ...(annotation.replies || []),
+        {
+          id: createId('reply'),
+          annotationId,
+          content,
+          createdAt: now,
+          updatedAt: now
+        }
+      ],
+      updatedAt: now
+    };
+  });
+  if (!found) {
+    throw new Error(`批注不存在: ${annotationId}`);
+  }
+  await writeIndex(workspaceRoot, requirementId, { version: 1, annotations: nextAnnotations }, { expectedHash: input.expectedHash });
+  return rebuildTechDesignAnnotationSummary(workspaceRoot, requirementId);
+}
+
+export async function deleteTechDesignAnnotationReply(
+  workspaceRoot: string,
+  requirementId: string,
+  annotationId: string,
+  replyId: string,
+  input: WriteOptions = {}
+): Promise<TechDesignAnnotationList> {
+  const { index } = await readIndex(workspaceRoot, requirementId);
+  let found = false;
+  const now = new Date().toISOString();
+  const nextAnnotations = index.annotations.map((annotation) => {
+    if (annotation.id !== annotationId) {
+      return annotation;
+    }
+    const replies = annotation.replies || [];
+    const nextReplies = replies.filter((reply) => reply.id !== replyId);
+    if (nextReplies.length !== replies.length) {
+      found = true;
+    }
+    return {
+      ...annotation,
+      replies: nextReplies,
+      updatedAt: found ? now : annotation.updatedAt
+    };
+  });
+  if (!found) {
+    throw new Error(`回复不存在: ${replyId}`);
+  }
+  await writeIndex(workspaceRoot, requirementId, { version: 1, annotations: nextAnnotations }, { expectedHash: input.expectedHash });
   return rebuildTechDesignAnnotationSummary(workspaceRoot, requirementId);
 }
 
@@ -254,6 +336,16 @@ export async function consumeTechDesignAnnotations(
     changed = true;
     return {
       ...annotation,
+      replies: (annotation.replies || []).map((reply) =>
+        reply.consumedAt
+          ? reply
+          : {
+              ...reply,
+              consumedAt: now,
+              consumedRunId: runId,
+              updatedAt: now
+            }
+      ),
       consumedAt: now,
       consumedRunId: runId,
       updatedAt: now

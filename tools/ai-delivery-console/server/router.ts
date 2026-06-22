@@ -26,8 +26,10 @@ import { bootstrapProjectArtifactWorkspace } from './services/skill-sync';
 import { deleteTechDesignQuestionRecord, type DeleteTechDesignQuestionInput } from './services/tech-design-questions';
 import {
   createTechDesignAnnotation,
+  createTechDesignAnnotationReply,
   consumeTechDesignAnnotations,
   deleteTechDesignAnnotation,
+  deleteTechDesignAnnotationReply,
   listTechDesignAnnotations,
   rebuildTechDesignAnnotationSummary,
   updateTechDesignAnnotationStatus
@@ -36,9 +38,13 @@ import {
   centerTechDesignAnnotationsEnabled,
   consumeCenterTechDesignAnnotationsAndSnapshot,
   createCenterTechDesignAnnotation,
+  createCenterTechDesignAnnotationReply,
   createPublicCenterTechDesignAnnotation,
+  createPublicCenterTechDesignAnnotationReply,
   deleteCenterTechDesignAnnotation,
+  deleteCenterTechDesignAnnotationReply,
   deletePublicCenterTechDesignAnnotation,
+  deletePublicCenterTechDesignAnnotationReply,
   filterTechDesignAnnotationsByContentHash,
   listCenterTechDesignAnnotations,
   listPublicCenterTechDesignAnnotations,
@@ -1064,6 +1070,78 @@ export function createRouter(workspaceRoot: string) {
         return;
       }
 
+      const techDesignAnnotationReplyMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/tech-design-annotations\/([^/]+)\/replies$/);
+      if (request.method === 'POST' && techDesignAnnotationReplyMatch) {
+        const requirementId = techDesignAnnotationReplyMatch[1];
+        const annotationId = decodeURIComponent(techDesignAnnotationReplyMatch[2]);
+        const input = await parseBody<{ content?: string; expectedHash?: string }>(request);
+        const loaded = await loadMergedWorkflow(requestContext, requirementId, true);
+        if (!loaded.workflow) {
+          send(response, 404, { message: '需求不存在' });
+          return;
+        }
+        if (centerTechDesignAnnotationsEnabled(requestContext, loaded.workflow)) {
+          send(response, 200, { data: await createCenterTechDesignAnnotationReply(requestContext, loaded.workflow, annotationId, input as any) });
+          return;
+        }
+        const { root, repository } = loaded;
+        const lock = new WorkflowLock(root, requirementId);
+        await lock.acquire();
+        try {
+          let workflow = loaded.workflow;
+          if (!workflow) {
+            send(response, 404, { message: '需求不存在' });
+            return;
+          }
+          await assertWritableWorkflow(requestContext, workflow);
+          const result = await createTechDesignAnnotationReply(root, requirementId, annotationId, input as any);
+          workflow = await saveWithArtifacts(root, repository, workflow);
+          await reportRequirementWorkspaceState(requestContext, workflow).catch(() => undefined);
+          send(response, 200, { data: result });
+        } finally {
+          await lock.release();
+        }
+        return;
+      }
+
+      const techDesignAnnotationReplyDeleteMatch = match(
+        pathname,
+        /^\/api\/ai-delivery\/requirements\/([^/]+)\/tech-design-annotations\/([^/]+)\/replies\/([^/]+)\/delete$/
+      );
+      if (request.method === 'POST' && techDesignAnnotationReplyDeleteMatch) {
+        const requirementId = techDesignAnnotationReplyDeleteMatch[1];
+        const annotationId = decodeURIComponent(techDesignAnnotationReplyDeleteMatch[2]);
+        const replyId = decodeURIComponent(techDesignAnnotationReplyDeleteMatch[3]);
+        const input = await parseBody<{ expectedHash?: string }>(request);
+        const loaded = await loadMergedWorkflow(requestContext, requirementId, true);
+        if (!loaded.workflow) {
+          send(response, 404, { message: '需求不存在' });
+          return;
+        }
+        if (centerTechDesignAnnotationsEnabled(requestContext, loaded.workflow)) {
+          send(response, 200, { data: await deleteCenterTechDesignAnnotationReply(requestContext, loaded.workflow, annotationId, replyId) });
+          return;
+        }
+        const { root, repository } = loaded;
+        const lock = new WorkflowLock(root, requirementId);
+        await lock.acquire();
+        try {
+          let workflow = loaded.workflow;
+          if (!workflow) {
+            send(response, 404, { message: '需求不存在' });
+            return;
+          }
+          await assertWritableWorkflow(requestContext, workflow);
+          const result = await deleteTechDesignAnnotationReply(root, requirementId, annotationId, replyId, input);
+          workflow = await saveWithArtifacts(root, repository, workflow);
+          await reportRequirementWorkspaceState(requestContext, workflow).catch(() => undefined);
+          send(response, 200, { data: result });
+        } finally {
+          await lock.release();
+        }
+        return;
+      }
+
       const techDesignAnnotationRebuildMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/tech-design-annotations\/rebuild-summary$/);
       if (request.method === 'POST' && techDesignAnnotationRebuildMatch) {
         const requirementId = techDesignAnnotationRebuildMatch[1];
@@ -1587,6 +1665,64 @@ export function createRouter(workspaceRoot: string) {
         const input = await parseBody<any>(request);
         const result = await createPublicCenterTechDesignAnnotation(artifactRoot, requestContext, token, { ...share, artifactPath }, input);
         const artifactResult = await readArtifact(artifactRoot, artifactPath);
+        send(response, 200, { data: filterTechDesignAnnotationsByContentHash(result, artifactResult.artifact.hash) });
+        return;
+      }
+
+      const publicAnnotationReplyMatch = match(
+        pathname,
+        /^\/api\/ai-delivery\/public-artifact-shares\/([^/]+)\/tech-design-annotations\/([^/]+)\/replies$/
+      );
+      if (request.method === 'POST' && publicAnnotationReplyMatch) {
+        if (!requestContext.accessToken && !requestContext.userId) {
+          throw localServiceError('B70001', '请先登录后回复批注');
+        }
+        const token = decodeURIComponent(publicAnnotationReplyMatch[1]);
+        const annotationId = decodeURIComponent(publicAnnotationReplyMatch[2]);
+        const share = await resolvePublicShare(requestContext, token);
+        if (share.showAnnotations === false) {
+          throw localServiceError('B70082', '公开分享未开启批注展示');
+        }
+        const artifactPath = assertPreviewableArtifactPath(share.requirementId, share.artifactPath);
+        if (!artifactPath.match(/^docs\/[^/]+\/technical-design\/design_review\.md$/)) {
+          throw localServiceError('B70080', '公开分享产物不是技术方案文档');
+        }
+        const artifactRoot = await resolvePublicArtifactRoot(requestContext, { ...share, artifactPath });
+        const artifactResult = await readArtifact(artifactRoot, artifactPath);
+        if (!artifactResult.artifact.exists) {
+          throw localServiceError('B70081', '分享产物当前不可读取');
+        }
+        const input = await parseBody<any>(request);
+        const result = await createPublicCenterTechDesignAnnotationReply(requestContext, token, share.requirementId, annotationId, input);
+        send(response, 200, { data: filterTechDesignAnnotationsByContentHash(result, artifactResult.artifact.hash) });
+        return;
+      }
+
+      const publicAnnotationReplyDeleteMatch = match(
+        pathname,
+        /^\/api\/ai-delivery\/public-artifact-shares\/([^/]+)\/tech-design-annotations\/([^/]+)\/replies\/([^/]+)\/delete$/
+      );
+      if (request.method === 'POST' && publicAnnotationReplyDeleteMatch) {
+        if (!requestContext.accessToken && !requestContext.userId) {
+          throw localServiceError('B70001', '请先登录后删除回复');
+        }
+        const token = decodeURIComponent(publicAnnotationReplyDeleteMatch[1]);
+        const annotationId = decodeURIComponent(publicAnnotationReplyDeleteMatch[2]);
+        const replyId = decodeURIComponent(publicAnnotationReplyDeleteMatch[3]);
+        const share = await resolvePublicShare(requestContext, token);
+        if (share.showAnnotations === false) {
+          throw localServiceError('B70082', '公开分享未开启批注展示');
+        }
+        const artifactPath = assertPreviewableArtifactPath(share.requirementId, share.artifactPath);
+        if (!artifactPath.match(/^docs\/[^/]+\/technical-design\/design_review\.md$/)) {
+          throw localServiceError('B70080', '公开分享产物不是技术方案文档');
+        }
+        const artifactRoot = await resolvePublicArtifactRoot(requestContext, { ...share, artifactPath });
+        const artifactResult = await readArtifact(artifactRoot, artifactPath);
+        if (!artifactResult.artifact.exists) {
+          throw localServiceError('B70081', '分享产物当前不可读取');
+        }
+        const result = await deletePublicCenterTechDesignAnnotationReply(requestContext, token, share.requirementId, annotationId, replyId);
         send(response, 200, { data: filterTechDesignAnnotationsByContentHash(result, artifactResult.artifact.hash) });
         return;
       }

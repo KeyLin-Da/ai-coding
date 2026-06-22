@@ -5,6 +5,7 @@ export interface TechDesignAnnotationChangedDetail {
   requirementId?: string | number;
   shareId?: string | number;
   annotationId?: string;
+  replyId?: string;
   operation?: string;
   eventId?: number;
   eventType?: string;

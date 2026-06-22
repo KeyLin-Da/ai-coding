@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   consumeTechDesignAnnotations,
   createTechDesignAnnotation,
+  createTechDesignAnnotationReply,
   deleteTechDesignAnnotation,
   listTechDesignAnnotations,
   techDesignAnnotationSummaryPath,
@@ -46,6 +47,21 @@ describe('tech-design-annotations service', () => {
     expect(result.annotations[0]).toMatchObject({ status: 'OPEN', includeInNextGeneration: true });
     expect(summary).toContain('Redis key');
     expect(summary).toContain('需要补充缓存策略');
+  });
+
+  it('回复批注后摘要包含回复内容', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-tech-annotation-reply-'));
+    await prepareDesign(root);
+    const created = await createTechDesignAnnotation(root, '172014', annotationInput());
+
+    const replied = await createTechDesignAnnotationReply(root, '172014', created.annotations[0].id, {
+      content: '回复也要进入下一次生成。',
+      expectedHash: created.hash
+    });
+    const summary = await fs.readFile(path.join(root, techDesignAnnotationSummaryPath('172014')), 'utf8');
+
+    expect(replied.annotations[0].replies).toHaveLength(1);
+    expect(summary).toContain('回复也要进入下一次生成');
   });
 
   it('expectedHash 不一致时阻止覆盖批注索引', async () => {

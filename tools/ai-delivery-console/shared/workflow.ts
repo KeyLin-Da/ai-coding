@@ -198,6 +198,20 @@ export interface TechDesignAnnotationAnchor {
   occurrence: number;
 }
 
+export interface TechDesignAnnotationReply {
+  id: string;
+  annotationId: string;
+  content: string;
+  consumedAt?: string;
+  consumedRunId?: string;
+  createdBy?: string | number;
+  createdByName?: string;
+  updatedBy?: string | number;
+  updatedByName?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface TechDesignAnnotation {
   id: string;
   requirementId: string;
@@ -219,6 +233,7 @@ export interface TechDesignAnnotation {
   updatedByName?: string;
   createdAt: string;
   updatedAt: string;
+  replies?: TechDesignAnnotationReply[];
 }
 
 export interface TechDesignAnnotationCreateInput {
@@ -235,6 +250,11 @@ export interface TechDesignAnnotationStatusInput {
 }
 
 export interface TechDesignAnnotationDeleteInput {
+  expectedHash?: string;
+}
+
+export interface TechDesignAnnotationReplyCreateInput {
+  content: string;
   expectedHash?: string;
 }
 

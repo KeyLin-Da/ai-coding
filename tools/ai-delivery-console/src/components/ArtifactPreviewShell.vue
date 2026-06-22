@@ -113,10 +113,14 @@
           v-if="showAnnotationPanel"
           :annotations="selectedVersionAnnotations"
           :deletable-annotation-ids="deletableAnnotationIds"
+          :deletable-reply-ids="deletableReplyIds"
+          :replyable-annotation-ids="replyableAnnotationIds"
           :readonly="annotationPanelReadonly"
           @collapse="annotationPanelVisible = false"
           @delete="deleteAnnotation"
+          @delete-reply="deleteAnnotationReply"
           @locate="locateAnnotation"
+          @reply="replyToAnnotation"
           @resolve="resolveAnnotation"
           @toggle-include="toggleAnnotationInclude"
         />
@@ -143,7 +147,7 @@ import MarkdownIt from 'markdown-it';
 import mermaid from 'mermaid';
 import { ChatLineSquare, CopyDocument, Download, EditPen, Minus, Plus, Refresh, Share } from '@element-plus/icons-vue';
 import { ElDropdown, ElDropdownItem, ElDropdownMenu, ElMessage, ElMessageBox } from 'element-plus';
-import type { ArtifactRef, TechDesignAnnotation, TechDesignVersion } from '@shared/workflow';
+import type { ArtifactRef, TechDesignAnnotation, TechDesignAnnotationReply, TechDesignVersion } from '@shared/workflow';
 import { apiClient } from '@/api/client';
 import ArtifactVersionDiffDialog from '@/components/ArtifactVersionDiffDialog.vue';
 import MarkdownOutlineNav from '@/components/MarkdownOutlineNav.vue';
@@ -358,6 +362,23 @@ const deletableAnnotationIds = computed(() => {
   return selectedVersionAnnotations.value
     .filter((annotation) => annotation.createdBy != null && String(annotation.createdBy) === currentUserId)
     .map((annotation) => annotation.id);
+});
+const deletableReplyIds = computed(() => {
+  if (!isPublicPreview.value || !props.canCreateAnnotation || !props.currentUserId) {
+    return [];
+  }
+  const currentUserId = String(props.currentUserId);
+  return selectedVersionAnnotations.value.flatMap((annotation) =>
+    (annotation.replies || [])
+      .filter((reply) => reply.createdBy != null && String(reply.createdBy) === currentUserId)
+      .map((reply) => reply.id)
+  );
+});
+const replyableAnnotationIds = computed(() => {
+  if (!isPublicPreview.value || !props.canCreateAnnotation) {
+    return [];
+  }
+  return selectedVersionAnnotations.value.map((annotation) => annotation.id);
 });
 const createAnnotationDisabled = computed(() => {
   if (isPublicPreview.value && !props.canCreateAnnotation) {
@@ -930,6 +951,78 @@ async function deleteAnnotation(annotation: TechDesignAnnotation) {
       return;
     }
     ElMessage.error(error.message || '删除批注失败');
+  }
+}
+
+async function replyToAnnotation(annotation: TechDesignAnnotation) {
+  if (isPublicPreview.value && !props.canCreateAnnotation) {
+    emit('login-required');
+    return;
+  }
+  if (isPublicPreview.value ? !props.publicToken : !requirementId.value) {
+    return;
+  }
+  try {
+    const result = await ElMessageBox.prompt('回复这条技术方案批注', '回复批注', {
+      inputType: 'textarea',
+      inputPlaceholder: '请输入回复内容',
+      confirmButtonText: '保存',
+      cancelButtonText: '取消'
+    });
+    const content = String(result.value || '').trim();
+    if (!content) {
+      ElMessage.warning('请输入回复内容');
+      return;
+    }
+    const response = isPublicPreview.value
+      ? await apiClient.createPublicTechDesignAnnotationReply(props.publicToken, annotation.id, { content })
+      : await apiClient.createTechDesignAnnotationReply(requirementId.value, annotation.id, {
+          content,
+          expectedHash: annotationHash.value
+        });
+    techDesignAnnotations.value = response.annotations;
+    annotationHash.value = response.hash;
+    annotationPanelVisible.value = true;
+    await nextTick();
+    applyAnnotationMarks();
+    ElMessage.success('回复已保存');
+  } catch (error: any) {
+    if (error === 'cancel' || error?.message === 'cancel') {
+      return;
+    }
+    ElMessage.error(error.message || '保存回复失败');
+  }
+}
+
+async function deleteAnnotationReply(annotation: TechDesignAnnotation, reply: TechDesignAnnotationReply) {
+  if (isPublicPreview.value ? !props.publicToken : !requirementId.value) {
+    return;
+  }
+  try {
+    await ElMessageBox.confirm('删除后该回复不会再显示，也不会进入下一次技术方案生成。确认删除吗？', '删除批注回复', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning'
+    });
+    const response = isPublicPreview.value
+      ? await apiClient.deletePublicTechDesignAnnotationReply(props.publicToken, annotation.id, reply.id)
+      : await apiClient.deleteTechDesignAnnotationReply(requirementId.value, annotation.id, reply.id, {
+          expectedHash: annotationHash.value
+        });
+    techDesignAnnotations.value = response.annotations;
+    annotationHash.value = response.hash;
+    await nextTick();
+    applyAnnotationMarks();
+    ElMessage.success('回复已删除');
+  } catch (error: any) {
+    if (error === 'cancel' || error === 'close' || error?.message === 'cancel' || error?.message === 'close') {
+      return;
+    }
+    if (error.code === 'B70002' || error.status === 403) {
+      ElMessage.error('只能删除本人创建的回复');
+      return;
+    }
+    ElMessage.error(error.message || '删除回复失败');
   }
 }
 

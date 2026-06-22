@@ -13,6 +13,7 @@ import type {
   TechDesignAnnotationCreateInput,
   TechDesignAnnotationDeleteInput,
   TechDesignAnnotationList,
+  TechDesignAnnotationReplyCreateInput,
   TechDesignAnnotationStatusInput,
   TechDesignVersion,
   TechDesignVersionContent,
@@ -739,6 +740,24 @@ export const apiClient = {
       }
     );
   },
+  createPublicTechDesignAnnotationReply(token: string, annotationId: string, input: TechDesignAnnotationReplyCreateInput) {
+    return runnerRequest<TechDesignAnnotationList>(
+      `/api/ai-delivery/public-artifact-shares/${encodeURIComponent(token)}/tech-design-annotations/${encodeURIComponent(annotationId)}/replies`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input)
+      }
+    );
+  },
+  deletePublicTechDesignAnnotationReply(token: string, annotationId: string, replyId: string) {
+    return runnerRequest<TechDesignAnnotationList>(
+      `/api/ai-delivery/public-artifact-shares/${encodeURIComponent(token)}/tech-design-annotations/${encodeURIComponent(annotationId)}/replies/${encodeURIComponent(replyId)}/delete`,
+      {
+        method: 'POST',
+        body: JSON.stringify({})
+      }
+    );
+  },
   deletePublicTechDesignAnnotation(token: string, annotationId: string) {
     return runnerRequest<TechDesignAnnotationList>(
       `/api/ai-delivery/public-artifact-shares/${encodeURIComponent(token)}/tech-design-annotations/${encodeURIComponent(annotationId)}/delete`,
@@ -773,6 +792,24 @@ export const apiClient = {
       method: 'POST',
       body: JSON.stringify(input)
     });
+  },
+  createTechDesignAnnotationReply(requirementId: string, annotationId: string, input: TechDesignAnnotationReplyCreateInput) {
+    return runnerRequest<TechDesignAnnotationList>(
+      `/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/tech-design-annotations/${encodeURIComponent(annotationId)}/replies`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input)
+      }
+    );
+  },
+  deleteTechDesignAnnotationReply(requirementId: string, annotationId: string, replyId: string, input: TechDesignAnnotationDeleteInput = {}) {
+    return runnerRequest<TechDesignAnnotationList>(
+      `/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/tech-design-annotations/${encodeURIComponent(annotationId)}/replies/${encodeURIComponent(replyId)}/delete`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input)
+      }
+    );
   },
   updateTechDesignAnnotationStatus(requirementId: string, annotationId: string, input: TechDesignAnnotationStatusInput & { expectedHash?: string }) {
     return runnerRequest<TechDesignAnnotationList>(

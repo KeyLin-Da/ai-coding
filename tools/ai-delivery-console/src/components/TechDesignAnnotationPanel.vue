@@ -17,6 +17,22 @@
         <div class="annotation-meta">{{ actorText(annotation) }} · {{ timeText(annotation.createdAt) }}</div>
         <blockquote>{{ annotation.selectedText }}</blockquote>
         <p>{{ annotation.comment }}</p>
+        <section v-if="annotation.replies?.length" class="annotation-replies">
+          <div v-for="reply in annotation.replies" :key="reply.id" class="annotation-reply">
+            <div class="annotation-reply-meta">
+              <span>{{ replyActorText(reply) }} · {{ timeText(reply.createdAt) }}</span>
+              <el-button
+                v-if="canDeleteReply(reply)"
+                :icon="Delete"
+                size="small"
+                text
+                title="删除回复"
+                @click="$emit('delete-reply', annotation, reply)"
+              />
+            </div>
+            <p>{{ reply.content }}</p>
+          </div>
+        </section>
         <div class="annotation-actions">
           <el-checkbox
             v-if="!readonly && !annotation.consumedAt"
@@ -30,6 +46,7 @@
           <span v-else-if="canDelete(annotation)" class="readonly-hint">本人批注</span>
           <span v-else class="readonly-hint">只读批注</span>
           <span class="annotation-action-buttons">
+            <el-button v-if="canReply(annotation)" size="small" title="回复批注" @click="$emit('reply', annotation)">回复</el-button>
             <el-button :icon="Aim" size="small" circle title="定位批注" @click="$emit('locate', annotation)" />
             <el-button
               v-if="!readonly && annotation.status !== 'RESOLVED'"
@@ -49,17 +66,21 @@
 
 <script setup lang="ts">
 import { Aim, Check, Delete, Fold } from '@element-plus/icons-vue';
-import type { TechDesignAnnotation, TechDesignAnnotationStatus } from '@shared/workflow';
+import type { TechDesignAnnotation, TechDesignAnnotationReply, TechDesignAnnotationStatus } from '@shared/workflow';
 
 const props = withDefaults(
   defineProps<{
     annotations: TechDesignAnnotation[];
     readonly?: boolean;
     deletableAnnotationIds?: string[];
+    deletableReplyIds?: string[];
+    replyableAnnotationIds?: string[];
   }>(),
   {
     readonly: false,
-    deletableAnnotationIds: () => []
+    deletableAnnotationIds: () => [],
+    deletableReplyIds: () => [],
+    replyableAnnotationIds: () => []
   }
 );
 
@@ -68,6 +89,8 @@ defineEmits<{
   (event: 'resolve', annotation: TechDesignAnnotation): void;
   (event: 'toggle-include', annotation: TechDesignAnnotation, include: boolean): void;
   (event: 'delete', annotation: TechDesignAnnotation): void;
+  (event: 'reply', annotation: TechDesignAnnotation): void;
+  (event: 'delete-reply', annotation: TechDesignAnnotation, reply: TechDesignAnnotationReply): void;
   (event: 'collapse'): void;
 }>();
 
@@ -100,8 +123,20 @@ function actorText(annotation: TechDesignAnnotation): string {
   return annotation.createdByName || (annotation.createdBy == null ? '未知用户' : `用户 ${annotation.createdBy}`);
 }
 
+function replyActorText(reply: TechDesignAnnotationReply): string {
+  return reply.createdByName || (reply.createdBy == null ? '未知用户' : `用户 ${reply.createdBy}`);
+}
+
 function canDelete(annotation: TechDesignAnnotation): boolean {
   return !props.readonly || props.deletableAnnotationIds.includes(annotation.id);
+}
+
+function canReply(annotation: TechDesignAnnotation): boolean {
+  return annotation.status !== 'RESOLVED' && (!props.readonly || props.replyableAnnotationIds.includes(annotation.id));
+}
+
+function canDeleteReply(reply: TechDesignAnnotationReply): boolean {
+  return !props.readonly || props.deletableReplyIds.includes(reply.id);
 }
 
 function timeText(value?: string): string {
@@ -187,6 +222,36 @@ function timeText(value?: string): string {
 
 .annotation-item p {
   margin: 0 0 10px;
+  color: #111827;
+  line-height: 1.5;
+}
+
+.annotation-replies {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0;
+  padding-left: 10px;
+  border-left: 2px solid #e5e7eb;
+}
+
+.annotation-reply {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.annotation-reply-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.annotation-reply p {
+  margin: 0;
   color: #111827;
   line-height: 1.5;
 }
