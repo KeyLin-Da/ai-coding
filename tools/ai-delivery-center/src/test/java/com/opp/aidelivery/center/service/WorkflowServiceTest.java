@@ -26,7 +26,9 @@ import com.opp.aidelivery.center.model.entity.TeamMemberEntity;
 import com.opp.aidelivery.center.model.entity.WorkflowStageEntity;
 import com.opp.aidelivery.center.model.vo.RequirementVO;
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -157,7 +159,31 @@ class WorkflowServiceTest {
     }
 
     @Test
-    void reviewFinalImplementationStepApprovalAdvancesToCodeReview() {
+    void reviewFinalImplementationStepApprovalKeepsTopImplementationStageInProgress() {
+        PermissionService permissionService = org.mockito.Mockito.mock(PermissionService.class);
+        when(permissionService.assertProjectMember(1L, 10L)).thenReturn(project());
+        ReviewService service = new ReviewService(permissionService, requirementMapper, workflowStageMapper, reviewMapper, domainEventService);
+        RequirementEntity requirement = requirement();
+        requirement.setCurrentStage("IMPLEMENTATION");
+        WorkflowStageEntity implementationStage = stage("IMPLEMENTATION", "READY_FOR_REVIEW");
+        when(requirementMapper.selectById(100L)).thenReturn(requirement);
+        when(workflowStageMapper.selectOne(any())).thenReturn(implementationStage);
+
+        StageReviewRequest request = new StageReviewRequest();
+        request.setRequirementPk(100L);
+        request.setStage("IMPLEMENTATION");
+        request.setImplementationStep("CHANGE_INSPECTION");
+        request.setDecision("APPROVED");
+        service.review(1L, request);
+
+        // 最后一个子步骤通过只是确认内部进度，顶层实施验证仍需单独审核。
+        assertThat(implementationStage.getStatus()).isEqualTo("IN_PROGRESS");
+        assertThat(requirement.getCurrentStage()).isEqualTo("IMPLEMENTATION");
+        assertThat(requirement.getStatus()).isEqualTo("IN_PROGRESS");
+    }
+
+    @Test
+    void reviewImplementationStageApprovalAfterAllStepsAdvancesToCodeReview() {
         PermissionService permissionService = org.mockito.Mockito.mock(PermissionService.class);
         when(permissionService.assertProjectMember(1L, 10L)).thenReturn(project());
         ReviewService service = new ReviewService(permissionService, requirementMapper, workflowStageMapper, reviewMapper, domainEventService);
@@ -167,14 +193,69 @@ class WorkflowServiceTest {
         WorkflowStageEntity codeReviewStage = stage("CODE_REVIEW", "NOT_STARTED");
         when(requirementMapper.selectById(100L)).thenReturn(requirement);
         when(workflowStageMapper.selectOne(any())).thenReturn(implementationStage, codeReviewStage);
+        when(reviewMapper.selectList(any())).thenReturn(approvedImplementationStepReviews());
 
         StageReviewRequest request = new StageReviewRequest();
         request.setRequirementPk(100L);
         request.setStage("IMPLEMENTATION");
-        request.setImplementationStep("CHANGE_INSPECTION");
         request.setDecision("APPROVED");
         service.review(1L, request);
 
+        // 四个子步骤全部通过后，顶层实施验证审核通过才推进到代码评审。
+        assertThat(implementationStage.getStatus()).isEqualTo("APPROVED");
+        assertThat(codeReviewStage.getStatus()).isEqualTo("DRAFT");
+        assertThat(requirement.getCurrentStage()).isEqualTo("CODE_REVIEW");
+        assertThat(requirement.getStatus()).isEqualTo("IN_PROGRESS");
+    }
+
+    @Test
+    void reviewImplementationStageApprovalRejectsWhenAnyStepMissing() {
+        PermissionService permissionService = org.mockito.Mockito.mock(PermissionService.class);
+        when(permissionService.assertProjectMember(1L, 10L)).thenReturn(project());
+        ReviewService service = new ReviewService(permissionService, requirementMapper, workflowStageMapper, reviewMapper, domainEventService);
+        RequirementEntity requirement = requirement();
+        requirement.setCurrentStage("IMPLEMENTATION");
+        WorkflowStageEntity implementationStage = stage("IMPLEMENTATION", "READY_FOR_REVIEW");
+        when(requirementMapper.selectById(100L)).thenReturn(requirement);
+        when(workflowStageMapper.selectOne(any())).thenReturn(implementationStage);
+        when(reviewMapper.selectList(any())).thenReturn(Arrays.asList(
+            implementationReview("START_CHANGE", "APPROVED", 4L),
+            implementationReview("ARTIFACT_REVIEW", "APPROVED", 3L),
+            implementationReview("APPLY", "APPROVED", 2L)
+        ));
+
+        StageReviewRequest request = new StageReviewRequest();
+        request.setRequirementPk(100L);
+        request.setStage("IMPLEMENTATION");
+        request.setDecision("APPROVED");
+
+        // 缺少任一子步骤最新 APPROVED 结论时，Center 强制拒绝绕过前端的顶层审核。
+        assertThatThrownBy(() -> service.review(1L, request))
+            .isInstanceOf(BusinessException.class)
+            .extracting("errorCode")
+            .isEqualTo(AiDeliveryErrorCode.VALIDATION_FAILED);
+    }
+
+    @Test
+    void reviewImplementationStageRiskAcceptedAfterAllStepsKeepsAdvanceSemantics() {
+        PermissionService permissionService = org.mockito.Mockito.mock(PermissionService.class);
+        when(permissionService.assertProjectMember(1L, 10L)).thenReturn(project());
+        ReviewService service = new ReviewService(permissionService, requirementMapper, workflowStageMapper, reviewMapper, domainEventService);
+        RequirementEntity requirement = requirement();
+        requirement.setCurrentStage("IMPLEMENTATION");
+        WorkflowStageEntity implementationStage = stage("IMPLEMENTATION", "READY_FOR_REVIEW");
+        WorkflowStageEntity codeReviewStage = stage("CODE_REVIEW", "NOT_STARTED");
+        when(requirementMapper.selectById(100L)).thenReturn(requirement);
+        when(workflowStageMapper.selectOne(any())).thenReturn(implementationStage, codeReviewStage);
+        when(reviewMapper.selectList(any())).thenReturn(approvedImplementationStepReviews());
+
+        StageReviewRequest request = new StageReviewRequest();
+        request.setRequirementPk(100L);
+        request.setStage("IMPLEMENTATION");
+        request.setDecision("RISK_ACCEPTED");
+        service.review(1L, request);
+
+        // 顶层带风险通过沿用阶段审核语义：满足四步前置条件后允许推进。
         assertThat(implementationStage.getStatus()).isEqualTo("APPROVED");
         assertThat(codeReviewStage.getStatus()).isEqualTo("DRAFT");
         assertThat(requirement.getCurrentStage()).isEqualTo("CODE_REVIEW");
@@ -285,5 +366,25 @@ class WorkflowServiceTest {
         entity.setStatus(status);
         entity.setVersion(0L);
         return entity;
+    }
+
+    private List<ReviewEntity> approvedImplementationStepReviews() {
+        return Arrays.asList(
+            implementationReview("CHANGE_INSPECTION", "APPROVED", 4L),
+            implementationReview("APPLY", "APPROVED", 3L),
+            implementationReview("ARTIFACT_REVIEW", "APPROVED", 2L),
+            implementationReview("START_CHANGE", "APPROVED", 1L)
+        );
+    }
+
+    private ReviewEntity implementationReview(String step, String decision, Long id) {
+        ReviewEntity review = new ReviewEntity();
+        review.setId(id);
+        review.setRequirementPk(100L);
+        review.setStage("IMPLEMENTATION");
+        review.setImplementationStep(step);
+        review.setDecision(decision);
+        review.setCreatedAt(LocalDateTime.of(2026, 6, 14, 10, id.intValue()));
+        return review;
     }
 }

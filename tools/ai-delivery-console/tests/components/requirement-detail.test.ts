@@ -41,7 +41,8 @@ vi.mock('@/api/client', () => ({
     getProjectRepositoryStatus: vi.fn(),
     refreshProjectRepositoryStatus: vi.fn(),
     assertRequirementWritable: vi.fn(),
-    listRequirementWorkspaceStates: vi.fn()
+    listRequirementWorkspaceStates: vi.fn(),
+    submitReview: vi.fn()
   }
 }));
 
@@ -85,6 +86,7 @@ const emptyOpenSpecSummary: OpenSpecSummary = {
 };
 
 let eventSourceUrls: string[] = [];
+let reviewDialogOpen: ReturnType<typeof vi.fn>;
 
 class MockEventSource {
   onmessage: ((event: MessageEvent) => void) | null = null;
@@ -165,7 +167,14 @@ function componentStubs() {
       template: '<div class="markdown-editor">{{ title }} {{ artifactPath }}</div>'
     },
     OpenSpecDocuments: { template: '<div />' },
-    ReviewDialog: { template: '<div />' },
+    ReviewDialog: {
+      template: '<div />',
+      methods: {
+        open(...args: any[]) {
+          reviewDialogOpen(...args);
+        }
+      }
+    },
     RunLogDrawer: { template: '<div />' },
     ArtifactSidebar: { template: '<div />' },
     ArtifactPreviewDialog: { template: '<div />' },
@@ -300,6 +309,12 @@ async function mountDetail(current: RequirementWorkflow, openSpecSummary: OpenSp
   vi.mocked(apiClient.deletePrdFile).mockResolvedValue(current);
   vi.mocked(apiClient.assertRequirementWritable).mockResolvedValue([]);
   vi.mocked(apiClient.listRequirementWorkspaceStates).mockResolvedValue([]);
+  vi.mocked(apiClient.submitReview).mockResolvedValue({
+    id: 1,
+    requirementPk: Number(current.id || 100),
+    stage: 'IMPLEMENTATION',
+    decision: 'APPROVED'
+  });
 
   const wrapper = mount(RequirementDetail, {
     global: {
@@ -344,6 +359,22 @@ function codeReviewButton(wrapper: ReturnType<typeof mount>) {
   const button = wrapper.findAll('button').find((item) => item.text().includes('生成代码评审'));
   if (!button) {
     throw new Error('未找到生成代码评审按钮');
+  }
+  return button;
+}
+
+function implementationStageReviewButton(wrapper: ReturnType<typeof mount>) {
+  const button = wrapper.findAll('button').find((item) => item.text().trim() === '审核实施验证');
+  if (!button) {
+    throw new Error('未找到审核实施验证按钮');
+  }
+  return button;
+}
+
+function implementationStepReviewButton(wrapper: ReturnType<typeof mount>) {
+  const button = wrapper.findAll('button').find((item) => item.text().trim() === '审核本步骤');
+  if (!button) {
+    throw new Error('未找到审核本步骤按钮');
   }
   return button;
 }
@@ -396,6 +427,7 @@ async function openDesignQuestionDialog(wrapper: ReturnType<typeof mount>) {
 describe('RequirementDetail OpenSpec 工件生成', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    reviewDialogOpen = vi.fn();
     eventSourceUrls = [];
     setApiRuntimeConfig({
       centerBaseUrl: 'http://127.0.0.1:8728',
@@ -475,8 +507,12 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
         }
       ]
     };
-    current.implementationSteps!.ARTIFACT_REVIEW.status = 'APPROVED';
-    current.implementationSteps!.APPLY.status = 'DRAFT';
+    const steps = current.implementationSteps;
+    if (!steps) {
+      throw new Error('测试数据缺少实施验证子步骤');
+    }
+    steps.ARTIFACT_REVIEW.status = 'APPROVED';
+    steps.APPLY.status = 'DRAFT';
     const wrapper = await mountDetail(current);
     vi.mocked(apiClient.getRequirementTokenUsageSummary).mockResolvedValue({
       requirementPk: 100,
@@ -1328,6 +1364,44 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     expect(wrapper.text()).toContain('查看报告');
     expect(wrapper.findAll('.markdown-editor').some((editor) => editor.text().includes('单元测试报告'))).toBe(false);
     expect(wrapper.text()).not.toContain('尚未扫描到单元测试报告');
+  });
+
+  it('实施验证子步骤未全部通过时禁用顶层审核入口', async () => {
+    const current = workflow([]);
+    current.id = 100;
+    const wrapper = await mountDetail(current);
+
+    expect(implementationStageReviewButton(wrapper).attributes('disabled')).toBeDefined();
+    await implementationStageReviewButton(wrapper).trigger('click');
+    await flushPromises();
+
+    expect(reviewDialogOpen).not.toHaveBeenCalled();
+  });
+
+  it('区分顶层实施验证审核和实施验证子步骤审核参数', async () => {
+    const current = workflow([]);
+    current.id = 100;
+    const steps = current.implementationSteps;
+    if (!steps) {
+      throw new Error('测试数据缺少实施验证子步骤');
+    }
+    steps.START_CHANGE.status = 'APPROVED';
+    steps.ARTIFACT_REVIEW.status = 'APPROVED';
+    steps.APPLY.status = 'APPROVED';
+    steps.CHANGE_INSPECTION.status = 'APPROVED';
+    const wrapper = await mountDetail(current);
+
+    expect(implementationStageReviewButton(wrapper).attributes('disabled')).toBeUndefined();
+    await implementationStageReviewButton(wrapper).trigger('click');
+    await flushPromises();
+
+    expect(reviewDialogOpen).toHaveBeenLastCalledWith('IMPLEMENTATION', undefined, undefined, '172014', 100);
+
+    reviewDialogOpen.mockClear();
+    await implementationStepReviewButton(wrapper).trigger('click');
+    await flushPromises();
+
+    expect(reviewDialogOpen).toHaveBeenLastCalledWith('IMPLEMENTATION', undefined, 'CHANGE_INSPECTION', '172014', 100);
   });
 
   it('代码评审默认使用 commit 正式评审模式', async () => {

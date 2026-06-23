@@ -287,6 +287,9 @@ export async function confirmArtifactGitSync(
 ): Promise<ArtifactGitSyncConfirmResult> {
   const files = [...new Set((input.files || []).map((file) => assertControlledArtifactPath(workflow, file)))];
   const inputSyncType = syncType(input);
+  if (inputSyncType === 'REVIEW_APPROVAL' && input.review?.implementationStep) {
+    throw new Error('顶层审核同步不能携带实施验证子步骤，请使用普通审核提交子步骤结论');
+  }
   const isEmptyReviewApproval = !files.length && inputSyncType === 'REVIEW_APPROVAL' && Boolean(input.review);
   if (!files.length && !isEmptyReviewApproval) {
     throw new Error('请至少选择一个需要同步的产物文件');
@@ -319,8 +322,7 @@ export async function confirmArtifactGitSync(
         requirementId: workflow.requirementId,
         stage: input.stage,
         decision: input.review?.decision,
-        comment: input.review?.comment || '',
-        implementationStep: input.review?.implementationStep
+        comment: input.review?.comment || ''
       })
     });
     return {

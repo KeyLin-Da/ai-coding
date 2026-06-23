@@ -147,8 +147,12 @@ function hasImplementationStepReview(reviews: ReviewRecord[]): boolean {
 function hasIncompleteImplementationApproval(
   stages: RequirementWorkflow['stages'],
   steps: NonNullable<RequirementWorkflow['implementationSteps']>,
-  reviews: ReviewRecord[]
+  reviews: ReviewRecord[],
+  currentStage: WorkflowStage | 'DONE'
 ): boolean {
+  if (currentStage === 'CODE_REVIEW' || currentStage === 'DONE') {
+    return false;
+  }
   return (
     hasImplementationStepReview(reviews)
     && stages.IMPLEMENTATION.status === 'APPROVED'
@@ -174,7 +178,7 @@ export function centerRequirementToWorkflow(item: CenterRequirementPayload): Req
   const now = new Date().toISOString();
   const reviews = centerReviewsToWorkflowReviews(item.reviews);
   const implementationStepStates = deriveImplementationStepsFromReviews(reviews);
-  const shouldRestoreImplementationStage = hasIncompleteImplementationApproval(stages, implementationStepStates, reviews);
+  const shouldRestoreImplementationStage = hasIncompleteImplementationApproval(stages, implementationStepStates, reviews, item.currentStage);
   if (shouldRestoreImplementationStage) {
     stages.IMPLEMENTATION = {
       ...stages.IMPLEMENTATION,
@@ -247,7 +251,7 @@ export function mergeRequirementWorkflow(centerWorkflow: RequirementWorkflow, lo
   };
   return {
     ...merged,
-    currentStage: deriveCurrentStage(merged)
+    currentStage: centerWorkflow.currentStage === 'DONE' ? 'DONE' : deriveCurrentStage(merged)
   };
 }
 

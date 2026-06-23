@@ -73,7 +73,7 @@ describe('requirement-workflow-view', () => {
     expect(merged.techDesignSourceFiles?.[0].path).toBe('docs/172014/technical-design/file/file-1.md');
   });
 
-  it('中心实施步骤审核记录会恢复 OpenSpec 子步骤状态', () => {
+  it('历史已进入代码评审的需求不会因缺少顶层审核记录回退', () => {
     const centerWorkflow = centerRequirementToWorkflow({
       id: 100,
       projectId: 10,
@@ -109,8 +109,107 @@ describe('requirement-workflow-view', () => {
     expect(centerWorkflow.reviews[0].implementationStep).toBe('START_CHANGE');
     expect(centerWorkflow.implementationSteps?.START_CHANGE.status).toBe('APPROVED');
     expect(centerWorkflow.implementationSteps?.ARTIFACT_REVIEW.status).toBe('DRAFT');
+    expect(centerWorkflow.stages.IMPLEMENTATION.status).toBe('APPROVED');
+    expect(centerWorkflow.currentStage).toBe('CODE_REVIEW');
+  });
+
+  it('新流程从四个子步骤审核记录派生状态且顶层未审仍停留实施验证', () => {
+    const centerWorkflow = centerRequirementToWorkflow({
+      id: 100,
+      projectId: 10,
+      requirementId: '141846',
+      title: '页面装修列表样式异常',
+      requirementType: 'DEFECT',
+      branchName: 'bugfix/opp#141846',
+      status: 'IN_PROGRESS',
+      currentStage: 'IMPLEMENTATION',
+      stages: [
+        {
+          stage: 'TECH_DESIGN',
+          status: 'APPROVED'
+        },
+        {
+          stage: 'IMPLEMENTATION',
+          status: 'IN_PROGRESS'
+        }
+      ],
+      reviews: [
+        {
+          id: 501,
+          stage: 'IMPLEMENTATION',
+          implementationStep: 'START_CHANGE',
+          decision: 'APPROVED',
+          comment: '开始变更通过',
+          actorId: 1,
+          createdAt: '2026-06-14T10:00:00'
+        },
+        {
+          id: 502,
+          stage: 'IMPLEMENTATION',
+          implementationStep: 'ARTIFACT_REVIEW',
+          decision: 'APPROVED',
+          comment: '工件通过',
+          actorId: 1,
+          createdAt: '2026-06-14T10:01:00'
+        },
+        {
+          id: 503,
+          stage: 'IMPLEMENTATION',
+          implementationStep: 'APPLY',
+          decision: 'APPROVED',
+          comment: '实施通过',
+          actorId: 1,
+          createdAt: '2026-06-14T10:02:00'
+        },
+        {
+          id: 504,
+          stage: 'IMPLEMENTATION',
+          implementationStep: 'CHANGE_INSPECTION',
+          decision: 'APPROVED',
+          comment: '变更检查通过',
+          actorId: 1,
+          createdAt: '2026-06-14T10:03:00'
+        }
+      ]
+    });
+
+    expect(centerWorkflow.implementationSteps?.START_CHANGE.status).toBe('APPROVED');
+    expect(centerWorkflow.implementationSteps?.ARTIFACT_REVIEW.status).toBe('APPROVED');
+    expect(centerWorkflow.implementationSteps?.APPLY.status).toBe('APPROVED');
+    expect(centerWorkflow.implementationSteps?.CHANGE_INSPECTION.status).toBe('APPROVED');
     expect(centerWorkflow.stages.IMPLEMENTATION.status).toBe('IN_PROGRESS');
     expect(centerWorkflow.currentStage).toBe('IMPLEMENTATION');
+  });
+
+  it('合并中心 DONE 状态时不按本地阶段缺失回退', () => {
+    const centerWorkflow = centerRequirementToWorkflow({
+      id: 100,
+      projectId: 10,
+      requirementId: '172014',
+      title: '中心已完成需求',
+      requirementType: 'REQUIREMENT',
+      status: 'DONE',
+      currentStage: 'DONE',
+      stages: [
+        {
+          stage: 'PRD',
+          status: 'APPROVED'
+        },
+        {
+          stage: 'TECH_DESIGN',
+          status: 'APPROVED'
+        },
+        {
+          stage: 'IMPLEMENTATION',
+          status: 'APPROVED'
+        }
+      ]
+    });
+
+    const merged = mergeRequirementWorkflow(centerWorkflow, localRequirementWorkflow());
+
+    expect(merged.currentStage).toBe('DONE');
+    expect(merged.status).toBe('DONE');
   });
 
   it('中心详情读取超时时先返回 undefined，并在完成后命中短缓存', async () => {

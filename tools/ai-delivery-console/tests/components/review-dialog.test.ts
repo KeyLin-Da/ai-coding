@@ -137,8 +137,7 @@ describe('ReviewDialog', () => {
       message: 'ai-delivery(172014): sync TECH_DESIGN',
       review: {
         decision: 'APPROVED',
-        comment: '',
-        implementationStep: undefined
+        comment: ''
       }
     });
     expect(wrapper.emitted('synced')?.[0]?.[0]).toEqual({
@@ -147,6 +146,29 @@ describe('ReviewDialog', () => {
       centerResult: {
         syncedFiles: ['docs/172014/technical-design/design_review.md']
       }
+    });
+  });
+
+  it('实施验证子步骤通过时直接提交普通审核且不生成 Git 同步计划', async () => {
+    const wrapper = mount(ReviewDialog, {
+      global: {
+        stubs: stubs()
+      }
+    });
+    (wrapper.vm as any).open('IMPLEMENTATION', undefined, 'CHANGE_INSPECTION', '141846', 200);
+    await flushPromises();
+
+    await wrapper.findAll('button').find((button) => button.text() === '提交')?.trigger('click');
+    await flushPromises();
+
+    expect(apiClient.planArtifactGitSync).not.toHaveBeenCalled();
+    expect(apiClient.confirmArtifactGitSync).not.toHaveBeenCalled();
+    expect(wrapper.emitted('submit')?.[0]?.[0]).toEqual({
+      stage: 'IMPLEMENTATION',
+      implementationStep: 'CHANGE_INSPECTION',
+      decision: 'APPROVED',
+      comment: '',
+      artifactPath: undefined
     });
   });
 
@@ -175,7 +197,7 @@ describe('ReviewDialog', () => {
         stubs: stubs()
       }
     });
-    (wrapper.vm as any).open('IMPLEMENTATION', undefined, 'CHANGE_INSPECTION', '141846', 200);
+    (wrapper.vm as any).open('IMPLEMENTATION', undefined, undefined, '141846', 200);
     await flushPromises();
 
     await wrapper.findAll('button').find((button) => button.text() === '下一步')?.trigger('click');
@@ -195,8 +217,7 @@ describe('ReviewDialog', () => {
       message: 'ai-delivery(141846): sync IMPLEMENTATION',
       review: {
         decision: 'APPROVED',
-        comment: '',
-        implementationStep: 'CHANGE_INSPECTION'
+        comment: ''
       }
     });
     expect(wrapper.emitted('synced')?.[0]?.[0]).toEqual({
@@ -205,5 +226,47 @@ describe('ReviewDialog', () => {
         reviewed: true
       }
     });
+  });
+
+  it('顶层审核同步失败时保留确认链路不关闭弹窗', async () => {
+    vi.mocked(apiClient.planArtifactGitSync).mockResolvedValue({
+      requirementId: '172014',
+      stage: 'IMPLEMENTATION',
+      syncType: 'REVIEW_APPROVAL',
+      blocked: false,
+      blockers: [],
+      repoPath: '/Users/me/ai-delivery',
+      headCommit: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      remoteCommit: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      files: [
+        {
+          path: 'openspec/changes/req-172014/tasks.md',
+          status: 'M',
+          selected: true,
+          contentSha256: 'sha256'
+        }
+      ],
+      diff: 'diff --git a/openspec/changes/req-172014/tasks.md b/openspec/changes/req-172014/tasks.md'
+    });
+    vi.mocked(apiClient.confirmArtifactGitSync).mockRejectedValue(new Error('Git push失败或远端已更新'));
+
+    const wrapper = mount(ReviewDialog, {
+      global: {
+        stubs: stubs()
+      }
+    });
+    (wrapper.vm as any).open('IMPLEMENTATION', undefined, undefined, '172014', 100);
+    await flushPromises();
+
+    await wrapper.findAll('button').find((button) => button.text() === '下一步')?.trigger('click');
+    await flushPromises();
+    await wrapper.findAll('button').find((button) => button.text() === '下一步')?.trigger('click');
+    await flushPromises();
+    await wrapper.findAll('button').find((button) => button.text() === '确认推送并通过')?.trigger('click');
+    await flushPromises();
+
+    expect(apiClient.confirmArtifactGitSync).toHaveBeenCalled();
+    expect(wrapper.findAll('button').some((button) => button.text() === '确认推送并通过')).toBe(true);
+    expect(wrapper.emitted('synced')).toBeUndefined();
   });
 });

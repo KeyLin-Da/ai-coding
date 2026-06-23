@@ -105,7 +105,7 @@ describe('review-service implementation steps', () => {
     expect(result.reviews[0].implementationStep).toBe('ARTIFACT_REVIEW');
   });
 
-  it('变更检查审核通过后解锁代码评审', async () => {
+  it('变更检查子步骤审核通过后仍停留在实施验证', async () => {
     const item = workflow();
     item.implementationSteps = {
       START_CHANGE: { step: 'START_CHANGE', status: 'APPROVED' },
@@ -120,6 +120,71 @@ describe('review-service implementation steps', () => {
       implementationStep: 'CHANGE_INSPECTION',
       decision: 'APPROVED',
       comment: '变更和测试证据通过'
+    });
+
+    expect(result.currentStage).toBe('IMPLEMENTATION');
+    expect(result.stages.IMPLEMENTATION.status).toBe('IN_PROGRESS');
+    expect(result.implementationSteps?.CHANGE_INSPECTION.status).toBe('APPROVED');
+    expect(result.stages.CODE_REVIEW.status).toBe('NOT_STARTED');
+  });
+
+  it('全部子步骤通过后顶层实施验证审核才解锁代码评审', async () => {
+    const item = workflow();
+    item.implementationSteps = {
+      START_CHANGE: { step: 'START_CHANGE', status: 'APPROVED' },
+      ARTIFACT_REVIEW: { step: 'ARTIFACT_REVIEW', status: 'APPROVED' },
+      APPLY: { step: 'APPLY', status: 'APPROVED' },
+      CHANGE_INSPECTION: { step: 'CHANGE_INSPECTION', status: 'APPROVED' }
+    };
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-review-'));
+    const result = await applyReview(root, item, {
+      requirementId: '172014',
+      stage: 'IMPLEMENTATION',
+      decision: 'APPROVED',
+      comment: '实施验证通过'
+    });
+
+    expect(result.currentStage).toBe('CODE_REVIEW');
+    expect(result.stages.IMPLEMENTATION.status).toBe('APPROVED');
+    expect(result.stages.CODE_REVIEW.status).toBe('DRAFT');
+    expect(result.reviews[0].implementationStep).toBeUndefined();
+  });
+
+  it('顶层实施验证审核缺少子步骤通过结论时拒绝推进', async () => {
+    const item = workflow();
+    item.implementationSteps = {
+      START_CHANGE: { step: 'START_CHANGE', status: 'APPROVED' },
+      ARTIFACT_REVIEW: { step: 'ARTIFACT_REVIEW', status: 'APPROVED' },
+      APPLY: { step: 'APPLY', status: 'APPROVED' },
+      CHANGE_INSPECTION: { step: 'CHANGE_INSPECTION', status: 'RISK_ACCEPTED' }
+    };
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-review-'));
+
+    await expect(applyReview(root, item, {
+      requirementId: '172014',
+      stage: 'IMPLEMENTATION',
+      decision: 'APPROVED',
+      comment: '实施验证通过'
+    })).rejects.toThrow('实施验证子步骤未全部通过');
+
+    expect(item.currentStage).toBe('IMPLEMENTATION');
+    expect(item.reviews).toHaveLength(0);
+  });
+
+  it('顶层实施验证带风险通过沿用阶段推进语义', async () => {
+    const item = workflow();
+    item.implementationSteps = {
+      START_CHANGE: { step: 'START_CHANGE', status: 'APPROVED' },
+      ARTIFACT_REVIEW: { step: 'ARTIFACT_REVIEW', status: 'APPROVED' },
+      APPLY: { step: 'APPLY', status: 'APPROVED' },
+      CHANGE_INSPECTION: { step: 'CHANGE_INSPECTION', status: 'APPROVED' }
+    };
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-review-'));
+    const result = await applyReview(root, item, {
+      requirementId: '172014',
+      stage: 'IMPLEMENTATION',
+      decision: 'RISK_ACCEPTED',
+      comment: '风险可接受'
     });
 
     expect(result.currentStage).toBe('CODE_REVIEW');

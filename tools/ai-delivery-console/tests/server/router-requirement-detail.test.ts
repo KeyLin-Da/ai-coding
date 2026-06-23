@@ -11,6 +11,7 @@ import {
   techDesignAnnotationSummaryPath
 } from '../../server/services/tech-design-annotations';
 import { readTechDesignInputLedger, techDesignInputLedgerPath } from '../../server/services/tech-design-input-ledger';
+import { WorkflowRepository } from '../../server/services/workflow-repository';
 import type { RequirementWorkflow, RunRecord } from '../../shared/workflow';
 import { createEmptyStages } from '../../shared/workflow';
 
@@ -368,6 +369,111 @@ describe('router requirement detail', () => {
     expect(responseBody.data.techDesignSourceFiles).toHaveLength(1);
     expect(calledPaths).toContain(`/api/ai-delivery/requirements/${requirementId}/workspace-states/assert-writable`);
     expect(calledPaths).not.toContain(`/api/ai-delivery/requirements/${requirementId}/workspace-states/report`);
+  });
+
+  it('切换 OpenSpec 任务状态只做轻量写入，不触发 Git 仓库状态上报', async () => {
+    const requirementId = '141849';
+    const workspaceRoot = await tmpDir('ai-delivery-router-workspace-');
+    const deliveryRoot = await tmpDir('ai-delivery-router-delivery-');
+    const repoPath = path.join(deliveryRoot, 'opp-artifacts');
+    const changeName = `req-${requirementId}`;
+    await fs.mkdir(path.join(repoPath, 'openspec', 'changes', changeName, 'specs'), { recursive: true });
+    const tasksPath = path.join(repoPath, 'openspec', 'changes', changeName, 'tasks.md');
+    await fs.writeFile(path.join(repoPath, 'openspec', 'changes', changeName, 'proposal.md'), '# Proposal\n', 'utf8');
+    await fs.writeFile(path.join(repoPath, 'openspec', 'changes', changeName, 'design.md'), '# Design\n', 'utf8');
+    await fs.writeFile(tasksPath, '## 开发\n\n- [ ] 1.1 待确认\n', 'utf8');
+    const stages = createEmptyStages();
+    stages.IMPLEMENTATION.changeName = changeName;
+    await new WorkflowRepository(repoPath).save({
+      id: Number(requirementId),
+      requirementId,
+      title: '门店定位菜单优化',
+      sources: [],
+      currentStage: 'IMPLEMENTATION',
+      status: 'IN_PROGRESS',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      stages,
+      artifacts: [],
+      runs: [],
+      reviews: [],
+      issues: []
+    });
+
+    const calledPaths: string[] = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      calledPaths.push(url.pathname);
+      if (url.pathname === '/api/ai-delivery/projects/5/delivery-workspace') {
+        return centerResponse({
+          id: 1,
+          projectId: 5,
+          localPath: deliveryRoot,
+          status: 'ACTIVE'
+        });
+      }
+      if (url.pathname === '/api/ai-delivery/projects/my') {
+        return centerResponse([
+          {
+            id: 5,
+            name: 'OPP',
+            code: 'opp',
+            repository: {
+              id: 10,
+              projectId: 5,
+              provider: 'GITLAB',
+              repoUrl: 'git@git.example.com:opp/ai-delivery-artifacts.git',
+              defaultBranch: 'main',
+              repoCode: 'opp-artifacts',
+              status: 'ACTIVE'
+            }
+          }
+        ]);
+      }
+      if (url.pathname === `/api/ai-delivery/requirements/${requirementId}/workspace-states/assert-writable`) {
+        return centerResponse([]);
+      }
+      if (/\/api\/ai-delivery\/requirements\/[^/]+\/workspace-states\/report$/.test(url.pathname)) {
+        return centerResponse({});
+      }
+      if (url.pathname === '/api/ai-delivery/projects/5/repository-state') {
+        return centerResponse({});
+      }
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ success: false, message: `not found: ${url.pathname}` })
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchImpl);
+
+    const router = createRouter(workspaceRoot);
+    const result = response();
+    await router(
+      requestWithBody(
+        'POST',
+        `/api/ai-delivery/requirements/${requirementId}/openspec-tasks`,
+        {
+          'content-type': 'application/json',
+          'x-user-id': '1',
+          'x-project-id': '5',
+          'x-client-session-id': '99',
+          'x-center-base-url': 'http://center.local'
+        },
+        Buffer.from(JSON.stringify({ changeName, line: 3, completed: true, raw: '1.1 待确认' }))
+      ),
+      result.response
+    );
+    const { status, body } = await result.done;
+    const tasksContent = await fs.readFile(tasksPath, 'utf8');
+
+    expect(status).toBe(200);
+    expect(body.data.tasks.completed).toBe(1);
+    expect(tasksContent).toContain('- [x] 1.1 待确认');
+    expect(calledPaths).toContain(`/api/ai-delivery/requirements/${requirementId}/workspace-states/assert-writable`);
+    expect(calledPaths).not.toContain(`/api/ai-delivery/requirements/${requirementId}/workspace-states/report`);
+    expect(calledPaths).not.toContain('/api/ai-delivery/projects/5/repository-state');
+    expect(calledPaths).not.toContain('/api/ai-delivery/users/me/git-credentials');
   });
 
   it('流程动作遇到旧中心缺少协作占用接口时降级执行', async () => {

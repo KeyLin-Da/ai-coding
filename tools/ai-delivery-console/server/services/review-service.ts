@@ -1,10 +1,14 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { RequirementWorkflow, ReviewInput, ReviewIssue, WorkflowStage } from '../../shared/workflow';
-import { ensureImplementationSteps, isImplementationStep, nextImplementationStep } from '../../shared/workflow';
+import { areAllImplementationStepsApproved, ensureImplementationSteps, isImplementationStep, nextImplementationStep } from '../../shared/workflow';
 import { nextStage, statusAfterReview } from '../../shared/stage-rules';
 import { createId, hashContent, normalizeRequirementId, sanitizeBranchName } from './workspace';
 import { parseCodeReviewSummary } from './code-review-parser';
+
+function isPositiveDecision(decision: ReviewInput['decision']): boolean {
+  return decision === 'APPROVED' || decision === 'RISK_ACCEPTED';
+}
 
 async function parseFirstExistingSummary(summaryPaths: string[]): Promise<ReviewIssue[]> {
   for (const summaryPath of summaryPaths) {
@@ -20,6 +24,11 @@ async function parseFirstExistingSummary(summaryPaths: string[]): Promise<Review
 }
 
 export async function applyReview(workspaceRoot: string, workflow: RequirementWorkflow, input: ReviewInput): Promise<RequirementWorkflow> {
+  const positiveDecision = isPositiveDecision(input.decision);
+  if (input.stage === 'IMPLEMENTATION' && !input.implementationStep && positiveDecision && !areAllImplementationStepsApproved(workflow.implementationSteps)) {
+    throw new Error('实施验证子步骤未全部通过，无法审核实施验证');
+  }
+
   const artifactPath = input.artifactPath || workflow.stages[input.stage].artifactPath;
   let artifactHash: string | undefined;
   if (artifactPath) {
@@ -69,18 +78,10 @@ export async function applyReview(workspaceRoot: string, workflow: RequirementWo
         if (steps[next].status === 'NOT_STARTED') {
           steps[next].status = 'DRAFT';
         }
-        workflow.stages.IMPLEMENTATION.status = 'IN_PROGRESS';
-        workflow.currentStage = 'IMPLEMENTATION';
-        workflow.status = 'IN_PROGRESS';
-      } else {
-        workflow.stages.IMPLEMENTATION.status = 'APPROVED';
-        workflow.stages.IMPLEMENTATION.approvedAt = review.createdAt;
-        workflow.currentStage = 'CODE_REVIEW';
-        workflow.status = 'IN_PROGRESS';
-        if (workflow.stages.CODE_REVIEW.status === 'NOT_STARTED') {
-          workflow.stages.CODE_REVIEW.status = 'DRAFT';
-        }
       }
+      workflow.stages.IMPLEMENTATION.status = 'IN_PROGRESS';
+      workflow.currentStage = 'IMPLEMENTATION';
+      workflow.status = 'IN_PROGRESS';
     }
 
     if (input.decision === 'REJECTED') {
@@ -90,19 +91,25 @@ export async function applyReview(workspaceRoot: string, workflow: RequirementWo
       workflow.stages.IMPLEMENTATION.rejectedAt = review.createdAt;
     }
 
+    if (input.decision === 'RISK_ACCEPTED') {
+      workflow.currentStage = 'IMPLEMENTATION';
+      workflow.status = 'IN_PROGRESS';
+      workflow.stages.IMPLEMENTATION.status = 'IN_REVIEW';
+    }
+
     return workflow;
   }
 
   workflow.stages[input.stage] = {
     ...workflow.stages[input.stage],
-    status: statusAfterReview(input.decision),
+    status: input.decision === 'RISK_ACCEPTED' ? 'APPROVED' : statusAfterReview(input.decision),
     artifactPath,
-    approvedAt: input.decision === 'APPROVED' ? review.createdAt : workflow.stages[input.stage].approvedAt,
+    approvedAt: positiveDecision ? review.createdAt : workflow.stages[input.stage].approvedAt,
     rejectedAt: input.decision === 'REJECTED' ? review.createdAt : workflow.stages[input.stage].rejectedAt,
     comment: input.comment
   };
 
-  if (input.decision === 'APPROVED') {
+  if (positiveDecision) {
     const next = nextStage(input.stage, workflow);
     workflow.currentStage = next;
     workflow.status = next === 'DONE' ? 'DONE' : 'IN_PROGRESS';

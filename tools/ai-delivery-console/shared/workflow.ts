@@ -678,6 +678,13 @@ export function findFirstPendingImplementationStep(
   return firstPending || implementationSteps[implementationSteps.length - 1];
 }
 
+export function areAllImplementationStepsApproved(
+  steps?: Partial<Record<WorkflowImplementationStep, Partial<ImplementationStepState>>>
+): boolean {
+  const normalized = ensureImplementationSteps(steps);
+  return implementationSteps.every((step) => normalized[step].status === 'APPROVED');
+}
+
 export const actionStageMap: Partial<Record<ActionType, WorkflowStage>> = {
   PRD_ANALYZE: 'PRD',
   PRD_CLARIFY: 'PRD',

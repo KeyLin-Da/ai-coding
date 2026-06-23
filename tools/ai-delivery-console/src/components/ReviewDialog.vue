@@ -96,7 +96,7 @@ const emit = defineEmits<{
   (event: 'synced', value: ArtifactGitSyncConfirmResult): void;
 }>();
 
-const requiresGitSync = computed(() => decision.value === 'APPROVED' || decision.value === 'RISK_ACCEPTED');
+const requiresGitSync = computed(() => !implementationStep.value && (decision.value === 'APPROVED' || decision.value === 'RISK_ACCEPTED'));
 
 const hasSyncFiles = computed(() => Boolean(syncPlan.value?.files.length));
 const canContinueToConfirm = computed(() => Boolean(syncPlan.value && !syncPlan.value.blocked && (!hasSyncFiles.value || selectedFiles.value.length)));
@@ -180,8 +180,7 @@ async function confirmPush() {
       message: commitMessage.value,
       review: {
         decision: decision.value,
-        comment: comment.value,
-        implementationStep: implementationStep.value
+        comment: comment.value
       }
     });
     emit('synced', result);

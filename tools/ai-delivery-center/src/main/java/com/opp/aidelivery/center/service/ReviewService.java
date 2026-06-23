@@ -12,7 +12,9 @@ import com.opp.aidelivery.center.model.entity.ReviewEntity;
 import com.opp.aidelivery.center.model.entity.WorkflowStageEntity;
 import java.time.LocalDateTime;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,7 +26,6 @@ public class ReviewService {
 
     private static final List<String> STAGES = Arrays.asList("PRD", "TECH_DESIGN", "IMPLEMENTATION", "CODE_REVIEW");
     private static final List<String> IMPLEMENTATION_STEPS = Arrays.asList("START_CHANGE", "ARTIFACT_REVIEW", "APPLY", "CHANGE_INSPECTION");
-    private static final String LAST_IMPLEMENTATION_STEP = "CHANGE_INSPECTION";
 
     private final PermissionService permissionService;
     private final RequirementMapper requirementMapper;
@@ -80,6 +81,9 @@ public class ReviewService {
             requirementMapper.updateById(requirement);
             return;
         }
+        if ("IMPLEMENTATION".equals(request.getStage()) && isPositiveDecision(request.getDecision())) {
+            assertAllImplementationStepsApproved(requirement.getId());
+        }
         if ("APPROVED".equals(request.getDecision())) {
             stage.setStatus("APPROVED");
             stage.setApprovedAt(now);
@@ -108,12 +112,6 @@ public class ReviewService {
             throw new BusinessException(AiDeliveryErrorCode.VALIDATION_FAILED, "实施步骤不存在");
         }
         if ("APPROVED".equals(request.getDecision())) {
-            if (LAST_IMPLEMENTATION_STEP.equals(request.getImplementationStep())) {
-                stage.setStatus("APPROVED");
-                stage.setApprovedAt(now);
-                advanceRequirement(requirement, stage.getStage());
-                return;
-            }
             stage.setStatus("IN_PROGRESS");
             requirement.setStatus("IN_PROGRESS");
             requirement.setCurrentStage("IMPLEMENTATION");
@@ -129,6 +127,28 @@ public class ReviewService {
         stage.setStatus("IN_REVIEW");
         requirement.setStatus("IN_PROGRESS");
         requirement.setCurrentStage("IMPLEMENTATION");
+    }
+
+    private boolean isPositiveDecision(String decision) {
+        return "APPROVED".equals(decision) || "RISK_ACCEPTED".equals(decision);
+    }
+
+    private void assertAllImplementationStepsApproved(Long requirementPk) {
+        List<ReviewEntity> reviews = reviewMapper.selectList(new LambdaQueryWrapper<ReviewEntity>()
+            .eq(ReviewEntity::getRequirementPk, requirementPk)
+            .eq(ReviewEntity::getStage, "IMPLEMENTATION")
+            .in(ReviewEntity::getImplementationStep, IMPLEMENTATION_STEPS)
+            .orderByDesc(ReviewEntity::getCreatedAt)
+            .orderByDesc(ReviewEntity::getId));
+        Map<String, String> latestDecisionByStep = new HashMap<>();
+        for (ReviewEntity review : reviews) {
+            latestDecisionByStep.putIfAbsent(review.getImplementationStep(), review.getDecision());
+        }
+        boolean allApproved = IMPLEMENTATION_STEPS.stream()
+            .allMatch(step -> "APPROVED".equals(latestDecisionByStep.get(step)));
+        if (!allApproved) {
+            throw new BusinessException(AiDeliveryErrorCode.VALIDATION_FAILED, "实施验证子步骤未全部通过，无法审核实施验证");
+        }
     }
 
     private void advanceRequirement(RequirementEntity requirement, String currentStage) {

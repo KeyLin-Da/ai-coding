@@ -8,7 +8,8 @@ vi.mock('@/api/client', () => ({
   apiClient: {
     listAgents: vi.fn(),
     listRequirements: vi.fn(),
-    getRequirement: vi.fn()
+    getRequirement: vi.fn(),
+    submitReview: vi.fn()
   }
 }));
 
@@ -108,5 +109,50 @@ describe('workflow store loading', () => {
     expect(apiClient.listRequirements).toHaveBeenCalledTimes(1);
     expect(store.requirements).toHaveLength(2);
     expect(store.lastEventId).toBe(12);
+  });
+
+  it('普通审核成功后重新加载当前需求和列表而不使用 Review 响应覆盖 current', async () => {
+    const store = useWorkflowStore();
+    const current = workflow('172014');
+    const refreshed = {
+      ...current,
+      title: '刷新后的需求',
+      stages: {
+        ...current.stages,
+        IMPLEMENTATION: {
+          stage: 'IMPLEMENTATION' as const,
+          status: 'IN_PROGRESS' as const
+        }
+      }
+    };
+    store.current = current;
+    vi.mocked(apiClient.submitReview).mockResolvedValue({
+      id: 501,
+      requirementPk: 100,
+      stage: 'IMPLEMENTATION',
+      implementationStep: 'CHANGE_INSPECTION',
+      decision: 'APPROVED'
+    });
+    vi.mocked(apiClient.getRequirement).mockResolvedValue(refreshed);
+    vi.mocked(apiClient.listRequirements).mockResolvedValue([refreshed]);
+
+    await store.submitReview({
+      stage: 'IMPLEMENTATION',
+      implementationStep: 'CHANGE_INSPECTION',
+      decision: 'APPROVED',
+      comment: '子步骤通过'
+    });
+
+    expect(apiClient.submitReview).toHaveBeenCalledWith({
+      requirementId: '172014',
+      stage: 'IMPLEMENTATION',
+      implementationStep: 'CHANGE_INSPECTION',
+      decision: 'APPROVED',
+      comment: '子步骤通过'
+    });
+    expect(apiClient.getRequirement).toHaveBeenCalledWith('172014');
+    expect(apiClient.listRequirements).toHaveBeenCalledTimes(1);
+    expect(store.current?.title).toBe('刷新后的需求');
+    expect(store.current).not.toHaveProperty('requirementPk');
   });
 });

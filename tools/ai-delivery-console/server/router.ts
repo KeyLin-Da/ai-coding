@@ -781,11 +781,10 @@ export function createRouter(workspaceRoot: string) {
             send(response, 404, { message: '需求不存在' });
             return;
           }
-          await assertWritableWorkflow(requestContext, workflow);
+          await assertCollaborationWritableWorkflow(requestContext, workflow);
           const fallbackChangeName = workflow.stages.IMPLEMENTATION.changeName || `req-${workflow.requirementId}`;
           const changeName = normalizeOpenSpecChangeName(input.changeName || fallbackChangeName, fallbackChangeName);
           const summary = await updateOpenSpecTaskStatus(root, changeName, fallbackChangeName, Number(input.line), Boolean(input.completed), input.raw);
-          await reportRequirementWorkspaceState(requestContext, workflow).catch(() => undefined);
           send(response, 200, { data: summary });
         } finally {
           await lock.release();

@@ -80,7 +80,16 @@
                 <el-option label="交互终端" value="INTERACTIVE_TERMINAL" />
                 <el-option label="手动复制" value="MANUAL_COPY" />
               </el-select>
-              <el-button v-if="activeStage !== 'IMPLEMENTATION'" :icon="DocumentChecked" @click="openReview">审核</el-button>
+              <el-button v-if="activeStage !== 'IMPLEMENTATION'" :icon="DocumentChecked" @click="openStageReview">审核</el-button>
+              <el-button
+                v-else
+                :icon="DocumentChecked"
+                :disabled="!canReviewImplementationStage"
+                :title="canReviewImplementationStage ? '审核实施验证并同步产物' : '四个实施验证子步骤全部通过后才可审核实施验证'"
+                @click="openStageReview"
+              >
+                审核实施验证
+              </el-button>
               <el-button v-if="currentStageRun" :icon="Tickets" @click="openRunLog(currentStageRun.id)">本步骤日志</el-button>
               <el-button v-if="currentStageRun" link class="stage-token-button" @click="openRunLog(currentStageRun.id)">
                 Token {{ currentRunTokenText }}
@@ -252,7 +261,7 @@
                     {{ actionButtonText('开始变更') }}
                   </el-button>
                   <el-button :icon="primaryActionIcon(DataAnalysis)" @click="runOpenSpecStatus">{{ actionButtonText('查看 OpenSpec 状态') }}</el-button>
-                  <el-button :icon="DocumentChecked" @click="openReview">审核本步骤</el-button>
+                  <el-button :icon="DocumentChecked" @click="openImplementationStepReview">审核本步骤</el-button>
                 </div>
                 <el-alert v-if="!techDesignApproved" type="warning" show-icon title="需要先通过技术方案审核" />
                 <el-alert v-else-if="openSpecChangeExists" type="success" show-icon title="已检测到对应 OpenSpec 变更目录，无需重复开始变更" />
@@ -265,7 +274,7 @@
                     {{ actionButtonText('生成 OpenSpec 工件') }}
                   </el-button>
                   <el-button :icon="primaryActionIcon(DataAnalysis)" @click="runOpenSpecStatus">{{ actionButtonText('查看 OpenSpec 状态') }}</el-button>
-                  <el-button :icon="DocumentChecked" @click="openReview">审核本步骤</el-button>
+                  <el-button :icon="DocumentChecked" @click="openImplementationStepReview">审核本步骤</el-button>
                 </div>
                 <el-alert v-if="implementationStepStates.START_CHANGE.status !== 'APPROVED'" type="warning" show-icon title="请先完成并审核开始变更步骤" />
                 <el-alert v-else-if="!techDesignApproved" type="warning" show-icon title="需要先通过技术方案审核" />
@@ -286,7 +295,7 @@
                   <el-button :disabled="!canRunOpenSpecApply" :icon="primaryActionIcon(DataAnalysis)" @click="runOpenSpecVerify">
                     {{ actionButtonText('发起验证') }}
                   </el-button>
-                  <el-button :icon="DocumentChecked" @click="openReview">审核本步骤</el-button>
+                  <el-button :icon="DocumentChecked" @click="openImplementationStepReview">审核本步骤</el-button>
                 </div>
                 <el-alert v-if="!canRunOpenSpecApply" type="warning" show-icon title="请先通过 OpenSpec 工件评审" />
               </template>
@@ -317,7 +326,7 @@
               <template v-if="activeImplementationStep === 'CHANGE_INSPECTION'">
                 <div class="action-line">
                   <el-button :icon="Refresh" @click="loadGitChanges">刷新变更</el-button>
-                  <el-button :disabled="!canInspectChanges" :icon="DocumentChecked" @click="openReview">审核本步骤</el-button>
+                  <el-button :disabled="!canInspectChanges" :icon="DocumentChecked" @click="openImplementationStepReview">审核本步骤</el-button>
                 </div>
                 <el-alert v-if="!canInspectChanges" type="warning" show-icon title="请先完成并审核开始实施步骤" />
                 <GitChangeInspector :summary="gitChanges" :requirement-id="workflow.requirementId" @updated="gitChanges = $event" />
@@ -444,6 +453,7 @@ import type {
   WorkflowStatus
 } from '@shared/workflow';
 import {
+  areAllImplementationStepsApproved,
   emptyRequirementTokenUsage,
   emptyRunTokenUsage,
   emptyTokenUsageSummary,
@@ -592,6 +602,7 @@ const canRunOpenSpecArtifacts = computed(() => Boolean(implementationStepStates.
 const canRunOpenSpecApply = computed(() => implementationStepStates.value.ARTIFACT_REVIEW.status === 'APPROVED');
 const canRunDesign = computed(() => (requiresPrdApproval.value ? Boolean(prdApproved.value && prdDesignSourcePath.value) : true));
 const canInspectChanges = computed(() => implementationStepStates.value.APPLY.status === 'APPROVED');
+const canReviewImplementationStage = computed(() => areAllImplementationStepsApproved(workflow.value?.implementationSteps));
 const openIssueCount = computed(() => workflow.value?.issues.filter((item) => item.status === 'OPEN').length || 0);
 const implementationOpenSpecPath = computed(() => openSpecSummary.value?.rootPath || stageArtifactPath('IMPLEMENTATION') || '未关联');
 const implementationArchiveStatus = computed(() => (openSpecSummary.value?.archived ? '已归档' : '进行中'));
@@ -1474,8 +1485,16 @@ function implementationReviewArtifactPath() {
   return undefined;
 }
 
-async function openReview() {
+function implementationStageReviewArtifactPath() {
+  return stageArtifactPath('IMPLEMENTATION') || selectedOpenSpecDocPath.value || junitArtifactPath.value || undefined;
+}
+
+async function openStageReview() {
   if (!workflow.value) {
+    return;
+  }
+  if (activeStage.value === 'IMPLEMENTATION' && !canReviewImplementationStage.value) {
+    ElMessage.warning('四个实施验证子步骤全部通过后才可审核实施验证');
     return;
   }
   if (!(await ensureDeliveryReady('提交审核', { allowDirty: true }))) {
@@ -1485,12 +1504,28 @@ async function openReview() {
     activeStage.value === 'PRD'
       ? prdEditorPath.value
       : activeStage.value === 'IMPLEMENTATION'
-        ? implementationReviewArtifactPath()
+        ? implementationStageReviewArtifactPath()
         : stageArtifactPath(activeStage.value);
   reviewDialog.value?.open(
     activeStage.value,
     path,
-    activeStage.value === 'IMPLEMENTATION' ? activeImplementationStep.value : undefined,
+    undefined,
+    workflow.value.requirementId,
+    workflow.value.id
+  );
+}
+
+async function openImplementationStepReview() {
+  if (!workflow.value) {
+    return;
+  }
+  if (!(await ensureDeliveryReady('提交审核', { allowDirty: true }))) {
+    return;
+  }
+  reviewDialog.value?.open(
+    'IMPLEMENTATION',
+    implementationReviewArtifactPath(),
+    activeImplementationStep.value,
     workflow.value.requirementId,
     workflow.value.id
   );

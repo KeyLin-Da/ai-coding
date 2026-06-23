@@ -254,8 +254,7 @@ describe('artifact-git-sync', () => {
         files: [],
         review: {
           decision: 'APPROVED',
-          comment: '通过',
-          implementationStep: 'CHANGE_INSPECTION'
+          comment: '通过'
         }
       });
 
@@ -274,12 +273,25 @@ describe('artifact-git-sync', () => {
         requirementId: '172014',
         stage: 'IMPLEMENTATION',
         decision: 'APPROVED',
-        comment: '通过',
-        implementationStep: 'CHANGE_INSPECTION'
+        comment: '通过'
       });
     } finally {
       await fs.rm(tempDir, { recursive: true, force: true });
     }
+  });
+
+  it('审核同步拒绝携带实施验证子步骤，子步骤应走普通审核', async () => {
+    await expect(confirmArtifactGitSync({} as any, workflow(), {
+      stage: 'IMPLEMENTATION',
+      syncType: 'REVIEW_APPROVAL',
+      requirementPk: 100,
+      files: [],
+      review: {
+        decision: 'APPROVED',
+        comment: '子步骤通过',
+        implementationStep: 'CHANGE_INSPECTION'
+      }
+    })).rejects.toThrow('顶层审核同步不能携带实施验证子步骤');
   });
 
   it('空文件审核确认前发现受控变更时要求刷新同步计划', async () => {

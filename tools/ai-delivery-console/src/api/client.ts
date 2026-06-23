@@ -242,6 +242,19 @@ export interface ArtifactGitSyncConfirmResult {
   centerResult: unknown;
 }
 
+export interface CenterReviewVO {
+  id: number;
+  requirementPk: number;
+  stage: ReviewInput['stage'];
+  implementationStep?: ReviewInput['implementationStep'];
+  decision: ReviewInput['decision'];
+  comment?: string;
+  actorId?: number;
+  artifactVersionId?: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface ArtifactShareCreateInput {
   projectId: string | number;
   requirementPk?: string | number;
@@ -999,7 +1012,7 @@ export const apiClient = {
     );
   },
   submitReview(input: ReviewInput) {
-    return request<RequirementWorkflow>('/api/ai-delivery/reviews', {
+    return request<CenterReviewVO>('/api/ai-delivery/reviews', {
       method: 'POST',
       body: JSON.stringify(input)
     });
