@@ -15,7 +15,7 @@ export const serverConfig = {
   agentProvidersPath: process.env.AGENT_PROVIDERS_PATH,
   agentProvidersJson: process.env.AGENT_PROVIDERS_JSON,
   defaultAgentId: process.env.DEFAULT_AGENT_ID || 'manual',
-  agentTimeout: Number(process.env.AGENT_TIMEOUT || 600000),
+  agentTimeout: Number(process.env.AGENT_TIMEOUT || 3600000),
   codexCommand: process.env.CODEX_COMMAND || 'codex exec --json --sandbox workspace-write -C {workspaceRoot} {projectParentAddDirArgs} {projectAddDirArgs} -',
   codexInteractiveCommand:
     process.env.CODEX_INTERACTIVE_COMMAND ||

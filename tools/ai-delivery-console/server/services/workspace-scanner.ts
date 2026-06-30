@@ -183,9 +183,19 @@ export async function scanRequirementArtifacts(
       path: `docs/${id}/code-review/commit/summary.md`
     },
     {
+      id: 'code-review-commit-all',
+      label: '代码评审详细报告（commit 正式评审）',
+      path: `docs/${id}/code-review/commit/code_review_result_all.md`
+    },
+    {
       id: 'code-review-staged',
       label: '代码评审（staged 暂存区预审）',
       path: `docs/${id}/code-review/staged/summary.md`
+    },
+    {
+      id: 'code-review-staged-all',
+      label: '代码评审详细报告（staged 暂存区预审）',
+      path: `docs/${id}/code-review/staged/code_review_result_all.md`
     }
   ];
   for (const item of requirementReviewArtifacts) {

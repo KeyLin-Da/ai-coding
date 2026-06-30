@@ -162,4 +162,155 @@ describe('RunLogDrawer', () => {
     expect(wrapper.text()).not.toContain('{"type":"token_count"}');
     expect((wrapper.vm as any).terminalEvents).toHaveLength(1);
   });
+
+  it('合并连续 stdout 输出，避免每段输出单独滚动', async () => {
+    const wrapper = mount(RunLogDrawer, {
+      props: {
+        events: [
+          {
+            time: '2026-06-22T10:21:00.000Z',
+            type: 'STDOUT',
+            level: 'INFO',
+            message: '第一段',
+            data: { transcriptPath: 'run.terminal.log' }
+          },
+          {
+            time: '2026-06-22T10:21:01.000Z',
+            type: 'STDOUT',
+            level: 'INFO',
+            message: '第二段',
+            data: { transcriptPath: 'run.terminal.log' }
+          },
+          {
+            time: '2026-06-22T10:21:02.000Z',
+            type: 'WARN',
+            level: 'WARN',
+            message: '警告日志'
+          }
+        ]
+      },
+      global: {
+        stubs: {
+          ElDrawer: {
+            props: ['modelValue'],
+            template: '<div v-if="modelValue"><slot name="header" /><slot /></div>'
+          },
+          ElButton: { template: '<button><slot /></button>' },
+          ElEmpty: { template: '<div />' }
+        }
+      }
+    });
+
+    (wrapper.vm as any).open();
+    await nextTick();
+
+    expect((wrapper.vm as any).terminalEvents).toHaveLength(3);
+    expect((wrapper.vm as any).displayTerminalEvents).toHaveLength(2);
+    expect((wrapper.vm as any).displayTerminalEvents[0]).toMatchObject({
+      type: 'STDOUT',
+      count: 2,
+      text: '第一段\n第二段'
+    });
+  });
+
+  it('支持按关键词和级别过滤可见日志', async () => {
+    const wrapper = mount(RunLogDrawer, {
+      props: {
+        events: [
+          {
+            time: '2026-06-22T10:21:00.000Z',
+            type: 'STDOUT',
+            level: 'INFO',
+            message: '构建成功'
+          },
+          {
+            time: '2026-06-22T10:21:01.000Z',
+            type: 'STDERR',
+            level: 'ERROR',
+            message: 'needle 编译失败'
+          }
+        ]
+      },
+      global: {
+        stubs: {
+          ElDrawer: {
+            props: ['modelValue'],
+            template: '<div v-if="modelValue"><slot name="header" /><slot /></div>'
+          },
+          ElButton: { template: '<button><slot /></button>' },
+          ElEmpty: { template: '<div />' }
+        }
+      }
+    });
+
+    (wrapper.vm as any).open();
+    await nextTick();
+
+    (wrapper.vm as any).searchKeyword = 'needle';
+    await nextTick();
+    expect((wrapper.vm as any).displayTerminalEvents).toHaveLength(1);
+    expect((wrapper.vm as any).displayTerminalEvents[0].text).toContain('编译失败');
+
+    (wrapper.vm as any).levelFilter = 'INFO';
+    await nextTick();
+    expect((wrapper.vm as any).displayTerminalEvents).toHaveLength(0);
+  });
+
+  it('将 Codex JSONL 日志格式化为可读命令和正文', async () => {
+    const wrapper = mount(RunLogDrawer, {
+      props: {
+        events: [
+          {
+            time: '2026-06-30T10:21:00.000Z',
+            type: 'STDOUT',
+            level: 'INFO',
+            message: '{"type":"item.completed"}',
+            text: [
+              JSON.stringify({
+                type: 'item.started',
+                item: {
+                  id: 'item_1',
+                  type: 'command_execution',
+                  command: '/bin/zsh -lc "sed -n 1,20p file.md"',
+                  status: 'in_progress'
+                }
+              }),
+              JSON.stringify({
+                type: 'item.completed',
+                item: {
+                  id: 'item_1',
+                  type: 'command_execution',
+                  command: '/bin/zsh -lc "sed -n 1,20p file.md"',
+                  aggregated_output: '# 标题\\n\\n## 小节\\n正文',
+                  exit_code: 0,
+                  status: 'completed'
+                }
+              })
+            ].join('\n')
+          }
+        ]
+      },
+      global: {
+        stubs: {
+          ElDrawer: {
+            props: ['modelValue'],
+            template: '<div v-if="modelValue"><slot name="header" /><slot /></div>'
+          },
+          ElButton: { template: '<button><slot /></button>' },
+          ElEmpty: { template: '<div />' }
+        }
+      }
+    });
+
+    (wrapper.vm as any).open();
+    await nextTick();
+
+    const [event] = (wrapper.vm as any).displayTerminalEvents;
+    expect(event.title).toBe('command_execution');
+    expect(event.command).toBe('/bin/zsh -lc "sed -n 1,20p file.md"');
+    expect(event.text).toContain('COMPLETED command_execution · item_1 · exit 0');
+    expect(event.text).toContain('# 标题\n\n## 小节\n正文');
+    expect(event.text).not.toContain('aggregated_output');
+    expect(wrapper.text()).toContain('$ /bin/zsh -lc "sed -n 1,20p file.md"');
+  });
 });

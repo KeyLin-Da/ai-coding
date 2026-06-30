@@ -101,6 +101,7 @@ import {
 import {
   assertPreviewableArtifactPath,
   contentTypeForPath,
+  normalizeShareArtifactPath,
   resolvePublicAssetPath,
   resolveSharePathInWorkspace
 } from './services/artifact-share-paths';
@@ -184,6 +185,61 @@ function designDocumentPath(workflow: RequirementWorkflow, params: Record<string
 
 function normalizeArtifactPath(filePath = ''): string {
   return filePath.trim().replace(/\\/g, '/');
+}
+
+function decodeArtifactViewPath(value = ''): string {
+  return value
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => decodeURIComponent(segment))
+    .join('/');
+}
+
+function decodeArtifactViewContext(value = ''): Partial<LocalRequestContext> {
+  try {
+    const parsed = JSON.parse(decodeURIComponent(value)) as Record<string, unknown>;
+    return {
+      projectId: typeof parsed.projectId === 'string' ? parsed.projectId : '',
+      clientSessionId: typeof parsed.clientSessionId === 'string' ? parsed.clientSessionId : '',
+      userId: typeof parsed.userId === 'string' ? parsed.userId : '',
+      centerBaseUrl: typeof parsed.centerBaseUrl === 'string' ? parsed.centerBaseUrl : ''
+    };
+  } catch {
+    return {};
+  }
+}
+
+const HTML_VIEW_EXTENSIONS = new Set([
+  '.html',
+  '.htm',
+  '.css',
+  '.js',
+  '.mjs',
+  '.map',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.ico',
+  '.webp',
+  '.svg',
+  '.pdf',
+  '.woff',
+  '.woff2',
+  '.ttf',
+  '.otf',
+  '.eot'
+]);
+
+function resolvePublicHtmlViewPath(requirementId: string, artifactPath: string, requestedPath: string): string {
+  const normalizedArtifactPath = assertPreviewableArtifactPath(requirementId, artifactPath);
+  const normalizedRequestedPath = normalizeShareArtifactPath(requestedPath);
+  const artifactDir = path.posix.dirname(normalizedArtifactPath);
+  const sameDirectory = normalizedRequestedPath === normalizedArtifactPath || normalizedRequestedPath.startsWith(`${artifactDir}/`);
+  if (!sameDirectory || !HTML_VIEW_EXTENSIONS.has(path.extname(normalizedRequestedPath).toLowerCase())) {
+    throw localServiceError('B70080', '分享产物路径不允许访问');
+  }
+  return normalizedRequestedPath;
 }
 
 function techDesignQuestionPathPrefix(requirementId: string): string {
@@ -591,6 +647,27 @@ export function createRouter(workspaceRoot: string) {
       ...workflow,
       artifacts
     });
+  }
+
+  async function refreshArtifacts(
+    root: string,
+    workflow: RequirementWorkflow
+  ): Promise<RequirementWorkflow> {
+    const artifacts = await scanRequirementArtifacts(
+      root,
+      workflow.requirementId,
+      workflow.branchName,
+      workflow.stages.IMPLEMENTATION.changeName,
+      workflow.requirementType
+    );
+    return {
+      ...workflow,
+      artifacts
+    };
+  }
+
+  function shouldRefreshArtifactsAfterRun(run?: RunRecord): boolean {
+    return Boolean(run && ['SUCCEEDED', 'COMPLETED'].includes(run.status));
   }
 
   function scheduleArtifactIndexRefresh(
@@ -1449,6 +1526,9 @@ export function createRouter(workspaceRoot: string) {
                 });
               }
             }
+            if (shouldRefreshArtifactsAfterRun(updatedRun)) {
+              updatedWorkflow = await refreshArtifacts(root, updatedWorkflow);
+            }
             await repository.save(updatedWorkflow);
           }, {
             projectPaths,
@@ -1474,6 +1554,9 @@ export function createRouter(workspaceRoot: string) {
           workflow.runs.unshift(run);
           workflow = applyImplementationRun(workflow, run);
           workflow = await consumeTechDesignInputsAfterRun(root, workflow, run, requestContext);
+          if (shouldRefreshArtifactsAfterRun(run)) {
+            workflow = await refreshArtifacts(root, workflow);
+          }
           if (effectiveAction.actionType === 'REFRESH_ARTIFACTS') {
             workflow.artifacts = await scanRequirementArtifacts(
               root,
@@ -1580,9 +1663,14 @@ export function createRouter(workspaceRoot: string) {
             const finalized = await finalizeSuccessfulTechDesignRuns(root, refreshed.workflow, requestContext);
             const outboxChanged = await retryWorkflowTokenUsageOutboxes(root, finalized.workflow, centerRunnerConfig(requestContext));
             const centerStatusChanged = await retryWorkflowCenterRunStatuses(finalized.workflow, centerRunnerConfig(requestContext));
-            workflow = refreshed.changed || finalized.changed || outboxChanged || centerStatusChanged
-              ? await repository.save(finalized.workflow)
+            const currentRun = finalized.workflow.runs.find((item) => item.id === runStreamMatch[1]);
+            const artifactsChanged = shouldRefreshArtifactsAfterRun(currentRun);
+            const workflowToSave = artifactsChanged
+              ? await refreshArtifacts(root, finalized.workflow)
               : finalized.workflow;
+            workflow = refreshed.changed || finalized.changed || outboxChanged || centerStatusChanged || artifactsChanged
+              ? await repository.save(workflowToSave)
+              : workflowToSave;
           }
           const run = workflow?.runs.find((item) => item.id === runStreamMatch[1]);
           const events = await readRunEvents(root, requirementId, runStreamMatch[1]);
@@ -1936,7 +2024,48 @@ export function createRouter(workspaceRoot: string) {
         return;
       }
 
+      const publicViewMatch = match(pathname, /^\/api\/ai-delivery\/public-artifact-shares\/([^/]+)\/view\/(.+)$/);
+      if (request.method === 'GET' && publicViewMatch) {
+        const token = decodeURIComponent(publicViewMatch[1]);
+        const requestedPath = decodeArtifactViewPath(publicViewMatch[2]);
+        const share = await resolvePublicShare(requestContext, token);
+        const artifactPath = assertPreviewableArtifactPath(share.requirementId, share.artifactPath);
+        const artifactRoot = await resolvePublicArtifactRoot(requestContext, { ...share, artifactPath });
+        const normalizedPath = resolvePublicHtmlViewPath(share.requirementId, artifactPath, requestedPath);
+        const resolvedPath = resolveSharePathInWorkspace(artifactRoot, normalizedPath);
+        const fileBuffer = await fs.readFile(resolvedPath.absolutePath);
+        response.writeHead(200, {
+          'Content-Type': contentTypeForPath(normalizedPath),
+          'Cache-Control': 'public, max-age=3600',
+          'Access-Control-Allow-Origin': '*'
+        });
+        response.end(fileBuffer);
+        return;
+      }
+
       // 读取图片等二进制文件
+      const artifactViewMatch = match(pathname, /^\/api\/artifacts\/view\/context\/([^/]+)\/(.+)$/);
+      if (request.method === 'GET' && artifactViewMatch) {
+        const viewContext = decodeArtifactViewContext(artifactViewMatch[1]);
+        const filePath = decodeArtifactViewPath(artifactViewMatch[2]);
+        try {
+          const artifactRoot = await resolveArtifactRoot({ ...requestContext, ...viewContext }, true);
+          const absolutePath = resolveSharePathInWorkspace(artifactRoot, filePath).absolutePath;
+          const fileBuffer = await fs.readFile(absolutePath);
+          response.writeHead(200, {
+            'Content-Type': contentTypeForPath(filePath),
+            'Cache-Control': 'public, max-age=3600',
+            'Access-Control-Allow-Origin': '*'
+          });
+          response.end(fileBuffer);
+        } catch (error: any) {
+          const denied = error.code === 'B70065' || error.code === 'B70080' || String(error.message || '').includes('路径不在工作区内');
+          response.writeHead(denied ? 403 : 404, { 'Content-Type': 'application/json' });
+          response.end(JSON.stringify({ message: error.code === 'ENOENT' ? '文件不存在' : error.message }));
+        }
+        return;
+      }
+
       if (request.method === 'GET' && pathname === '/api/artifacts/read') {
         const filePath = url.searchParams.get('path');
         if (!filePath) {

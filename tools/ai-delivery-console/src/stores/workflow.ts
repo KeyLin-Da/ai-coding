@@ -145,9 +145,19 @@ export const useWorkflowStore = defineStore('workflow', {
         this.runEventSeqs[runId] = this.runEvents.length;
       };
       source.onerror = () => {
+        const shouldRefresh = this.activeRunId === runId;
+        const requirementId = shouldRefresh ? this.current?.requirementId : undefined;
         source.close();
-        if (this.runEventSource === source) {
+        if (this.runEventSource === source || shouldRefresh) {
           this.runEventSource = undefined;
+        }
+        if (shouldRefresh) {
+          this.activeRunId = undefined;
+        }
+        if (requirementId) {
+          void this.loadRequirement(requirementId)
+            .then(() => this.loadRequirements())
+            .catch(() => undefined);
         }
       };
     },

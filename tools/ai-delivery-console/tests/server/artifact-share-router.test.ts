@@ -660,4 +660,88 @@ describe('artifact share router', () => {
       await fs.rm(tempDir, { recursive: true, force: true });
     }
   });
+
+  it('/api/artifacts/view 支持 HTML 目录型产物和相对资源预览', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-html-view-'));
+    const repoRoot = path.join(tempDir, 'demo');
+    await fs.mkdir(path.join(repoRoot, 'docs/159145/junit/css'), { recursive: true });
+    await fs.writeFile(path.join(repoRoot, 'docs/159145/junit/index.html'), '<link rel="stylesheet" href="./css/site.css">', 'utf8');
+    await fs.writeFile(path.join(repoRoot, 'docs/159145/junit/css/site.css'), 'body{color:#123456}', 'utf8');
+    const router = createRouter(tempDir);
+    vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request) => {
+      const parsed = new URL(String(url));
+      if (parsed.pathname === '/api/ai-delivery/projects/10/delivery-workspace') {
+        return jsonResponse({ id: 1, projectId: 10, localPath: tempDir, status: 'ACTIVE' });
+      }
+      if (parsed.pathname === '/api/ai-delivery/projects/my') {
+        return jsonResponse([projectWithRepository()]);
+      }
+      return jsonResponse(null, 404, 'B70004', '接口不存在');
+    }));
+
+    try {
+      const context = encodeURIComponent(JSON.stringify({
+        projectId: '10',
+        userId: '1',
+        clientSessionId: '11',
+        centerBaseUrl: 'http://center.local'
+      }));
+      const htmlResult = routerResponse();
+      await router(
+        routerRequest('GET', `/api/artifacts/view/context/${context}/docs/159145/junit/index.html`),
+        htmlResult.response
+      );
+      const html = await htmlResult.done;
+      expect(html.status).toBe(200);
+      expect(html.raw.toString('utf8')).toContain('./css/site.css');
+
+      const cssResult = routerResponse();
+      await router(
+        routerRequest('GET', `/api/artifacts/view/context/${context}/docs/159145/junit/css/site.css`),
+        cssResult.response
+      );
+      const css = await cssResult.done;
+      expect(css.status).toBe(200);
+      expect(css.raw.toString('utf8')).toContain('#123456');
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('公开 HTML 预览只允许访问分享文件同目录资源', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-public-html-view-'));
+    await fs.mkdir(path.join(tempDir, 'docs/172014/junit/css'), { recursive: true });
+    await fs.mkdir(path.join(tempDir, 'docs/172014/technical-design'), { recursive: true });
+    await fs.writeFile(path.join(tempDir, 'docs/172014/junit/index.html'), '<link rel="stylesheet" href="./css/site.css">', 'utf8');
+    await fs.writeFile(path.join(tempDir, 'docs/172014/junit/css/site.css'), 'body{color:#abcdef}', 'utf8');
+    await fs.writeFile(path.join(tempDir, 'docs/172014/technical-design/design_review.md'), '# secret-ish', 'utf8');
+    const router = createRouter(tempDir);
+    vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request) => {
+      const parsed = new URL(String(url));
+      if (parsed.pathname === '/api/ai-delivery/public-artifact-shares/token-html') {
+        return jsonResponse(publicShare('docs/172014/junit/index.html'));
+      }
+      return jsonResponse(null, 404, 'B70004', '接口不存在');
+    }));
+
+    try {
+      const cssResult = routerResponse();
+      await router(
+        routerRequest('GET', '/api/ai-delivery/public-artifact-shares/token-html/view/docs/172014/junit/css/site.css'),
+        cssResult.response
+      );
+      const css = await cssResult.done;
+      expect(css.status).toBe(200);
+      expect(css.raw.toString('utf8')).toContain('#abcdef');
+
+      const deniedResult = routerResponse();
+      await router(
+        routerRequest('GET', '/api/ai-delivery/public-artifact-shares/token-html/view/docs/172014/technical-design/design_review.md'),
+        deniedResult.response
+      );
+      expect((await deniedResult.done).status).toBe(403);
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
 });

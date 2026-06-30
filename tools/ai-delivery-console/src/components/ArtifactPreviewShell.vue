@@ -113,7 +113,7 @@
               @mouseup="captureSelection"
               @keyup="captureSelection"
             ></article>
-            <iframe v-else-if="isHtml" class="artifact-frame" :srcdoc="effectiveContent" title="产物预览"></iframe>
+            <iframe v-else-if="isHtml" class="artifact-frame" :src="htmlPreviewUrl" title="产物预览"></iframe>
             <iframe v-else-if="isPdf" class="artifact-frame" :src="assetUrl" title="产物预览"></iframe>
             <div v-else-if="isImage" class="artifact-image-wrap">
               <img :src="assetUrl" :alt="artifact?.label || '产物图片'" />
@@ -174,7 +174,7 @@ import {
   renderMarkdownSafely,
   stableTextHash
 } from '@/utils/artifact-preview-rendering';
-import { artifactReadUrl, publicArtifactAssetUrl, rewriteMarkdownImageSources } from '@/utils/markdown-assets';
+import { artifactReadUrl, artifactViewUrl, publicArtifactAssetUrl, publicArtifactViewUrl, rewriteMarkdownImageSources } from '@/utils/markdown-assets';
 import { applyAnnotationHighlights, createAnnotationAnchor } from '@/utils/tech-design-annotations';
 
 type DownloadFormat = 'markdown' | 'html' | 'pdf';
@@ -343,6 +343,12 @@ const assetUrl = computed(() => {
     return '';
   }
   return props.publicToken ? publicArtifactAssetUrl(props.publicToken, props.artifact.path) : artifactReadUrl(props.artifact.path, props.projectId);
+});
+const htmlPreviewUrl = computed(() => {
+  if (!props.artifact?.path) {
+    return '';
+  }
+  return props.publicToken ? publicArtifactViewUrl(props.publicToken, props.artifact.path) : artifactViewUrl(props.artifact.path, props.projectId);
 });
 const markdownRenderResult = computed(() => {
   if (!isMarkdown.value) {

@@ -1298,9 +1298,11 @@ async function runDesignQuestion(rawQuestion: string) {
   };
   if (requiresPrdApproval.value) {
     const prdDocumentPath = openSpecPrdDocumentPath.value.trim();
-    if (prdDocumentPath) {
-       params.prdDocumentPath = prdDocumentPath;
+    if (!prdDocumentPath) {
+      ElMessage.warning('请先生成、保存或刷新 PRD 产物');
+      return;
     }
+    params.prdDocumentPath = prdDocumentPath;
   }
   await runOrCopyAction({
     actionType: 'DESIGN_QUESTION',
@@ -1367,11 +1369,12 @@ async function runOpenSpecArtifacts() {
   }
   const prdDocumentPath = openSpecPrdDocumentPath.value.trim();
   const documentPath = openSpecTechnicalDesignDocumentPath.value.trim();
-  if (requiresPrdApproval.value && prdDocumentPath) {
-   params.prdDocumentPath = prdDocumentPath;
-  }
   if (!documentPath) {
     ElMessage.warning('请先生成、保存或刷新技术方案产物');
+    return;
+  }
+  if (requiresPrdApproval.value && !prdDocumentPath) {
+    ElMessage.warning('请先生成、保存或刷新 PRD 产物');
     return;
   }
   const params: Record<string, unknown> = {
@@ -1380,6 +1383,9 @@ async function runOpenSpecArtifacts() {
     documentPath,
     sourceFiles: techDesignSourceFiles.value.map((file) => file.path)
   };
+  if (requiresPrdApproval.value && prdDocumentPath) {
+    params.prdDocumentPath = prdDocumentPath;
+  }
   await runOrCopyAction({ actionType: 'OPENSPEC_FF', params }, loadOpenSpecSummary);
 }
 
@@ -1432,7 +1438,15 @@ async function runCodeReview() {
   if (!(await ensureStagedChangesForReview())) {
     return;
   }
-  await runOrCopyAction({ actionType: 'CODE_REVIEW', params: { ...agentActionParams(), branchName: branchName.value, reviewMode: codeReviewMode.value } });
+  await runOrCopyAction(
+    { 
+      actionType: 'CODE_REVIEW', 
+      params: { 
+        ...agentActionParams(), 
+        branchName: branchName.value, 
+        reviewMode: codeReviewMode.value,
+        docs: openSpecTechnicalDesignDocumentPath.value.trim()
+      }});
 }
 
 async function runOpenSpecArchive() {

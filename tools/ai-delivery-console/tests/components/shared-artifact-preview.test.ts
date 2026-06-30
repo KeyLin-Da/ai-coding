@@ -6,6 +6,7 @@ import mermaid from 'mermaid';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import type { ArtifactRef, TechDesignAnnotation } from '../../shared/workflow';
 import { apiClient } from '../../src/api/client';
+import { setApiRuntimeConfig } from '../../src/api/runtime';
 import ArtifactPreviewShell from '../../src/components/ArtifactPreviewShell.vue';
 import artifactPreviewShellSource from '../../src/components/ArtifactPreviewShell.vue?raw';
 import artifactPreviewDialogSource from '../../src/components/ArtifactPreviewDialog.vue?raw';
@@ -76,6 +77,13 @@ function annotation(overrides: Partial<TechDesignAnnotation> = {}): TechDesignAn
 describe('shared artifact preview', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    setApiRuntimeConfig({
+      centerBaseUrl: 'http://center.example.com',
+      runnerBaseUrl: 'http://runner.example.com',
+      userId: '',
+      projectId: '',
+      clientSessionId: ''
+    });
     vi.mocked(mermaid.run).mockImplementation(async (options?: { nodes?: HTMLElement[] }) => {
       (options?.nodes || []).forEach((node) => {
         if (!node.querySelector('svg')) {
@@ -126,6 +134,34 @@ describe('shared artifact preview', () => {
     expect(apiClient.listTechDesignVersions).toHaveBeenCalledTimes(versionRequestCount);
     expect(apiClient.listTechDesignAnnotations).toHaveBeenCalledTimes(annotationRequestCount);
     renderSpy.mockRestore();
+  });
+
+  it('HTML 产物使用真实预览 URL 以保留目录型报告相对资源', async () => {
+    setApiRuntimeConfig({
+      centerBaseUrl: 'http://center.example.com',
+      userId: '1',
+      projectId: '5',
+      clientSessionId: '16'
+    });
+    const wrapper = mount(ArtifactPreviewShell, {
+      props: {
+        artifact: {
+          id: 'junit-report',
+          label: 'JUnit 报告',
+          path: 'docs/159145/junit/index.html',
+          stage: 'IMPLEMENTATION',
+          kind: 'html',
+          exists: true
+        },
+        content: '<html><head><link rel="stylesheet" href="./css/site.css"></head><body>report</body></html>',
+        projectId: 42
+      }
+    });
+
+    const frame = wrapper.find('iframe.artifact-frame');
+    expect(frame.attributes('srcdoc')).toBeUndefined();
+    expect(frame.attributes('src')).toContain('/runner-api/api/artifacts/view/context/');
+    expect(frame.attributes('src')).toContain('/docs/159145/junit/index.html');
   });
 
   it('打开新产物重置 HTML 预览，同一路径内容变化保留当前模式', async () => {

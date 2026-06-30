@@ -947,7 +947,10 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
 - 文档：docs/172014/prd/analysis.md
 
 **回答：**
-因为存在重复查询。
+## 处理结论
+
+- 因为存在重复查询。
+- 缓存能减少重复读取。
 
 **依据：**
 - 技术方案缓存策略
@@ -1007,6 +1010,8 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     expect(wrapper.text()).toContain('因为存在重复查询。');
     expect(wrapper.text()).toContain('技术方案缓存策略');
     expect(wrapper.text()).toContain('继续观察缓存命中率');
+    expect(wrapper.find('.answer-section--answer .answer-markdown h2').text()).toBe('处理结论');
+    expect(wrapper.findAll('.answer-section--answer .answer-markdown li').map((item) => item.text())).toContain('缓存能减少重复读取。');
 
     const collapseButton = wrapper.findAll('button').find((item) => item.text().includes('收起答案'));
     await collapseButton?.trigger('click');
