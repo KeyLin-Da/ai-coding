@@ -26,6 +26,75 @@ function draftVersionDir(workspaceRoot: string, requirementId: string): string {
   return path.join(getRequirementRuntimeDir(workspaceRoot, requirementId), 'technical-design', 'draft-versions');
 }
 
+function normalizeReviewVersion(version: string): string {
+  return version.trim().replace(/^v/i, 'v');
+}
+
+function revisionSearchArea(content: string): string {
+  const heading = content.match(/^#{1,6}\s*修订记录[^\n]*$/im);
+  if (heading?.index == null) {
+    return content;
+  }
+  const afterHeading = content.slice(heading.index + heading[0].length);
+  const nextHeadingIndex = afterHeading.search(/^#{1,6}\s+\S/m);
+  return nextHeadingIndex >= 0 ? afterHeading.slice(0, nextHeadingIndex) : afterHeading;
+}
+
+function extractReviewVersion(content?: string): string | undefined {
+  if (!content) {
+    return undefined;
+  }
+  const explicit = content.match(/评审版本\s*[:：]\s*(v\d+(?:\.\d+)+)/i);
+  if (explicit?.[1]) {
+    return normalizeReviewVersion(explicit[1]);
+  }
+  for (const line of revisionSearchArea(content).split(/\r?\n/)) {
+    const rowVersion = line.match(/^\|\s*(v\d+(?:\.\d+)+)\s*\|/i);
+    if (rowVersion?.[1]) {
+      return normalizeReviewVersion(rowVersion[1]);
+    }
+  }
+  return undefined;
+}
+
+function labelFromContent(content: string | undefined, fallback: string, suffix = ''): string {
+  const reviewVersion = extractReviewVersion(content);
+  return reviewVersion ? [reviewVersion, suffix].filter(Boolean).join(' ') : fallback;
+}
+
+function formatCompactDateTime(iso?: string): string | undefined {
+  if (!iso) {
+    return undefined;
+  }
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return undefined;
+  }
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return [
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
+    `${pad(date.getHours())}:${pad(date.getMinutes())}`
+  ].join(' ');
+}
+
+function snapshotFallbackLabel(fileNameOrStamp: string, createdAt?: string): string {
+  const stamp = fileNameOrStamp.replace(/\.md$/i, '');
+  const match = stamp.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})/);
+  if (match) {
+    return `草稿快照 ${match[1]}-${match[2]}-${match[3]} ${match[4]}:${match[5]}`;
+  }
+  const timeLabel = formatCompactDateTime(createdAt);
+  return timeLabel ? `草稿快照 ${timeLabel}` : '草稿快照';
+}
+
+function historyFallbackLabel(createdAt?: string, commitSha?: string): string {
+  const timeLabel = formatCompactDateTime(createdAt);
+  if (timeLabel) {
+    return `历史记录 ${timeLabel}`;
+  }
+  return commitSha ? `历史记录 ${commitSha.slice(0, 8)}` : '历史记录';
+}
+
 function normalizeVersionId(versionId: string): string {
   const normalized = String(versionId || '').trim();
   if (!normalized) {
@@ -73,6 +142,12 @@ function versionFromContent(input: {
   };
 }
 
+async function draftSnapshotFileNames(workspaceRoot: string, requirementId: string): Promise<string[]> {
+  const dir = draftVersionDir(workspaceRoot, requirementId);
+  const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
+  return entries.filter((entry) => entry.isFile() && entry.name.endsWith('.md')).map((entry) => entry.name).sort();
+}
+
 async function currentVersion(workspaceRoot: string, requirementId: string): Promise<TechDesignVersion> {
   const relative = designDocumentPath(requirementId);
   const absolute = assertInsideWorkspace(workspaceRoot, relative);
@@ -80,7 +155,7 @@ async function currentVersion(workspaceRoot: string, requirementId: string): Pro
   return versionFromContent({
     id: CURRENT_VERSION_ID,
     source: 'CURRENT_DRAFT',
-    label: '当前草稿',
+    label: labelFromContent(content, '当前草稿', '当前草稿'),
     artifactPath: relative,
     content,
     createdAt: await statTime(absolute),
@@ -91,20 +166,20 @@ async function currentVersion(workspaceRoot: string, requirementId: string): Pro
 
 async function listDraftSnapshots(workspaceRoot: string, requirementId: string): Promise<TechDesignVersion[]> {
   const dir = draftVersionDir(workspaceRoot, requirementId);
-  const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
-  const files = entries.filter((entry) => entry.isFile() && entry.name.endsWith('.md')).map((entry) => entry.name).sort().reverse();
+  const files = (await draftSnapshotFileNames(workspaceRoot, requirementId)).reverse();
   return Promise.all(
-    files.map(async (fileName, index) => {
+    files.map(async (fileName) => {
       const absolute = path.join(dir, fileName);
       const content = await readText(absolute);
       const stamp = fileName.replace(/\.md$/i, '');
+      const createdAt = await statTime(absolute);
       return versionFromContent({
         id: `snapshot:${stamp}`,
         source: 'DRAFT_SNAPSHOT',
-        label: `草稿快照 ${files.length - index}`,
+        label: labelFromContent(content, snapshotFallbackLabel(fileName, createdAt)),
         artifactPath: designDocumentPath(requirementId),
         content,
-        createdAt: await statTime(absolute),
+        createdAt,
         readable: content != null,
         unreadableReason: content == null ? '草稿快照不存在' : undefined
       });
@@ -113,6 +188,10 @@ async function listDraftSnapshots(workspaceRoot: string, requirementId: string):
 }
 
 async function isGitRepository(workspaceRoot: string): Promise<boolean> {
+  const gitMeta = await fs.stat(path.join(workspaceRoot, '.git')).catch(() => undefined);
+  if (!gitMeta || (!gitMeta.isDirectory() && !gitMeta.isFile())) {
+    return false;
+  }
   return runGit(workspaceRoot, ['rev-parse', '--is-inside-work-tree'])
     .then((value) => value.trim() === 'true')
     .catch(() => false);
@@ -135,16 +214,17 @@ async function listPublishedVersions(workspaceRoot: string, requirementId: strin
       const [commitSha = '', timestamp = '', author = ''] = row.split('\t');
       const content = commitSha ? await gitFileAtCommit(workspaceRoot, commitSha, relative) : undefined;
       const versionNo = total - index;
+      const createdAt = timestamp ? new Date(Number(timestamp) * 1000).toISOString() : undefined;
       return {
         ...versionFromContent({
           id: `git:${commitSha}`,
           source: 'PUBLISHED',
-          label: `v${versionNo}`,
+          label: labelFromContent(content, historyFallbackLabel(createdAt, commitSha)),
           artifactPath: relative,
           content,
           versionNo,
           commitSha,
-          createdAt: timestamp ? new Date(Number(timestamp) * 1000).toISOString() : undefined,
+          createdAt,
           readable: content != null,
           unreadableReason: content == null ? '历史版本内容不可读取，请先同步项目仓' : undefined
         }),
@@ -156,11 +236,11 @@ async function listPublishedVersions(workspaceRoot: string, requirementId: strin
 }
 
 export async function listTechDesignVersions(workspaceRoot: string, requirementId: string): Promise<TechDesignVersion[]> {
-  const [current, snapshots, published] = await Promise.all([
-    currentVersion(workspaceRoot, requirementId),
+  const [snapshots, published] = await Promise.all([
     listDraftSnapshots(workspaceRoot, requirementId),
     listPublishedVersions(workspaceRoot, requirementId)
   ]);
+  const current = await currentVersion(workspaceRoot, requirementId);
   return [current, ...snapshots, ...published];
 }
 
@@ -171,13 +251,14 @@ async function readSnapshotContent(workspaceRoot: string, requirementId: string,
   }
   const absolute = path.join(draftVersionDir(workspaceRoot, requirementId), `${snapshotId}.md`);
   const content = await readText(absolute);
+  const createdAt = await statTime(absolute);
   const version = versionFromContent({
     id: versionId,
     source: 'DRAFT_SNAPSHOT',
-    label: '草稿快照',
+    label: labelFromContent(content, snapshotFallbackLabel(snapshotId, createdAt)),
     artifactPath: designDocumentPath(requirementId),
     content,
-    createdAt: await statTime(absolute),
+    createdAt,
     readable: content != null,
     unreadableReason: content == null ? '草稿快照不存在' : undefined
   });
@@ -197,7 +278,7 @@ async function readGitVersionContent(workspaceRoot: string, requirementId: strin
   const version = versionFromContent({
     id: versionId,
     source: 'PUBLISHED',
-    label: commitSha.slice(0, 8),
+    label: labelFromContent(content, historyFallbackLabel(undefined, commitSha)),
     artifactPath: relative,
     content,
     commitSha,
@@ -245,9 +326,9 @@ function truncateDiff(diff: string): { diff: string; truncated: boolean } {
 
 function relabelNoIndexDiff(diff: string, leftLabel: string, rightLabel: string): string {
   return diff
-    .replace(/^diff --git a\/left\.md b\/right\.md/m, `diff --git a/${leftLabel} b/${rightLabel}`)
-    .replace(/^--- a\/left\.md/m, `--- a/${leftLabel}`)
-    .replace(/^\+\+\+ b\/right\.md/m, `+++ b/${rightLabel}`);
+    .replace(/^diff --git a\/.+ b\/.+$/m, `diff --git a/${leftLabel} b/${rightLabel}`)
+    .replace(/^--- .+$/m, `--- a/${leftLabel}`)
+    .replace(/^\+\+\+ .+$/m, `+++ b/${rightLabel}`);
 }
 
 function runDiff(cwd: string, args: string[]): Promise<string> {
@@ -330,7 +411,7 @@ export async function createTechDesignDraftSnapshot(workspaceRoot: string, requi
   return versionFromContent({
     id: `snapshot:${stamp}`,
     source: 'DRAFT_SNAPSHOT',
-    label: '草稿快照',
+    label: labelFromContent(content, snapshotFallbackLabel(stamp)),
     artifactPath: relative,
     content,
     createdAt: await statTime(snapshotPath),
@@ -341,5 +422,6 @@ export async function createTechDesignDraftSnapshot(workspaceRoot: string, requi
 export const internalForTests = {
   designDocumentPath,
   draftVersionDir,
+  extractReviewVersion,
   truncateDiff
 };

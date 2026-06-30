@@ -892,14 +892,15 @@ describe('shared artifact preview', () => {
     expect(apiClient.deletePublicTechDesignAnnotation).toHaveBeenCalledWith('share-token', 'annotation-1');
   });
 
-  it('已消费未解决批注展示为已处理待确认', () => {
+  it('已消费批注展示为已解决', () => {
     const wrapper = mount(TechDesignAnnotationPanel, {
       props: {
         annotations: [annotation({ consumedAt: '2026-06-18T08:00:00.000Z', consumedRunId: 'run-design-1' })]
       }
     });
 
-    expect(wrapper.text()).toContain('已处理待确认');
+    expect(wrapper.text()).toContain('已解决');
+    expect(wrapper.text()).not.toContain('已处理待确认');
     expect(wrapper.text()).toContain('已纳入生成');
     expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false);
   });

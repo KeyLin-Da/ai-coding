@@ -324,18 +324,22 @@ export async function deleteTechDesignAnnotation(
 export async function consumeTechDesignAnnotations(
   workspaceRoot: string,
   requirementId: string,
-  runId: string
+  runId: string,
+  annotationIds?: string[]
 ): Promise<TechDesignAnnotationList> {
   const { index } = await readIndex(workspaceRoot, requirementId);
   const now = new Date().toISOString();
   let changed = false;
+  const includedIds = annotationIds === undefined ? undefined : new Set(annotationIds);
   const nextAnnotations = index.annotations.map((annotation) => {
-    if (!annotationIncludedInSummary(annotation)) {
+    if (!annotationIncludedInSummary(annotation) || (includedIds && !includedIds.has(annotation.id))) {
       return annotation;
     }
     changed = true;
     return {
       ...annotation,
+      status: 'RESOLVED',
+      includeInNextGeneration: false,
       replies: (annotation.replies || []).map((reply) =>
         reply.consumedAt
           ? reply

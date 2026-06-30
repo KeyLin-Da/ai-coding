@@ -103,7 +103,7 @@ describe('tech-design-annotations service', () => {
     await expect(fs.readFile(summaryPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  it('消费批注后记录运行信息并移除下一次生成摘要', async () => {
+  it('消费批注后标记已解决并移除下一次生成摘要', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-tech-annotation-consume-'));
     await prepareDesign(root);
     const created = await createTechDesignAnnotation(root, '172014', annotationInput());
@@ -114,6 +114,8 @@ describe('tech-design-annotations service', () => {
     expect(consumed.annotations).toHaveLength(1);
     expect(consumed.annotations[0]).toMatchObject({
       id: created.annotations[0].id,
+      status: 'RESOLVED',
+      includeInNextGeneration: false,
       consumedRunId: 'run-design-1'
     });
     expect(consumed.annotations[0].consumedAt).toBeTruthy();

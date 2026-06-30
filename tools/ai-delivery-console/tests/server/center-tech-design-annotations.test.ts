@@ -159,17 +159,38 @@ describe('center-tech-design-annotations service', () => {
     await expect(prepareCenterTechDesignAnnotationInput(root, { userId: 1, fetchImpl }, workflow())).resolves.toBeUndefined();
   });
 
-  it('生成成功后消费中心批注并写入 Markdown 快照', async () => {
+  it('生成成功后消费中心批注并按已解决写入 Markdown 快照', async () => {
     const root = await tmpDir('ai-delivery-center-annotation-consume-');
-    const fetchImpl = vi.fn(async () => centerResponse([centerAnnotation({ consumedRunId: 'run-design-1' })]));
+    const fetchImpl = vi.fn(async () =>
+      centerResponse([
+        centerAnnotation({
+          status: 'OPEN',
+          consumedAt: '2026-06-18T08:00:00.000Z',
+          consumedRunId: 'run-design-1'
+        })
+      ])
+    );
 
-    const consumed = await consumeCenterTechDesignAnnotationsAndSnapshot(root, { userId: 1, fetchImpl }, workflow(), 'run-design-1');
+    const consumed = await consumeCenterTechDesignAnnotationsAndSnapshot(
+      root,
+      { userId: 1, fetchImpl },
+      workflow(),
+      'run-design-1',
+      ['annotation-center-1']
+    );
     const snapshot = await fs.readFile(path.join(root, techDesignAnnotationSnapshotPath('172014', 'run-design-1')), 'utf8');
+    const consumeRequest = fetchImpl.mock.calls.find(([url]) => String(url).endsWith('/consume'));
 
     expect(consumed).toHaveLength(1);
+    expect(consumed[0].status).toBe('RESOLVED');
+    expect(consumed[0].includeInNextGeneration).toBe(false);
     expect(snapshot).toContain('# 技术方案批注消费快照');
     expect(snapshot).toContain('run-design-1');
     expect(snapshot).toContain('annotation-center-1');
+    expect(JSON.parse(String(consumeRequest?.[1]?.body))).toEqual({
+      runId: 'run-design-1',
+      annotationIds: ['annotation-center-1']
+    });
   });
 
   it('中心批注消费接口不存在时不阻断生成后处理', async () => {

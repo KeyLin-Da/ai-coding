@@ -37,7 +37,7 @@
           <el-checkbox
             v-if="!readonly && !annotation.consumedAt"
             :model-value="annotation.includeInNextGeneration"
-            :disabled="annotation.status === 'RESOLVED'"
+            :disabled="isResolved(annotation)"
             @change="(value) => $emit('toggle-include', annotation, value === true)"
           >
             纳入生成
@@ -49,7 +49,7 @@
             <el-button v-if="canReply(annotation)" size="small" title="回复批注" @click="$emit('reply', annotation)">回复</el-button>
             <el-button :icon="Aim" size="small" circle title="定位批注" @click="$emit('locate', annotation)" />
             <el-button
-              v-if="!readonly && annotation.status !== 'RESOLVED'"
+              v-if="!readonly && !isResolved(annotation)"
               :icon="Check"
               size="small"
               circle
@@ -95,8 +95,8 @@ defineEmits<{
 }>();
 
 function statusText(annotation: TechDesignAnnotation): string {
-  if (annotation.status !== 'RESOLVED' && annotation.consumedAt) {
-    return '已处理待确认';
+  if (isResolved(annotation)) {
+    return '已解决';
   }
   const labels: Record<TechDesignAnnotationStatus, string> = {
     OPEN: '未解决',
@@ -108,11 +108,14 @@ function statusText(annotation: TechDesignAnnotation): string {
 }
 
 function tagType(annotation: TechDesignAnnotation): 'primary' | 'success' | 'warning' | 'info' {
-  if (annotation.status === 'RESOLVED') return 'success';
-  if (annotation.consumedAt) return 'primary';
+  if (isResolved(annotation)) return 'success';
   if (annotation.status === 'STALE') return 'warning';
   if (annotation.status === 'CARRIED_FORWARD') return 'primary';
   return 'info';
+}
+
+function isResolved(annotation: TechDesignAnnotation): boolean {
+  return annotation.status === 'RESOLVED' || Boolean(annotation.consumedAt);
 }
 
 function versionText(annotation: TechDesignAnnotation): string {
@@ -132,7 +135,7 @@ function canDelete(annotation: TechDesignAnnotation): boolean {
 }
 
 function canReply(annotation: TechDesignAnnotation): boolean {
-  return annotation.status !== 'RESOLVED' && (!props.readonly || props.replyableAnnotationIds.includes(annotation.id));
+  return !isResolved(annotation) && (!props.readonly || props.replyableAnnotationIds.includes(annotation.id));
 }
 
 function canDeleteReply(reply: TechDesignAnnotationReply): boolean {

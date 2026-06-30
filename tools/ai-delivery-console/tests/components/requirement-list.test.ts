@@ -201,6 +201,7 @@ describe('RequirementList', () => {
 
     await titleInput.setValue('新标题');
     await branchInput.setValue('feature/opp-172014-edit');
+    (wrapper.vm as any).selectedProjectPaths = ['opp-api', 'opp-diy'];
     await (wrapper.vm as any).submit();
 
     expect(apiClient.createRequirement).toHaveBeenCalledWith(
@@ -208,7 +209,10 @@ describe('RequirementList', () => {
         requirementId: '172014',
         title: '新标题',
         branchName: 'feature/opp-172014-edit',
-        projects: [{ name: 'opp-api', path: 'opp-api' }]
+        projects: [
+          { name: 'opp-api', path: 'opp-api' },
+          { name: 'opp-diy', path: 'opp-diy' }
+        ]
       })
     );
     expect(routerPush).not.toHaveBeenCalled();

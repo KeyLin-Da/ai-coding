@@ -127,6 +127,73 @@ describe('apiClient Runner docs endpoints', () => {
     );
   });
 
+  it('创建或编辑需求通过 Runner 同步中心和本地涉及工程', async () => {
+    const expected = {
+      ...workflow(),
+      id: 100,
+      projects: [
+        { name: 'opp-api', path: '/workspace/opp-api' },
+        { name: 'opp-learn', path: '/workspace/opp-learn' }
+      ]
+    };
+    const fetchMock = vi.fn().mockImplementation(() => okResponse(expected));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiClient.createRequirement({
+      id: 100,
+      requirementId: '172014',
+      title: '补充材料',
+      requirementType: 'DEFECT',
+      branchName: 'bugfix/opp#172014',
+      projects: expected.projects
+    });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/runner-api/api/ai-delivery/requirements');
+    expect(JSON.parse(String(init.body))).toEqual({
+      id: 100,
+      projectId: 10,
+      requirementId: '172014',
+      title: '补充材料',
+      requirementType: 'DEFECT',
+      branchName: 'bugfix/opp#172014',
+      projects: expected.projects
+    });
+    expect(result.projects).toEqual(expected.projects);
+  });
+
+  it('审核提交使用中心需求主键而不是业务需求编号', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      okResponse({
+        id: 501,
+        requirementPk: 100,
+        stage: 'IMPLEMENTATION',
+        implementationStep: 'START_CHANGE',
+        decision: 'APPROVED'
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiClient.submitReview({
+      requirementId: '172014',
+      requirementPk: 100,
+      stage: 'IMPLEMENTATION',
+      implementationStep: 'START_CHANGE',
+      decision: 'APPROVED',
+      comment: '开始变更通过'
+    });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/center-api/api/ai-delivery/reviews');
+    expect(JSON.parse(String(init.body))).toEqual({
+      requirementPk: 100,
+      stage: 'IMPLEMENTATION',
+      implementationStep: 'START_CHANGE',
+      decision: 'APPROVED',
+      comment: '开始变更通过'
+    });
+  });
+
   it('Runner 不可用时需求详情兜底中心服务，仍能打开基础详情', async () => {
     const fetchMock = vi
       .fn()

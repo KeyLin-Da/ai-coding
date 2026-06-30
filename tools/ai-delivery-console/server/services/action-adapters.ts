@@ -105,8 +105,9 @@ function openSpecPrdDocumentPath(workflow: RequirementWorkflow, params: Record<s
   if (explicitPath) {
     return explicitPath;
   }
-  const artifactPath = workflow.artifacts.find((artifact) => artifact.stage === 'PRD' && artifact.exists && artifact.kind !== 'directory')?.path;
-  return artifactPath || workflow.stages.PRD.artifactPath || `docs/${workflow.requirementId}/prd/analysis.md`;
+  else {
+    return null
+  }
 }
 
 function slugText(value: string): string {
@@ -244,7 +245,7 @@ function designQuestionInputParam(workflow: RequirementWorkflow, params: Record<
   if (workflow.requirementType === 'DEFECT') {
     return technicalDesignDocumentPath(workflow, params);
   }
-  return uniqueNonEmpty([openSpecPrdDocumentPath(workflow, params), technicalDesignDocumentPath(workflow, params)]).join(',');
+  return uniqueNonEmpty([technicalDesignDocumentPath(workflow, params)]).join(',');
 }
 
 function openSpecInputParam(workflow: RequirementWorkflow, params: Record<string, unknown>): string {
@@ -499,7 +500,8 @@ export async function executeAction(
     status: 'RUNNING',
     startedAt,
     params,
-    executionMode: executionMode(params)
+    executionMode: executionMode(params),
+    techDesignInputSnapshot: normalizedAction.techDesignInputSnapshot
   };
   const artifactSnapshot = await captureControlledArtifactSnapshot(workspaceRoot, workflow);
 

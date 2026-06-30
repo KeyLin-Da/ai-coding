@@ -227,16 +227,36 @@ class TechDesignAnnotationServiceTest {
         when(annotationMapper.selectList(any())).thenReturn(Collections.singletonList(entity));
         TechDesignAnnotationConsumeRequest request = new TechDesignAnnotationConsumeRequest();
         request.setRunId("run-design-1");
+        request.setAnnotationIds(Collections.singletonList("annotation-1"));
 
         List<TechDesignAnnotationVO> result = service.consume(1L, 100L, request);
 
         assertThat(result).hasSize(1);
+        assertThat(result.get(0).getStatus()).isEqualTo("RESOLVED");
+        assertThat(result.get(0).getIncludeInNextGeneration()).isFalse();
+        assertThat(entity.getStatus()).isEqualTo("RESOLVED");
+        assertThat(entity.getIncludeInNextGeneration()).isEqualTo(0);
         assertThat(entity.getConsumedAt()).isNotNull();
         assertThat(entity.getConsumedRunId()).isEqualTo("run-design-1");
+        assertThat(entity.getUpdatedAt()).isNotNull();
         verify(annotationMapper).updateById(entity);
         ArgumentCaptor<String> payloadCaptor = ArgumentCaptor.forClass(String.class);
         verify(domainEventService).publishAfterCommit(eq(10L), eq("tech-design.annotation.changed"), eq("REQUIREMENT"), eq(100L), payloadCaptor.capture());
         assertThat(payloadCaptor.getValue()).contains("\"operation\":\"CONSUMED\"");
+    }
+
+    @Test
+    void consumeWithEmptyAnnotationIdsDoesNotConsumeOtherPendingAnnotations() {
+        when(requirementMapper.selectById(100L)).thenReturn(requirement());
+        TechDesignAnnotationConsumeRequest request = new TechDesignAnnotationConsumeRequest();
+        request.setRunId("run-design-1");
+        request.setAnnotationIds(Collections.emptyList());
+
+        List<TechDesignAnnotationVO> result = service.consume(1L, 100L, request);
+
+        assertThat(result).isEmpty();
+        verify(annotationMapper, never()).selectList(any());
+        verify(annotationMapper, never()).updateById(any());
     }
 
     @Test

@@ -4,7 +4,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { applyPrdClarificationRun, consumeTechDesignInputsAfterRun, createRouter } from '../../server/router';
+import {
+  applyPrdClarificationRun,
+  captureTechDesignInputSnapshot,
+  consumeTechDesignInputsAfterRun,
+  createRouter,
+  finalizeSuccessfulTechDesignRuns
+} from '../../server/router';
 import {
   createTechDesignAnnotation,
   listTechDesignAnnotations,
@@ -177,6 +183,87 @@ function designGenerateRun(status: RunRecord['status']): RunRecord {
 describe('router requirement detail', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it('编辑需求时同时保存中心工程名称和本地工程路径', async () => {
+    const workspaceRoot = await tmpDir('ai-delivery-requirement-edit-');
+    const projectParent = await tmpDir('ai-delivery-projects-');
+    const oppApiPath = path.join(projectParent, 'opp-api');
+    const oppLearnPath = path.join(projectParent, 'opp-learn');
+    await fs.mkdir(oppApiPath, { recursive: true });
+    await fs.mkdir(oppLearnPath, { recursive: true });
+    const centerBodies: unknown[] = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/ai-delivery/projects/5/workspace-mappings') {
+        return centerResponse([{ localPath: projectParent, status: 'ACTIVE' }]);
+      }
+      if (url.pathname === '/api/ai-delivery/requirements' && init?.method === 'POST') {
+        centerBodies.push(JSON.parse(String(init.body)));
+        return centerResponse({
+          id: 100,
+          projectId: 5,
+          requirementId: '172014',
+          title: '更新需求',
+          requirementType: 'REQUIREMENT',
+          branchName: 'feature/opp#172014',
+          status: 'DRAFT',
+          currentStage: 'PRD',
+          stages: [],
+          projectNames: ['opp-api', 'opp-learn']
+        });
+      }
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ success: false, message: 'not found' })
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchImpl);
+
+    const router = createRouter(workspaceRoot);
+    const result = response();
+    await router(
+      requestWithBody(
+        'POST',
+        '/api/ai-delivery/requirements',
+        {
+          'content-type': 'application/json',
+          'x-user-id': '1',
+          'x-project-id': '5',
+          'x-center-base-url': 'http://center.local'
+        },
+        Buffer.from(JSON.stringify({
+          requirementId: '172014',
+          title: '更新需求',
+          requirementType: 'REQUIREMENT',
+          branchName: 'feature/opp#172014',
+          projects: [
+            { name: 'opp-api', path: oppApiPath },
+            { name: 'opp-learn', path: oppLearnPath }
+          ]
+        }))
+      ),
+      result.response
+    );
+    const { status, body } = await result.done;
+    const saved = await new WorkflowRepository(workspaceRoot).load('172014');
+
+    expect(status).toBe(200);
+    expect(centerBodies).toEqual([{
+      projectId: 5,
+      requirementId: '172014',
+      title: '更新需求',
+      requirementType: 'REQUIREMENT',
+      branchName: 'feature/opp#172014',
+      projectNames: ['opp-api', 'opp-learn']
+    }]);
+    expect(body.data.id).toBe(100);
+    expect(body.data.projects).toEqual([
+      { name: 'opp-api', path: oppApiPath },
+      { name: 'opp-learn', path: oppLearnPath }
+    ]);
+    expect(saved?.projects).toEqual(body.data.projects);
   });
 
   it('中心存在需求但本地没有 runtime state 时仍允许进入详情读路径', async () => {
@@ -635,8 +722,64 @@ describe('router requirement detail', () => {
     ]);
     expect(ledger.entries.map((entry) => entry.type)).toEqual(expect.arrayContaining(['QUESTION', 'SOURCE_FILE', 'CLARIFICATION']));
     expect(rawLedger).toContain('docs/172014/technical-design/questions/20260605-101500-question.md');
+    expect(annotations.annotations[0].status).toBe('RESOLVED');
+    expect(annotations.annotations[0].includeInNextGeneration).toBe(false);
     expect(annotations.annotations[0].consumedRunId).toBe('run-design-succeeded');
     await expect(fs.readFile(path.join(workspaceRoot, techDesignAnnotationSummaryPath('172014')), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('成功运行只消费启动时冻结的输入且重复后处理保持幂等', async () => {
+    const workspaceRoot = await tmpDir('ai-delivery-tech-design-snapshot-consume-');
+    await prepareTechDesign(workspaceRoot);
+    const annotationList = await createTechDesignAnnotation(workspaceRoot, '172014', annotationInput());
+    const workflow = techDesignConsumptionWorkflow();
+    const snapshot = captureTechDesignInputSnapshot(
+      workflow,
+      {
+        clarification: '补充异常场景',
+        sourceFiles: [
+          'docs/172014/technical-design/questions/20260605-101500-question.md',
+          'docs/172014/technical-design/file/file-1.md',
+          '/tmp/tech-design-annotations-runtime.md'
+        ]
+      },
+      [annotationList.annotations[0].id],
+      ['/tmp/tech-design-annotations-runtime.md']
+    );
+    workflow.techDesignSourceFiles?.push({
+      id: 'file-2',
+      name: '运行期间新增.md',
+      path: 'docs/172014/technical-design/file/file-2.md',
+      size: 200,
+      uploadedAt: new Date().toISOString()
+    });
+    workflow.techDesignClarification = '运行期间新增说明';
+    const run = {
+      ...designGenerateRun('SUCCEEDED'),
+      techDesignInputSnapshot: snapshot
+    };
+    workflow.runs = [run];
+
+    const first = await finalizeSuccessfulTechDesignRuns(workspaceRoot, workflow);
+    const firstLedger = await readTechDesignInputLedger(workspaceRoot, '172014');
+    const second = await finalizeSuccessfulTechDesignRuns(workspaceRoot, first.workflow);
+    const secondLedger = await readTechDesignInputLedger(workspaceRoot, '172014');
+
+    expect(first.changed).toBe(true);
+    expect(second.changed).toBe(false);
+    expect(run.techDesignInputsConsumedAt).toBeTruthy();
+    expect(first.workflow.techDesignClarification).toBe('运行期间新增说明');
+    expect(first.workflow.techDesignSourceFiles?.map((file) => file.path)).toEqual([
+      'docs/172014/technical-design/file/file-2.md'
+    ]);
+    expect(first.workflow.techDesignConsumedQuestionPaths).toEqual([
+      'docs/172014/technical-design/questions/20260604-173000-question.md',
+      'docs/172014/technical-design/questions/20260605-101500-question.md'
+    ]);
+    expect(firstLedger.entries).toHaveLength(secondLedger.entries.length);
+    expect(firstLedger.entries.filter((entry) => entry.type === 'QUESTION').map((entry) => entry.path)).toEqual([
+      'docs/172014/technical-design/questions/20260605-101500-question.md'
+    ]);
   });
 
   it('技术方案生成失败时保留待消费输入和批注摘要', async () => {

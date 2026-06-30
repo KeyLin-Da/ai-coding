@@ -12,7 +12,7 @@ vi.mock('@/api/client', () => ({
   apiClient: {
     diffTechDesignVersions: vi.fn().mockResolvedValue({
       left: { id: 'git:abc1234', source: 'PUBLISHED', label: 'v1', artifactPath: 'docs/172014/technical-design/design_review.md', readable: true },
-      right: { id: 'current', source: 'CURRENT_DRAFT', label: '当前草稿', artifactPath: 'docs/172014/technical-design/design_review.md', readable: true },
+      right: { id: 'current', source: 'CURRENT_DRAFT', label: 'v2.0 当前草稿', artifactPath: 'docs/172014/technical-design/design_review.md', readable: true },
       diff: 'diff --git a/design.md b/design.md\n--- a/design.md\n+++ b/design.md\n@@ -1 +1 @@\n-old\n+new\n',
       truncated: false
     })
@@ -28,7 +28,14 @@ function versions(): TechDesignVersion[] {
     {
       id: 'current',
       source: 'CURRENT_DRAFT',
-      label: '当前草稿',
+      label: 'v2.0 当前草稿',
+      artifactPath: 'docs/172014/technical-design/design_review.md',
+      readable: true
+    },
+    {
+      id: 'snapshot:20260624120000-abcdef12',
+      source: 'DRAFT_SNAPSHOT',
+      label: 'v1.9',
       artifactPath: 'docs/172014/technical-design/design_review.md',
       readable: true
     },
@@ -166,7 +173,7 @@ describe('tech design versioned annotation UI', () => {
     expect(highlight?.textContent).toBe('F1‑学习积');
   });
 
-  it('版本选择器展示当前草稿和历史版本', () => {
+  it('版本选择器展示文档中解析到的评审版本', () => {
     const wrapper = mount(TechDesignVersionSelector, {
       props: {
         modelValue: 'current',
@@ -174,8 +181,8 @@ describe('tech design versioned annotation UI', () => {
       }
     });
 
-    expect(wrapper.text()).toContain('当前草稿');
-    expect(wrapper.text()).toContain('v1');
+    expect(wrapper.text()).toContain('v2.0 当前草稿');
+    expect(wrapper.text()).toContain('v1.9');
     expect(wrapper.text()).toContain('对比版本');
   });
 
@@ -215,7 +222,7 @@ describe('tech design versioned annotation UI', () => {
     await Promise.resolve();
 
     expect(apiClient.diffTechDesignVersions).toHaveBeenCalledWith('172014', {
-      leftVersionId: 'git:abc1234',
+      leftVersionId: 'snapshot:20260624120000-abcdef12',
       rightVersionId: 'current'
     });
   });

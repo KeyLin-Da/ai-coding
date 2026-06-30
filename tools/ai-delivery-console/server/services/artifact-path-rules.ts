@@ -14,7 +14,7 @@ export function isReportRunLogPath(relativePath: string, requirementId?: string)
   const normalized = normalizeRelativePath(relativePath);
   if (requirementId !== undefined) {
     const safeRequirementId = normalizeRequirementPathSegment(requirementId);
-    return new RegExp(`^docs/${escapeRegExp(safeRequirementId)}/reports/run-[^/]*\\.log$`, 'i').test(normalized);
+    return new RegExp(`^docs/${escapeRegExp(safeRequirementId)}/reports/run-[^/]*\\.(?:log|md)$`, 'i').test(normalized);
   }
-  return /^docs\/[^/]+\/reports\/run-[^/]*\.log$/i.test(normalized);
+  return /^docs\/[^/]+\/reports\/run-[^/]*\.(?:log|md)$/i.test(normalized);
 }

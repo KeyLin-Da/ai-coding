@@ -1298,11 +1298,9 @@ async function runDesignQuestion(rawQuestion: string) {
   };
   if (requiresPrdApproval.value) {
     const prdDocumentPath = openSpecPrdDocumentPath.value.trim();
-    if (!prdDocumentPath) {
-      ElMessage.warning('请先生成、保存或刷新 PRD 产物');
-      return;
+    if (prdDocumentPath) {
+       params.prdDocumentPath = prdDocumentPath;
     }
-    params.prdDocumentPath = prdDocumentPath;
   }
   await runOrCopyAction({
     actionType: 'DESIGN_QUESTION',
@@ -1318,7 +1316,7 @@ async function deleteDesignQuestion(item: TechDesignQuestionListItem) {
   if (!workflow.value) {
     return;
   }
-  if (!(await ensureDeliveryReady('删除技术方案答疑', { allowDirty: true }))) {
+  if (!(await ensureDeliveryReady('删除技术方案答疑', { allowDirty: true, skipRepositoryChecks: true  }))) {
     return;
   }
   try {
@@ -1369,9 +1367,8 @@ async function runOpenSpecArtifacts() {
   }
   const prdDocumentPath = openSpecPrdDocumentPath.value.trim();
   const documentPath = openSpecTechnicalDesignDocumentPath.value.trim();
-  if (requiresPrdApproval.value && !prdDocumentPath) {
-    ElMessage.warning('请先生成、保存或刷新 PRD 产物');
-    return;
+  if (requiresPrdApproval.value && prdDocumentPath) {
+   params.prdDocumentPath = prdDocumentPath;
   }
   if (!documentPath) {
     ElMessage.warning('请先生成、保存或刷新技术方案产物');
@@ -1383,9 +1380,6 @@ async function runOpenSpecArtifacts() {
     documentPath,
     sourceFiles: techDesignSourceFiles.value.map((file) => file.path)
   };
-  if (requiresPrdApproval.value) {
-    params.prdDocumentPath = prdDocumentPath;
-  }
   await runOrCopyAction({ actionType: 'OPENSPEC_FF', params }, loadOpenSpecSummary);
 }
 
@@ -1519,7 +1513,7 @@ async function openImplementationStepReview() {
   if (!workflow.value) {
     return;
   }
-  if (!(await ensureDeliveryReady('提交审核', { allowDirty: true }))) {
+  if (!(await ensureDeliveryReady('提交审核', { allowDirty: true, skipRepositoryChecks: true  }))) {
     return;
   }
   reviewDialog.value?.open(
@@ -1548,8 +1542,12 @@ async function submitReview(input: {
   comment: string;
   artifactPath?: string;
 }) {
-  await store.submitReview(input);
-  ElMessage.success('审核记录已保存');
+  try {
+    await store.submitReview(input);
+    ElMessage.success('审核记录已保存');
+  } catch (error: any) {
+    ElMessage.error(error.message || '审核提交失败');
+  }
 }
 
 async function handleArtifactGitSynced(result: { commitSha?: string; pushed?: boolean }) {

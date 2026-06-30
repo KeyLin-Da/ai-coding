@@ -107,7 +107,8 @@ export const useWorkflowStore = defineStore('workflow', {
       const requirementId = this.current.requirementId;
       await apiClient.submitReview({
         ...input,
-        requirementId
+        requirementId,
+        requirementPk: this.current.id
       });
       await this.loadRequirement(requirementId);
       await this.loadRequirements();

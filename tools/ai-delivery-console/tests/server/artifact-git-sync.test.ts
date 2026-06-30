@@ -92,6 +92,7 @@ describe('artifact-git-sync', () => {
     expect(assertControlledArtifactPath(current, 'docs/172014/reports/implementation-report.md')).toBe('docs/172014/reports/implementation-report.md');
     expect(() => assertControlledArtifactPath(current, 'docs/172014/workflow/runs/run-1.jsonl')).toThrow('不在受控产物路径内');
     expect(() => assertControlledArtifactPath(current, 'docs/172014/reports/run-20260610085925-588899.log')).toThrow('不在受控产物路径内');
+    expect(() => assertControlledArtifactPath(current, 'docs/172014/reports/run-20260629033308-ef7f42.md')).toThrow('不在受控产物路径内');
   });
 
   it('拒绝绝对路径、目录逃逸和其他需求路径', () => {
@@ -537,17 +538,21 @@ describe('artifact-git-sync', () => {
       await fs.mkdir(path.join(repoPath, 'docs', '172014', 'reports'), { recursive: true });
       await fs.writeFile(path.join(repoPath, 'docs', '172014', 'reports', 'manual.md'), '# manual\nnew artifact\n', 'utf8');
       await fs.writeFile(path.join(repoPath, 'docs', '172014', 'reports', 'run-20260610085925-588899.log'), 'runtime log\n', 'utf8');
+      await fs.writeFile(path.join(repoPath, 'docs', '172014', 'reports', 'run-20260629033308-ef7f42.md'), '# runtime report\n', 'utf8');
       await fs.writeFile(path.join(repoPath, 'docs', '172014', 'technical-design', 'design_review.md'), 'design old\nstaged but not selected\n', 'utf8');
       await git(repoPath, ['add', 'docs/172014/technical-design/design_review.md']);
 
       const plan = await buildArtifactGitSyncPlan(context, workflow(), { stage: 'TECH_DESIGN', syncType: 'PUBLIC_SYNC' });
       const reportFile = plan.files.find((file) => file.path === 'docs/172014/reports/manual.md');
       const runLogFile = plan.files.find((file) => file.path === 'docs/172014/reports/run-20260610085925-588899.log');
+      const runMarkdownFile = plan.files.find((file) => file.path === 'docs/172014/reports/run-20260629033308-ef7f42.md');
       expect(reportFile?.status).toBe('??');
       expect(runLogFile).toBeUndefined();
+      expect(runMarkdownFile).toBeUndefined();
       expect(plan.diff).toContain('new file mode 100644');
       expect(plan.diff).toContain('+# manual');
       expect(plan.diff).not.toContain('runtime log');
+      expect(plan.diff).not.toContain('runtime report');
 
       const result = await confirmArtifactGitSync(context, workflow(), {
         stage: 'TECH_DESIGN',

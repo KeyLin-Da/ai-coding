@@ -145,6 +145,7 @@ describe('workflow store loading', () => {
 
     expect(apiClient.submitReview).toHaveBeenCalledWith({
       requirementId: '172014',
+      requirementPk: '172014',
       stage: 'IMPLEMENTATION',
       implementationStep: 'CHANGE_INSPECTION',
       decision: 'APPROVED',

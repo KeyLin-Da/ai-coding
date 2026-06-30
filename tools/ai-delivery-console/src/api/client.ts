@@ -255,6 +255,10 @@ export interface CenterReviewVO {
   updatedAt?: string;
 }
 
+export type ReviewSubmissionInput = ReviewInput & {
+  requirementPk?: string | number;
+};
+
 export interface ArtifactShareCreateInput {
   projectId: string | number;
   requirementPk?: string | number;
@@ -754,17 +758,18 @@ export const apiClient = {
     return request<WorkflowProject[]>('/api/ai-delivery/project-history');
   },
   createRequirement(input: RequirementInput) {
-    return request<CenterRequirementVO>('/api/ai-delivery/requirements', {
+    return runnerRequest<RequirementWorkflow>('/api/ai-delivery/requirements', {
       method: 'POST',
       body: JSON.stringify({
+        id: input.id,
         projectId: Number(requireRemoteProjectId()),
         requirementId: input.requirementId,
         title: input.title || input.requirementId,
         requirementType: input.requirementType || 'REQUIREMENT',
         branchName: input.branchName,
-        projectNames: (input.projects || []).map((p) => p.name)
+        projects: input.projects || []
       })
-    }).then(centerRequirementToWorkflow);
+    });
   },
   getRequirement(requirementId: string) {
     const centerFallback = () =>
@@ -1011,10 +1016,31 @@ export const apiClient = {
       }
     );
   },
-  submitReview(input: ReviewInput) {
-    return request<CenterReviewVO>('/api/ai-delivery/reviews', {
+  submitReview(input: ReviewSubmissionInput) {
+    const requirementPk = Number(input.requirementPk);
+    if (Number.isSafeInteger(requirementPk) && requirementPk > 0) {
+      return request<CenterReviewVO>('/api/ai-delivery/reviews', {
+        method: 'POST',
+        body: JSON.stringify({
+          requirementPk,
+          stage: input.stage,
+          implementationStep: input.implementationStep,
+          decision: input.decision,
+          comment: input.comment
+        })
+      });
+    }
+    return runnerRequest<RequirementWorkflow>('/api/ai-delivery/reviews', {
       method: 'POST',
-      body: JSON.stringify(input)
+      body: JSON.stringify({
+        requirementId: input.requirementId,
+        stage: input.stage,
+        implementationStep: input.implementationStep,
+        decision: input.decision,
+        comment: input.comment,
+        actor: input.actor,
+        artifactPath: input.artifactPath
+      })
     });
   },
   getRunTokenUsages(requirementId: string, runId: string | number) {

@@ -104,6 +104,14 @@ export interface RunEvent {
   data?: unknown;
 }
 
+export interface TechDesignGenerationInputSnapshot {
+  questionPaths: string[];
+  sourceFilePaths: string[];
+  clarification?: string;
+  annotationIds: string[];
+  capturedAt: string;
+}
+
 export interface RunRecord {
   id: string;
   requirementId: string;
@@ -132,6 +140,8 @@ export interface RunRecord {
   codexTokenSnapshot?: TokenUsageSnapshot;
   tokenUsageOutboxPath?: string;
   centerSyncedAt?: string;
+  techDesignInputSnapshot?: TechDesignGenerationInputSnapshot;
+  techDesignInputsConsumedAt?: string;
   error?: string;
 }
 
@@ -540,6 +550,7 @@ export interface RequirementInput {
 export interface ActionInput {
   actionType: ActionType;
   params?: Record<string, unknown>;
+  techDesignInputSnapshot?: TechDesignGenerationInputSnapshot;
 }
 
 export interface ReviewInput {

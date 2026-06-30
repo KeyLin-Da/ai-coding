@@ -129,11 +129,13 @@ describe('bootstrap-importer', () => {
     await fs.writeFile(path.join(sourceRoot, 'docs/172014/prd/analysis.md'), '# PRD', 'utf8');
     await fs.writeFile(path.join(sourceRoot, 'docs/172014/reports/implementation-report.md'), '# implementation', 'utf8');
     await fs.writeFile(path.join(sourceRoot, 'docs/172014/reports/run-20260610085925-588899.log'), 'runtime log', 'utf8');
+    await fs.writeFile(path.join(sourceRoot, 'docs/172014/reports/run-20260629033308-ef7f42.md'), '# runtime report', 'utf8');
     vi.mocked(runGit).mockResolvedValue(
       [
         '?? docs/172014/prd/analysis.md',
         '?? docs/172014/reports/implementation-report.md',
-        '?? docs/172014/reports/run-20260610085925-588899.log'
+        '?? docs/172014/reports/run-20260610085925-588899.log',
+        '?? docs/172014/reports/run-20260629033308-ef7f42.md'
       ].join('\n')
     );
     const plan = await buildBootstrapImportPlan(sourceRoot);
@@ -149,9 +151,11 @@ describe('bootstrap-importer', () => {
 
     expect(await fs.readFile(path.join(repoRoot, 'docs/172014/reports/implementation-report.md'), 'utf8')).toBe('# implementation');
     await expect(fs.stat(path.join(repoRoot, 'docs/172014/reports/run-20260610085925-588899.log'))).rejects.toThrow();
+    await expect(fs.stat(path.join(repoRoot, 'docs/172014/reports/run-20260629033308-ef7f42.md'))).rejects.toThrow();
     const syncedFiles = vi.mocked(confirmArtifactGitSync).mock.calls.flatMap((call) => call[2].files);
     expect(syncedFiles).toContain('docs/172014/reports/implementation-report.md');
     expect(syncedFiles).not.toContain('docs/172014/reports/run-20260610085925-588899.log');
+    expect(syncedFiles).not.toContain('docs/172014/reports/run-20260629033308-ef7f42.md');
   });
 
   it('dry-run 只写本机 manifest，不调用中心和 Git 同步', async () => {

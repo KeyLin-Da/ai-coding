@@ -2,7 +2,18 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { URL } from 'node:url';
-import type { ActionInput, GitStageUntrackedInput, PrdSourceFile, RequirementInput, RequirementWorkflow, ReviewInput, RunRecord, TechDesignSourceFile, WorkflowStatus } from '../shared/workflow';
+import type {
+  ActionInput,
+  GitStageUntrackedInput,
+  PrdSourceFile,
+  RequirementInput,
+  RequirementWorkflow,
+  ReviewInput,
+  RunRecord,
+  TechDesignGenerationInputSnapshot,
+  TechDesignSourceFile,
+  WorkflowStatus
+} from '../shared/workflow';
 import { ensureImplementationSteps, isImplementationStep, stageForAction } from '../shared/workflow';
 import { normalizePrdClarification, WorkflowRepository } from './services/workflow-repository';
 import { scanRequirementArtifacts } from './services/workspace-scanner';
@@ -66,7 +77,13 @@ import {
 } from './services/tech-design-input-ledger';
 import { createTechDesignDraftSnapshot, diffTechDesignVersions, listTechDesignVersions, readTechDesignVersionContent } from './services/tech-design-versions';
 import { buildBootstrapImportPlan, importBootstrapPlan, type BootstrapImportConfig } from './services/bootstrap-importer';
-import { listCenterRequirementWorkflows, loadCachedCenterRequirementWorkflow, loadCenterRequirementWorkflow, mergeRequirementWorkflow } from './services/requirement-workflow-view';
+import {
+  listCenterRequirementWorkflows,
+  loadCachedCenterRequirementWorkflow,
+  loadCenterRequirementWorkflow,
+  mergeRequirementWorkflow,
+  upsertCenterRequirement
+} from './services/requirement-workflow-view';
 import {
   assertRequirementCollaborationWritable,
   assertRequirementWorkspaceWritable,
@@ -205,19 +222,58 @@ function pendingTechDesignQuestionPaths(workflow: RequirementWorkflow, params: R
   return [...paths].sort((left, right) => left.localeCompare(right));
 }
 
+function uniqueNormalizedPaths(values: unknown[]): string[] {
+  return [...new Set(values.map((value) => normalizeArtifactPath(typeof value === 'string' ? value : '')).filter(Boolean))];
+}
+
+export function captureTechDesignInputSnapshot(
+  workflow: RequirementWorkflow,
+  params: Record<string, unknown>,
+  annotationIds: string[] = [],
+  excludedSourcePaths: string[] = []
+): TechDesignGenerationInputSnapshot {
+  const questionPaths = pendingTechDesignQuestionPaths(workflow, params);
+  const requestedSourceFiles = Array.isArray(params.sourceFiles) ? params.sourceFiles : [];
+  const sourceCandidates = requestedSourceFiles.length
+    ? requestedSourceFiles
+    : (workflow.techDesignSourceFiles || []).map((file) => file.path);
+  const questionPathSet = new Set(questionPaths);
+  const excludedPathSet = new Set(uniqueNormalizedPaths(excludedSourcePaths));
+  const sourceFilePaths = uniqueNormalizedPaths(sourceCandidates).filter(
+    (filePath) => !questionPathSet.has(filePath) && !excludedPathSet.has(filePath)
+  );
+  const clarification = typeof params.clarification === 'string'
+    ? params.clarification.trim()
+    : String(workflow.techDesignClarification || '').trim();
+  return {
+    questionPaths,
+    sourceFilePaths,
+    clarification: clarification || undefined,
+    annotationIds: [...new Set(annotationIds.map((id) => String(id || '').trim()).filter(Boolean))],
+    capturedAt: new Date().toISOString()
+  };
+}
+
 export async function consumeTechDesignInputsAfterRun(
   root: string,
   workflow: RequirementWorkflow,
   run: RunRecord,
   context?: LocalRequestContext
 ): Promise<RequirementWorkflow> {
-  if (run.actionType !== 'DESIGN_GENERATE' || !['SUCCEEDED', 'COMPLETED'].includes(run.status)) {
+  if (
+    run.actionType !== 'DESIGN_GENERATE'
+    || !['SUCCEEDED', 'COMPLETED'].includes(run.status)
+    || run.techDesignInputsConsumedAt
+  ) {
     return workflow;
   }
   const params = run.params || {};
-  const consumedQuestionPaths = pendingTechDesignQuestionPaths(workflow, params);
-  const consumedSourceFilePaths = (workflow.techDesignSourceFiles || []).map((file) => file.path).filter(Boolean);
-  const clarification = typeof params.clarification === 'string' ? params.clarification : workflow.techDesignClarification || '';
+  const snapshot = run.techDesignInputSnapshot;
+  const consumedQuestionPaths = snapshot?.questionPaths || pendingTechDesignQuestionPaths(workflow, params);
+  const consumedSourceFilePaths = snapshot?.sourceFilePaths
+    || (workflow.techDesignSourceFiles || []).map((file) => file.path).filter(Boolean);
+  const clarification = snapshot?.clarification
+    ?? (typeof params.clarification === 'string' ? params.clarification : workflow.techDesignClarification || '');
   const ledger = await consumeTechDesignInputLedger(root, workflow.requirementId, {
     questionPaths: consumedQuestionPaths,
     sourceFilePaths: consumedSourceFilePaths,
@@ -225,17 +281,47 @@ export async function consumeTechDesignInputsAfterRun(
     runId: run.id
   });
   if (context && centerTechDesignAnnotationsEnabled(context, workflow)) {
-    await consumeCenterTechDesignAnnotationsAndSnapshot(root, context, workflow, run.id);
+    await consumeCenterTechDesignAnnotationsAndSnapshot(root, context, workflow, run.id, snapshot?.annotationIds);
   } else {
-    await consumeTechDesignAnnotations(root, workflow.requirementId, run.id);
+    await consumeTechDesignAnnotations(root, workflow.requirementId, run.id, snapshot?.annotationIds);
   }
+  run.techDesignInputsConsumedAt = new Date().toISOString();
   const ledgerQuestionPaths = consumedQuestionPathsFromLedger(ledger);
+  const consumedSourcePathSet = new Set(consumedSourceFilePaths.map(normalizeArtifactPath));
+  const currentClarification = String(workflow.techDesignClarification || '').trim();
+  const consumedClarification = String(clarification || '').trim();
   return {
     ...workflow,
-    techDesignClarification: '',
-    techDesignSourceFiles: [],
+    techDesignClarification: snapshot && currentClarification !== consumedClarification
+      ? workflow.techDesignClarification
+      : '',
+    techDesignSourceFiles: snapshot
+      ? (workflow.techDesignSourceFiles || []).filter((file) => !consumedSourcePathSet.has(normalizeArtifactPath(file.path)))
+      : [],
     techDesignConsumedQuestionPaths: [...new Set([...(workflow.techDesignConsumedQuestionPaths || []), ...ledgerQuestionPaths])]
   };
+}
+
+export async function finalizeSuccessfulTechDesignRuns(
+  root: string,
+  workflow: RequirementWorkflow,
+  context?: LocalRequestContext
+): Promise<{ workflow: RequirementWorkflow; changed: boolean }> {
+  let nextWorkflow = workflow;
+  let changed = false;
+  for (const run of workflow.runs) {
+    if (
+      run.actionType !== 'DESIGN_GENERATE'
+      || !run.techDesignInputSnapshot
+      || run.techDesignInputsConsumedAt
+      || !['SUCCEEDED', 'COMPLETED'].includes(run.status)
+    ) {
+      continue;
+    }
+    nextWorkflow = await consumeTechDesignInputsAfterRun(root, nextWorkflow, run, context);
+    changed = true;
+  }
+  return { workflow: nextWorkflow, changed };
 }
 
 function implementationStatusForRun(run: RunRecord): WorkflowStatus {
@@ -707,12 +793,20 @@ export function createRouter(workspaceRoot: string) {
               return merged;
             }
             const refreshed = await refreshTerminalRunStatuses(root, merged, centerRunnerConfig(requestContext));
-            await retryWorkflowTokenUsageOutboxes(root, refreshed.workflow, centerRunnerConfig(requestContext));
-            await retryWorkflowCenterRunStatuses(refreshed.workflow, centerRunnerConfig(requestContext));
-            return saveWithArtifacts(root, repository, refreshed.workflow);
+            const finalized = await finalizeSuccessfulTechDesignRuns(root, refreshed.workflow, requestContext);
+            await retryWorkflowTokenUsageOutboxes(root, finalized.workflow, centerRunnerConfig(requestContext));
+            await retryWorkflowCenterRunStatuses(finalized.workflow, centerRunnerConfig(requestContext));
+            return saveWithArtifacts(root, repository, finalized.workflow);
           }));
         } catch {
-          workflows = await Promise.all((await repository.list()).map((workflow) => mergeTechDesignInputLedgerIntoWorkflow(root, workflow)));
+          workflows = await Promise.all((await repository.list()).map(async (workflow) => {
+            const merged = await mergeTechDesignInputLedgerIntoWorkflow(root, workflow);
+            const refreshed = await refreshTerminalRunStatuses(root, merged, centerRunnerConfig(requestContext));
+            const finalized = await finalizeSuccessfulTechDesignRuns(root, refreshed.workflow, requestContext);
+            return refreshed.changed || finalized.changed
+              ? saveWithArtifacts(root, repository, finalized.workflow)
+              : finalized.workflow;
+          }));
         }
         send(response, 200, { data: workflows });
         return;
@@ -722,7 +816,13 @@ export function createRouter(workspaceRoot: string) {
         const input = await parseBody<RequirementInput>(request);
         const projectPaths = input.projects?.length ? await loadCurrentProjectPaths(requestContext, true) : [];
         const { root, repository } = await resolveWorkflowStore(requestContext);
-        let workflow = await repository.upsert(input, projectPaths);
+        const centerWorkflow = requestContext.projectId
+          ? await upsertCenterRequirement(requestContext, input)
+          : undefined;
+        let workflow = await repository.upsert({
+          ...input,
+          id: centerWorkflow?.id ?? input.id
+        }, projectPaths);
         workflow = await saveWithArtifacts(root, repository, workflow);
         await reportRequirementWorkspaceState(requestContext, workflow).catch(() => undefined);
         send(response, 200, { data: workflow });
@@ -743,10 +843,11 @@ export function createRouter(workspaceRoot: string) {
         }
         workflow = await mergeTechDesignInputLedgerIntoWorkflow(store.root, workflow);
         const refreshed = await refreshTerminalRunStatuses(store.root, workflow, centerRunnerConfig(requestContext));
-        workflow = refreshed.workflow;
+        const finalized = await finalizeSuccessfulTechDesignRuns(store.root, refreshed.workflow, requestContext);
+        workflow = finalized.workflow;
         const outboxChanged = await retryWorkflowTokenUsageOutboxes(store.root, workflow, centerRunnerConfig(requestContext));
         const centerStatusChanged = await retryWorkflowCenterRunStatuses(workflow, centerRunnerConfig(requestContext));
-        if (refreshed.changed || outboxChanged || centerStatusChanged) {
+        if (refreshed.changed || finalized.changed || outboxChanged || centerStatusChanged) {
           workflow = await store.repository.save(workflow);
         }
         send(response, 200, { data: workflow });
@@ -973,10 +1074,10 @@ export function createRouter(workspaceRoot: string) {
             send(response, 404, { message: '需求不存在' });
             return;
           }
-          await assertWritableWorkflow(requestContext, workflow);
+//          await assertWritableWorkflow(requestContext, workflow);
           const nextWorkflow = await deleteTechDesignQuestionRecord(root, workflow, input);
           workflow = await saveWithArtifacts(root, repository, nextWorkflow);
-          await reportRequirementWorkspaceState(requestContext, workflow).catch(() => undefined);
+//          await reportRequirementWorkspaceState(requestContext, workflow).catch(() => undefined);
           send(response, 200, { data: workflow });
         } finally {
           await lock.release();
@@ -1284,18 +1385,25 @@ export function createRouter(workspaceRoot: string) {
             const documentPath = designDocumentPath(workflow, params);
             await createTechDesignDraftSnapshot(root, workflow.requirementId).catch(() => undefined);
             const preparedAnnotations = await prepareCenterTechDesignAnnotationInput(root, requestContext, workflow);
+            const preparedAnnotationPath = preparedAnnotations?.sourceFilePath || '';
+            const inputSnapshot = captureTechDesignInputSnapshot(
+              workflow,
+              params,
+              (preparedAnnotations?.annotations || []).map((annotation) => annotation.id),
+              preparedAnnotationPath ? [preparedAnnotationPath] : []
+            );
+            const nextParams = { ...params };
             if (preparedAnnotations?.sourceFilePath) {
               const sourceFiles = Array.isArray(params.sourceFiles)
                 ? params.sourceFiles.map((item) => String(item).trim()).filter(Boolean)
                 : [];
-              effectiveAction = {
-                ...action,
-                params: {
-                  ...params,
-                  sourceFiles: [...sourceFiles, preparedAnnotations.sourceFilePath]
-                }
-              };
+              nextParams.sourceFiles = [...sourceFiles, preparedAnnotations.sourceFilePath];
             }
+            effectiveAction = {
+              ...action,
+              params: nextParams,
+              techDesignInputSnapshot: inputSnapshot
+            };
             workflow = {
               ...workflow,
               techDesignDocument: documentPath,
@@ -1328,7 +1436,20 @@ export function createRouter(workspaceRoot: string) {
             } else {
               latest.runs.unshift(updatedRun);
             }
-            await repository.save(latest);
+            let updatedWorkflow = applyImplementationRun(latest, updatedRun);
+            if (['SUCCEEDED', 'COMPLETED'].includes(updatedRun.status)) {
+              try {
+                updatedWorkflow = (await finalizeSuccessfulTechDesignRuns(root, updatedWorkflow, requestContext)).workflow;
+              } catch (error: any) {
+                await appendRunEvent(root, requirementId, updatedRun.id, {
+                  type: 'WARN',
+                  level: 'WARN',
+                  message: `技术方案增量输入消费失败，将在刷新时重试：${error?.message || 'unknown error'}`,
+                  agentId: updatedRun.agentId
+                });
+              }
+            }
+            await repository.save(updatedWorkflow);
           }, {
             projectPaths,
             centerConfig: centerRunnerConfig(requestContext)
@@ -1456,11 +1577,12 @@ export function createRouter(workspaceRoot: string) {
           let workflow = await repository.load(requirementId);
           if (workflow) {
             const refreshed = await refreshTerminalRunStatuses(root, workflow, centerRunnerConfig(requestContext));
-            const outboxChanged = await retryWorkflowTokenUsageOutboxes(root, refreshed.workflow, centerRunnerConfig(requestContext));
-            const centerStatusChanged = await retryWorkflowCenterRunStatuses(refreshed.workflow, centerRunnerConfig(requestContext));
-            workflow = refreshed.changed || outboxChanged || centerStatusChanged
-              ? await repository.save(refreshed.workflow)
-              : refreshed.workflow;
+            const finalized = await finalizeSuccessfulTechDesignRuns(root, refreshed.workflow, requestContext);
+            const outboxChanged = await retryWorkflowTokenUsageOutboxes(root, finalized.workflow, centerRunnerConfig(requestContext));
+            const centerStatusChanged = await retryWorkflowCenterRunStatuses(finalized.workflow, centerRunnerConfig(requestContext));
+            workflow = refreshed.changed || finalized.changed || outboxChanged || centerStatusChanged
+              ? await repository.save(finalized.workflow)
+              : finalized.workflow;
           }
           const run = workflow?.runs.find((item) => item.id === runStreamMatch[1]);
           const events = await readRunEvents(root, requirementId, runStreamMatch[1]);

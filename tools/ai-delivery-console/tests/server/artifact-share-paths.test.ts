@@ -13,6 +13,7 @@ describe('artifact share paths', () => {
     expect(() => assertPreviewableArtifactPath('172014', '../secret.md')).toThrow('分享产物路径不允许访问');
     expect(() => assertPreviewableArtifactPath('172014', 'docs/172014/workflow/state.json')).toThrow('分享产物路径不允许访问');
     expect(() => assertPreviewableArtifactPath('172014', 'docs/172014/reports/run-abc.log')).toThrow('分享产物路径不允许访问');
+    expect(() => assertPreviewableArtifactPath('172014', 'docs/172014/reports/run-abc.md')).toThrow('分享产物路径不允许访问');
   });
 
   it('公开资产只能解析到受控目录下的安全资源', () => {
