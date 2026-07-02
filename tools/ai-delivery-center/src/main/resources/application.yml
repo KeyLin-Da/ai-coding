@@ -1,0 +1,77 @@
+server:
+  port: ${AI_DELIVERY_CENTER_PORT:8728}
+
+spring:
+  application:
+    name: ai-delivery-center
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: ${AI_DELIVERY_CENTER_DATASOURCE_URL:jdbc:mysql://127.0.0.1:3306/ai_delivery_center?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai}
+    username: ${AI_DELIVERY_CENTER_DATASOURCE_USERNAME:root}
+    password: ${AI_DELIVERY_CENTER_DATASOURCE_PASSWORD:12345678}
+  flyway:
+    enabled: ${AI_DELIVERY_CENTER_FLYWAY_ENABLED:false}
+    baseline-on-migrate: ${AI_DELIVERY_CENTER_FLYWAY_BASELINE_ON_MIGRATE:true}
+    baseline-version: ${AI_DELIVERY_CENTER_FLYWAY_BASELINE_VERSION:0}
+    locations: classpath:db/migration
+  redis:
+    host: ${AI_DELIVERY_CENTER_REDIS_HOST:127.0.0.1}
+    port: ${AI_DELIVERY_CENTER_REDIS_PORT:6379}
+    password: ${AI_DELIVERY_CENTER_REDIS_PASSWORD:}
+    database: ${AI_DELIVERY_CENTER_REDIS_DATABASE:0}
+  cloud:
+    nacos:
+      config:
+        enabled: ${AI_DELIVERY_CENTER_NACOS_CONFIG_ENABLED:false}
+        server-addr: ${AI_DELIVERY_CENTER_NACOS_SERVER_ADDR:127.0.0.1:8848}
+        namespace: ${AI_DELIVERY_CENTER_NACOS_NAMESPACE:}
+        group: ${AI_DELIVERY_CENTER_NACOS_GROUP:DEFAULT_GROUP}
+      discovery:
+        enabled: ${AI_DELIVERY_CENTER_NACOS_DISCOVERY_ENABLED:false}
+        server-addr: ${AI_DELIVERY_CENTER_NACOS_SERVER_ADDR:127.0.0.1:8848}
+        namespace: ${AI_DELIVERY_CENTER_NACOS_NAMESPACE:}
+
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+ai-delivery:
+  center:
+    redis:
+      key-prefix: ${AI_DELIVERY_CENTER_REDIS_KEY_PREFIX:ai-delivery}
+    job:
+      lease-ttl: ${AI_DELIVERY_CENTER_JOB_LEASE_TTL:60s}
+      heartbeat-interval: ${AI_DELIVERY_CENTER_JOB_HEARTBEAT_INTERVAL:20s}
+      max-retry-times: ${AI_DELIVERY_CENTER_JOB_MAX_RETRY_TIMES:3}
+    event:
+      retained-window: ${AI_DELIVERY_CENTER_EVENT_RETAINED_WINDOW:7d}
+      page-size: ${AI_DELIVERY_CENTER_EVENT_PAGE_SIZE:500}
+    websocket:
+      endpoint: ${AI_DELIVERY_CENTER_WEBSOCKET_ENDPOINT:/api/ai-delivery/ws}
+      ticket-ttl: ${AI_DELIVERY_CENTER_WEBSOCKET_TICKET_TTL:2m}
+      heartbeat-interval: ${AI_DELIVERY_CENTER_WEBSOCKET_HEARTBEAT_INTERVAL:20s}
+      session-idle-timeout: ${AI_DELIVERY_CENTER_WEBSOCKET_SESSION_IDLE_TIMEOUT:90s}
+      broker: ${AI_DELIVERY_CENTER_WEBSOCKET_BROKER:local}
+      redis-channel-prefix: ${AI_DELIVERY_CENTER_WEBSOCKET_REDIS_CHANNEL_PREFIX:ai-delivery:ws-events}
+      redis-required: ${AI_DELIVERY_CENTER_WEBSOCKET_REDIS_REQUIRED:false}
+    bootstrap-import:
+      max-file-size: ${AI_DELIVERY_CENTER_IMPORT_MAX_FILE_SIZE:104857600}
+      manifest-retention-days: ${AI_DELIVERY_CENTER_IMPORT_MANIFEST_RETENTION_DAYS:30}
+    preflight:
+      object-storage-test-enabled: ${AI_DELIVERY_CENTER_PREFLIGHT_OBJECT_STORAGE_TEST_ENABLED:true}
+    security:
+      jwt-issuer: ${AI_DELIVERY_CENTER_JWT_ISSUER:ai-delivery-center}
+      jwt-secret: ${AI_DELIVERY_CENTER_JWT_SECRET:change-me}
+      access-token-ttl: ${AI_DELIVERY_CENTER_ACCESS_TOKEN_TTL:8h}

@@ -5,6 +5,8 @@ import type { RequirementWorkflow } from '../../shared/workflow';
 import { createEmptyStages } from '../../shared/workflow';
 import RequirementList from '../../src/views/RequirementList.vue';
 import { apiClient } from '@/api/client';
+import { useSettingsStore } from '@/stores/settings';
+import { useProjectStore } from '@/stores/project';
 import { ElMessage } from 'element-plus';
 
 const routerPush = vi.fn();
@@ -20,7 +22,8 @@ vi.mock('@/api/client', () => ({
     listRequirements: vi.fn(),
     listProjectHistory: vi.fn(),
     listProjects: vi.fn(),
-    createRequirement: vi.fn()
+    createRequirement: vi.fn(),
+    listProjectTokenUsageSummaries: vi.fn()
   }
 }));
 
@@ -87,6 +90,9 @@ function componentStubs() {
       props: ['label', 'value'],
       template: '<option :value="value">{{ label }}</option>'
     },
+    ElOptionGroup: {
+      template: '<optgroup><slot /></optgroup>'
+    },
     ElRadioButton: {
       props: ['value'],
       template: '<button type="button" :value="value"><slot /></button>'
@@ -113,6 +119,15 @@ function componentStubs() {
 async function mountList(current: RequirementWorkflow | RequirementWorkflow[] = workflow()) {
   const pinia = createPinia();
   setActivePinia(pinia);
+  const settings = useSettingsStore();
+  settings.desktopConfig = {
+    ...settings.desktopConfig,
+    centerBaseUrl: 'http://127.0.0.1:8728',
+    userId: '1',
+    projectId: '10',
+    clientSessionId: '100'
+  };
+  settings.projectPaths = ['opp-api', 'opp-diy'];
   const workflows = Array.isArray(current) ? current : [current];
   vi.mocked(apiClient.listRequirements).mockResolvedValue(workflows);
   vi.mocked(apiClient.listProjectHistory).mockResolvedValue([
@@ -150,6 +165,7 @@ async function mountList(current: RequirementWorkflow | RequirementWorkflow[] = 
       }
     ]
   });
+  vi.mocked(apiClient.listProjectTokenUsageSummaries).mockResolvedValue([]);
 
   const wrapper = mount(RequirementList, {
     global: {
@@ -185,6 +201,7 @@ describe('RequirementList', () => {
 
     await titleInput.setValue('新标题');
     await branchInput.setValue('feature/opp-172014-edit');
+    (wrapper.vm as any).selectedProjectPaths = ['opp-api', 'opp-diy'];
     await (wrapper.vm as any).submit();
 
     expect(apiClient.createRequirement).toHaveBeenCalledWith(
@@ -192,7 +209,10 @@ describe('RequirementList', () => {
         requirementId: '172014',
         title: '新标题',
         branchName: 'feature/opp-172014-edit',
-        projects: [{ name: 'opp-api', path: 'opp-api' }]
+        projects: [
+          { name: 'opp-api', path: 'opp-api' },
+          { name: 'opp-diy', path: 'opp-diy' }
+        ]
       })
     );
     expect(routerPush).not.toHaveBeenCalled();
@@ -239,6 +259,53 @@ describe('RequirementList', () => {
     expect(vm.stageText('SKIPPED')).toBe('已跳过');
     expect(vm.recentRunText(current.runs[0])).toBe('代码评审（成功）');
     expect(vm.recentRunText()).toBe('暂无');
+  });
+
+  it('展示需求累计 token 和最近一次 token 用量', async () => {
+    const current = {
+      ...workflow(),
+      id: 100
+    };
+    const wrapper = await mountList(current);
+    const projectStore = useProjectStore();
+    projectStore.current = {
+      id: 10,
+      name: 'AI Delivery',
+      code: 'AI',
+      status: 'ACTIVE',
+      role: 'OWNER'
+    };
+    vi.mocked(apiClient.listProjectTokenUsageSummaries).mockResolvedValue([
+      {
+        requirementPk: 100,
+        summary: {
+          totalTokens: 61129,
+          inputTokens: 60835,
+          cachedInputTokens: 32512,
+          outputTokens: 294,
+          reasoningOutputTokens: 171,
+          runCount: 1,
+          detailCount: 1
+        },
+        latestRunSummary: {
+          runId: 700,
+          totalTokens: 61129,
+          inputTokens: 60835,
+          cachedInputTokens: 32512,
+          outputTokens: 294,
+          reasoningOutputTokens: 171,
+          runCount: 1,
+          detailCount: 1
+        },
+        stageSummaries: [],
+        agentSummaries: []
+      }
+    ]);
+
+    await (wrapper.vm as any).loadTokenUsageSummaries();
+
+    expect((wrapper.vm as any).tokenUsageFor(current).summary.totalTokens).toBe(61129);
+    expect((wrapper.vm as any).formatTokenCount(61129)).toBe('61.1K');
   });
 
   it('支持按标题或需求号、需求类型、阶段和涉及工程过滤并清空', async () => {

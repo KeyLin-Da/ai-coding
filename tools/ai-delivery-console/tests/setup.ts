@@ -4,6 +4,9 @@ config.global.stubs = {
   ElButton: {
     template: '<button><slot /></button>'
   },
+  ElCheckbox: {
+    template: '<label><input type="checkbox" @change="$emit(\'change\', $event.target.checked)" /><slot /></label>'
+  },
   ElDialog: {
     template: '<div><slot name="header" /><slot /></div>'
   },

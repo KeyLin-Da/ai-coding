@@ -5,8 +5,18 @@
         <strong>需求工作流</strong>
         <p class="muted">按需求号聚合 PRD、技术方案、OpenSpec、单测和代码评审。</p>
       </div>
-      <el-button type="primary" :icon="Plus" @click="openCreateDialog">创建/导入</el-button>
+      <div class="toolbar-actions">
+        <el-tag size="small" :type="realtimeStatusType" effect="plain">{{ realtimeStatusText }}</el-tag>
+        <el-button type="primary" :icon="Plus" @click="openCreateDialog">创建/导入</el-button>
+      </div>
     </div>
+    <el-alert
+      v-if="repoReadinessMessage"
+      :type="repoReadinessType"
+      show-icon
+      :title="repoReadinessMessage"
+      class="repo-readiness-alert"
+    />
 
     <div class="filter-panel" aria-label="需求筛选">
       <el-input
@@ -39,26 +49,24 @@
     <el-table :data="pagedRequirements" v-loading="store.loading" style="width: 100%">
       <el-table-column prop="requirementId" label="需求号" width="140" />
       <el-table-column prop="title" label="标题" min-width="220" />
-      <el-table-column prop="requirementType" label="需求类型" min-width="140" >
+      <el-table-column prop="requirementType" label="需求类型" min-width="140">
         <template #default="{ row }">
-            <el-tag :class="stageTagClass(row.requirementType)" effect="plain">{{ stageRequirementType(row.requirementType) }}</el-tag>
-         </template>
+          <el-tag :class="stageTagClass(row.requirementType)" effect="plain">{{ stageRequirementType(row.requirementType) }}</el-tag>
+        </template>
       </el-table-column>
       <el-table-column prop="branchName" label="分支" min-width="180" />
       <el-table-column label="涉及工程" min-width="220">
         <template #default="{ row }">
           <div v-if="row.projects?.length" class="project-tags">
-            <el-tooltip
+            <el-tag
               v-for="project in row.projects"
-              :key="project.path"
-              :content="project.path"
-              placement="top"
-              :show-after="300"
+              :key="project.name"
+              class="project-tag"
+              size="small"
+              effect="plain"
             >
-              <el-tag class="project-tag" size="small" effect="plain">
-                {{ projectDisplayName(project) }}
-              </el-tag>
-            </el-tooltip>
+              {{ projectDisplayName(project) }}
+            </el-tag>
           </div>
           <span v-else class="muted">未配置</span>
         </template>
@@ -73,9 +81,27 @@
           <span :class="{ muted: !row.runs[0] }">{{ recentRunText(row.runs[0]) }}</span>
         </template>
       </el-table-column>
+      <el-table-column label="Token" min-width="130">
+        <template #default="{ row }">
+          <div class="token-cell" :class="{ empty: !tokenUsageFor(row).summary.detailCount }">
+            <strong>{{ tokenUsageFor(row).summary.detailCount ? formatTokenCount(tokenUsageFor(row).summary.totalTokens) : '暂无' }}</strong>
+            <small v-if="tokenUsageFor(row).latestRunSummary.detailCount">最近 {{ formatTokenCount(tokenUsageFor(row).latestRunSummary.totalTokens) }}</small>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column label="协作" min-width="180">
+        <template #default="{ row }">
+          <div class="collaboration-tags">
+            <el-tag v-if="row.onlineClientCount !== undefined" size="small" type="success" effect="plain">在线 {{ row.onlineClientCount }}</el-tag>
+            <el-tag v-if="row.pendingReviewCount !== undefined" size="small" type="warning" effect="plain">待审 {{ row.pendingReviewCount }}</el-tag>
+            <el-tag v-if="row.jobStatus" size="small" type="info" effect="plain">{{ row.jobStatus }}</el-tag>
+            <span v-if="row.onlineClientCount === undefined && row.pendingReviewCount === undefined && !row.jobStatus" class="muted">-</span>
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column label="操作" width="190" fixed="right">
         <template #default="{ row }">
-          <el-button :icon="View" size="small" @click="openDetail(row.requirementId)">查看</el-button>
+          <el-button :icon="View" size="small" :loading="openingRequirementId === row.requirementId" @click="openDetail(row.requirementId)">查看</el-button>
           <el-button :icon="Edit" size="small" @click="openEditDialog(row)">编辑</el-button>
         </template>
       </el-table-column>
@@ -123,14 +149,21 @@
             placeholder="选择工程（从已配置的工程目录下读取）"
             style="width: 100%"
           >
-            <el-option v-for="project in projectHistory" :key="project.path" :label="project.name" :value="project.path" />
+            <el-option-group
+              v-for="group in workspaceSubdirs"
+              :key="group.parentPath"
+              :label="group.parentName"
+            >
+              <el-option v-for="dir in group.children" :key="dir.path" :label="dir.name" :value="dir.path" />
+            </el-option-group>
+            <el-option v-for="project in projectHistoryWithoutSubdirs" :key="project.path" :label="project.name" :value="project.path" />
           </el-select>
         </div>
       </el-form-item>
     </el-form>
     <template #footer>
       <el-button @click="dialogVisible = false">取消</el-button>
-      <el-button type="primary" :icon="DocumentAdd" @click="submit">保存</el-button>
+      <el-button type="primary" :icon="DocumentAdd" :loading="savingRequirement" @click="submit">保存</el-button>
     </template>
   </el-dialog>
 </template>
@@ -140,12 +173,18 @@ import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { DocumentAdd, Edit, Plus, Search, View } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
-import type { RequirementInput, RequirementType, RequirementWorkflow, RunRecord, WorkflowProject } from '@shared/workflow';
+import type { RequirementInput, RequirementTokenUsageSummary, RequirementType, RequirementWorkflow, RunRecord, WorkflowProject } from '@shared/workflow';
+import { emptyRequirementTokenUsage } from '@shared/workflow';
 import { actionTypeLabels, defaultBranchName, requirementTypeLabels, shouldSyncBranchName, stageLabels, statusLabels } from '@shared/workflow';
 import { useWorkflowStore } from '@/stores/workflow';
-import { apiClient } from '@/api/client';
+import { useProjectStore } from '@/stores/project';
+import { useSettingsStore } from '@/stores/settings';
+import { apiClient, type ProjectRepoStateVO, type ProjectRepoSyncStatus } from '@/api/client';
+import type { Subdirectory } from '@/services/desktop-local-config';
 
 const store = useWorkflowStore();
+const projectStore = useProjectStore();
+const settings = useSettingsStore();
 const router = useRouter();
 const dialogVisible = ref(false);
 const form = reactive<RequirementInput>({
@@ -158,7 +197,12 @@ const lastAutoBranchName = ref('');
 const branchNameEdited = ref(false);
 const selectedProjectPaths = ref<string[]>([]);
 const projectHistory = ref<WorkflowProject[]>([]);
+const workspaceSubdirs = ref<{ parentName: string; parentPath: string; children: Subdirectory[] }[]>([]);
 const editingWorkflow = ref<RequirementWorkflow>();
+const savingRequirement = ref(false);
+const openingRequirementId = ref('');
+const projectRepoState = ref<ProjectRepoStateVO | undefined>();
+const tokenUsageByRequirement = ref<Map<string, RequirementTokenUsageSummary>>(new Map());
 const isEditingWorkflow = computed(() => Boolean(editingWorkflow.value));
 const dialogTitle = computed(() => (isEditingWorkflow.value ? '编辑需求' : '创建或导入需求'));
 const filters = reactive<{
@@ -175,6 +219,24 @@ const filters = reactive<{
 const currentPage = ref(1);
 const pageSize = ref(10);
 const pageSizeOptions = [10, 20, 50, 100];
+const realtimeStatusText = computed(() => {
+  const text: Record<typeof store.realtimeStatus, string> = {
+    CONNECTING: '实时连接中',
+    CONNECTED: '实时已连接',
+    DISCONNECTED: '实时未连接',
+    ERROR: '实时异常'
+  };
+  return text[store.realtimeStatus];
+});
+const realtimeStatusType = computed(() => {
+  const type: Record<typeof store.realtimeStatus, 'success' | 'info' | 'warning' | 'danger'> = {
+    CONNECTING: 'warning',
+    CONNECTED: 'success',
+    DISCONNECTED: 'info',
+    ERROR: 'danger'
+  };
+  return type[store.realtimeStatus];
+});
 const requirementTypeOptions = computed(() =>
   (Object.keys(requirementTypeLabels) as RequirementType[]).map((value) => ({
     value,
@@ -195,12 +257,9 @@ const projectFilterOptions = computed(() => {
   const options = new Map<string, { label: string; value: string }>();
   for (const workflow of store.requirements) {
     for (const project of workflow.projects || []) {
-      const value = project.path.trim();
+      const value = projectDisplayName(project);
       if (value && !options.has(value)) {
-        options.set(value, {
-          value,
-          label: projectDisplayName(project)
-        });
+        options.set(value, { value, label: value });
       }
     }
   }
@@ -224,7 +283,7 @@ const filteredRequirements = computed(() => {
     if (filters.stage && workflow.currentStage !== filters.stage) {
       return false;
     }
-    if (selectedProjectPaths.size > 0 && !(workflow.projects || []).some((project) => selectedProjectPaths.has(project.path))) {
+    if (selectedProjectPaths.size > 0 && !(workflow.projects || []).some((project) => selectedProjectPaths.has(projectDisplayName(project)))) {
       return false;
     }
     return true;
@@ -244,6 +303,20 @@ const pageCount = computed(() => Math.max(1, Math.ceil(filteredRequirements.valu
 const pagedRequirements = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value;
   return filteredRequirements.value.slice(start, start + pageSize.value);
+});
+const repoReadinessMessage = computed(() => {
+  const status = projectRepoState.value?.syncStatus;
+  if (!status || status === 'READY' || status === 'PUSHED') {
+    return '';
+  }
+  return repoStatusText(status);
+});
+const repoReadinessType = computed<'success' | 'info' | 'warning' | 'error'>(() => {
+  const status = projectRepoState.value?.syncStatus;
+  if (status === 'CONFLICTING' || status === 'FAILED') {
+    return 'error';
+  }
+  return 'warning';
 });
 
 const branchNamePreview = computed(() => {
@@ -296,7 +369,7 @@ function projectDisplayName(project: WorkflowProject) {
   if (name && !name.includes('/') && !name.includes('\\')) {
     return name;
   }
-  return pathBasename(name || project.path);
+  return pathBasename(name || project.path || '');
 }
 
 function recentRunText(run?: RunRecord) {
@@ -306,6 +379,35 @@ function recentRunText(run?: RunRecord) {
   const actionText = actionTypeLabels[run.actionType] || run.actionType;
   const statusText = statusLabels[run.status] || run.status;
   return `${actionText}（${statusText}）`;
+}
+
+function tokenUsageFor(workflow: RequirementWorkflow) {
+  return tokenUsageByRequirement.value.get(String(workflow.id || '')) || emptyRequirementTokenUsage(workflow.id);
+}
+
+function formatTokenCount(value?: number) {
+  const count = value || 0;
+  if (count >= 1000000) {
+    return `${(count / 1000000).toFixed(1)}M`;
+  }
+  if (count >= 1000) {
+    return `${(count / 1000).toFixed(1)}K`;
+  }
+  return String(count);
+}
+
+function repoStatusText(status: ProjectRepoSyncStatus): string {
+  const labels: Record<ProjectRepoSyncStatus, string> = {
+    NOT_CLONED: '项目产物仓尚未 clone，请先到个人中心初始化后再推进需求流程',
+    READY: '项目产物仓已就绪',
+    BEHIND_REMOTE: '本地项目产物仓落后远端，请先拉取最新提交',
+    DIRTY: '项目产物仓存在未同步变更，继续操作前建议先公开同步或清理',
+    CONFLICTING: '项目产物仓存在冲突，请先处理后再继续',
+    PUSHING: '项目产物仓正在推送，请稍后再操作',
+    PUSHED: '项目产物仓已推送',
+    FAILED: '项目产物仓状态检查失败，请在个人中心重新检查'
+  };
+  return labels[status] || status;
 }
 
 function clearFilters() {
@@ -339,8 +441,71 @@ watch(pageSize, resetPagination);
 watch([() => filteredRequirements.value.length, pageSize], clampCurrentPage);
 
 async function loadProjectHistory() {
-  // Load projects from configured projectPaths instead of saved history
-  projectHistory.value = await apiClient.listProjects();
+  await projectStore.loadWorkspaceMappings();
+  projectHistory.value = projectStore.workspaceMappings.map((mapping) => ({
+    name: mapping.displayName || pathBasename(mapping.localPath),
+    path: mapping.localPath
+  }));
+  await loadWorkspaceSubdirs();
+}
+
+async function loadRepoReadiness() {
+  if (!projectStore.current?.id) {
+    projectRepoState.value = undefined;
+    return;
+  }
+  try {
+    await settings.requireClientSessionId();
+    projectRepoState.value = await apiClient.getProjectRepositoryStatus(projectStore.current.id);
+  } catch {
+    projectRepoState.value = undefined;
+  }
+}
+
+async function loadTokenUsageSummaries() {
+  if (!projectStore.current?.id) {
+    tokenUsageByRequirement.value = new Map();
+    return;
+  }
+  try {
+    const items = await apiClient.listProjectTokenUsageSummaries(projectStore.current.id);
+    tokenUsageByRequirement.value = new Map(items.map((item) => [String(item.requirementPk || ''), item]));
+  } catch {
+    tokenUsageByRequirement.value = new Map();
+  }
+}
+
+const projectHistoryWithoutSubdirs = computed(() =>
+  projectHistory.value.filter((project) => !workspaceSubdirs.value.some((group) => group.parentPath === project.path))
+);
+
+async function loadWorkspaceSubdirs() {
+  const listSubdirs = window.aiDeliveryDesktop?.listSubdirectories;
+  if (!listSubdirs) {
+    workspaceSubdirs.value = [];
+    return;
+  }
+  const results = await Promise.all(
+    projectHistory.value.map(async (mapping) => {
+      try {
+        const children = await listSubdirs(mapping.path);
+        return { parentName: mapping.name, parentPath: mapping.path, children };
+      } catch {
+        return { parentName: mapping.name, parentPath: mapping.path, children: [] as Subdirectory[] };
+      }
+    })
+  );
+  workspaceSubdirs.value = results.filter((group) => group.children.length > 0);
+}
+
+function resolveProjectPaths(names: string[]): string[] {
+  const nameToPath = new Map<string, string>();
+  for (const group of workspaceSubdirs.value) {
+    for (const child of group.children) {
+      nameToPath.set(child.name, child.path);
+    }
+  }
+  return names.map((name) => nameToPath.get(name) || name);
 }
 
 function openCreateDialog() {
@@ -363,7 +528,7 @@ function openEditDialog(workflow: RequirementWorkflow) {
   form.title = workflow.title;
   form.requirementType = workflow.requirementType || 'REQUIREMENT';
   form.branchName = workflow.branchName || defaultBranchName(workflow.requirementId, form.requirementType);
-  selectedProjectPaths.value = (workflow.projects || []).map((project) => project.path);
+  selectedProjectPaths.value = resolveProjectPaths((workflow.projects || []).map((project) => project.name));
   branchNameEdited.value = true;
   lastAutoBranchName.value = defaultBranchName(workflow.requirementId, form.requirementType);
   void loadProjectHistory();
@@ -395,29 +560,45 @@ async function submit() {
     ElMessage.warning('请填写分支名');
     return;
   }
-  const workflow = await store.createRequirement({
-    requirementId,
-    title,
-    requirementType,
-    branchName,
-    projects: selectedProjects()
-  });
-  dialogVisible.value = false;
-  await loadProjectHistory();
-  if (isEditingWorkflow.value) {
-    editingWorkflow.value = undefined;
-    ElMessage.success('需求信息已保存');
-    return;
+  savingRequirement.value = true;
+  try {
+    const workflow = await store.createRequirement({
+      requirementId,
+      title,
+      requirementType,
+      branchName,
+      projects: selectedProjects()
+    });
+    dialogVisible.value = false;
+    await loadProjectHistory();
+    if (isEditingWorkflow.value) {
+      editingWorkflow.value = undefined;
+      ElMessage.success('需求信息已保存');
+      return;
+    }
+    router.push(`/requirements/${workflow.requirementId}`);
+  } catch (error: any) {
+    ElMessage.error(error.message || '需求保存失败');
+  } finally {
+    savingRequirement.value = false;
   }
-  router.push(`/requirements/${workflow.requirementId}`);
 }
 
-function openDetail(requirementId: string) {
-  router.push(`/requirements/${requirementId}`);
+async function openDetail(requirementId: string) {
+  openingRequirementId.value = requirementId;
+  try {
+    await store.loadRequirement(requirementId);
+    router.push(`/requirements/${requirementId}`);
+  } catch (error: any) {
+    ElMessage.warning(error.message || '无法进入需求详情，请先同步 Git 仓');
+  } finally {
+    openingRequirementId.value = '';
+  }
 }
 
 onMounted(async () => {
-  await Promise.all([store.loadRequirements(), loadProjectHistory()]);
+  await Promise.all([store.loadRequirements(), loadProjectHistory(), loadRepoReadiness()]);
+  await loadTokenUsageSummaries();
 });
 </script>
 
@@ -431,6 +612,27 @@ onMounted(async () => {
   border-top: 1px solid #e5e7eb;
   border-bottom: 1px solid #eef2f7;
   background: linear-gradient(180deg, #fbfdff 0%, #f8fafc 100%);
+}
+
+.repo-readiness-alert {
+  margin: 0 16px 12px;
+}
+
+.token-cell {
+  display: grid;
+  gap: 2px;
+  line-height: 18px;
+}
+
+.token-cell strong {
+  color: #172033;
+  font-weight: 650;
+}
+
+.token-cell small,
+.token-cell.empty strong {
+  color: #94a3b8;
+  font-weight: 400;
 }
 
 .filter-control {
@@ -512,6 +714,13 @@ onMounted(async () => {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.collaboration-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
 }
 
 .project-tag {

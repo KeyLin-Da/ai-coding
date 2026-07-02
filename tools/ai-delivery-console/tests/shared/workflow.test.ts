@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  areAllImplementationStepsApproved,
   createEmptyImplementationSteps,
   defaultBranchName,
   ensureImplementationSteps,
@@ -70,5 +71,31 @@ describe('workflow helpers', () => {
     });
 
     expect(Object.keys(steps)).toEqual(['START_CHANGE', 'ARTIFACT_REVIEW', 'APPLY', 'CHANGE_INSPECTION']);
+  });
+
+  it('判定实施验证子步骤全部通过时只认可四个新流程步骤均为 APPROVED', () => {
+    expect(areAllImplementationStepsApproved()).toBe(false);
+    expect(
+      areAllImplementationStepsApproved({
+        START_CHANGE: { status: 'APPROVED' },
+        ARTIFACT_REVIEW: { status: 'APPROVED' }
+      })
+    ).toBe(false);
+    expect(
+      areAllImplementationStepsApproved({
+        START_CHANGE: { status: 'APPROVED' },
+        ARTIFACT_REVIEW: { status: 'APPROVED' },
+        APPLY: { status: 'APPROVED' },
+        CHANGE_INSPECTION: { status: 'APPROVED' }
+      })
+    ).toBe(true);
+    expect(
+      areAllImplementationStepsApproved({
+        START_CHANGE: { status: 'APPROVED' },
+        ARTIFACT_REVIEW: { status: 'APPROVED' },
+        APPLY: { status: 'APPROVED' },
+        CHANGE_INSPECTION: { status: 'RISK_ACCEPTED' }
+      })
+    ).toBe(false);
   });
 });

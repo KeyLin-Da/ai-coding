@@ -1,0 +1,22 @@
+CREATE TABLE IF NOT EXISTS ad_requirement_workspace_state (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    project_id BIGINT NOT NULL COMMENT '项目ID，关联 ad_project.id',
+    requirement_pk BIGINT NOT NULL COMMENT '需求主键ID，关联 ad_requirement.id',
+    user_id BIGINT NOT NULL COMMENT '用户ID，关联 ad_user.id',
+    client_session_id BIGINT NOT NULL COMMENT '桌面客户端会话ID，关联 ad_client_session.id',
+    status VARCHAR(32) NOT NULL DEFAULT 'CLEAN' COMMENT '需求本地工作区状态：CLEAN、EDITING、DIRTY、SYNCING、EXPIRED',
+    dirty_file_count INT NOT NULL DEFAULT 0 COMMENT '未提交文件数量',
+    dirty_paths_sample VARCHAR(2000) NULL COMMENT '未提交文件路径样例，JSON数组字符串',
+    head_commit CHAR(40) NULL COMMENT '上报时本地HEAD提交',
+    remote_commit CHAR(40) NULL COMMENT '上报时远端默认分支提交',
+    first_dirty_at DATETIME NULL COMMENT '首次进入未提交状态时间',
+    last_reported_at DATETIME NULL COMMENT '最近上报时间',
+    expire_at DATETIME NULL COMMENT '状态过期时间',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除标记：0未删除，1已删除',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_requirement_user_client (requirement_pk, user_id, client_session_id),
+    KEY idx_project_status (project_id, status, expire_at),
+    KEY idx_requirement_status (requirement_pk, status, expire_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI交付需求级本地工作区未提交状态表';

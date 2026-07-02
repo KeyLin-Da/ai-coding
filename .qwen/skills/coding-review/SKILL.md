@@ -44,6 +44,7 @@ docs/{需求编号}/code-review/
 ├── commit/
 │   ├── .checkpoint.json               # 仅 commit 模式维护
 │   ├── summary.md                     # 正式评审汇总，作为合并判定依据
+│   ├── code_review_result_all.md      # 正式评审最新的评审结果
 │   └── {时间戳}/
 │       ├── diff_index.md
 │       ├── commit_diff_{工程名}.md
@@ -51,6 +52,7 @@ docs/{需求编号}/code-review/
 │       └── pr_split_suggestion.md
 └── staged/
     ├── summary.md                     # 暂存区预审汇总，不作为正式合并判定
+    ├── code_review_result_all.md      # 暂存区预审最新的评审结果
     └── {时间戳}/
         ├── diff_index.md
         ├── staged_diff_{工程名}.md

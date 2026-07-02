@@ -4,14 +4,18 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { WorkflowRepository } from '../../server/services/workflow-repository';
 import { readProjectHistory } from '../../server/services/project-history';
-import { saveSettings } from '../../server/services/project-settings';
+import {
+  getConsoleStateDir,
+  getLegacyHashedWorkflowRuntimeStatePath,
+  getWorkflowRuntimeStatePath
+} from '../../server/services/runtime-paths';
 
 async function tmpWorkspace() {
   return fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-repo-'));
 }
 
 describe('WorkflowRepository', () => {
-  it('创建 workflow 并用 state.json 持久化', async () => {
+  it('创建 workflow 并将 state.json 持久化到 Runner runtime', async () => {
     const workspace = await tmpWorkspace();
     const repository = new WorkflowRepository(workspace);
     const workflow = await repository.upsert({ requirementId: 'REQ/172014', title: '定位菜单', requirementType: 'REQUIREMENT' });
@@ -23,7 +27,28 @@ describe('WorkflowRepository', () => {
     expect(loaded?.title).toBe('定位菜单');
     expect(loaded?.implementationSteps?.START_CHANGE.status).toBe('DRAFT');
     expect(loaded?.implementationSteps?.ARTIFACT_REVIEW.status).toBe('NOT_STARTED');
-    expect(await fs.stat(path.join(workspace, 'docs', 'REQ_172014', 'workflow', 'state.json'))).toBeTruthy();
+    await expect(fs.stat(getWorkflowRuntimeStatePath(workspace, 'REQ_172014'))).resolves.toBeTruthy();
+    await expect(fs.stat(path.join(workspace, 'docs', 'REQ_172014', 'workflow', 'state.json'))).rejects.toThrow();
+  });
+
+  it('兼容读取旧哈希运行目录并将后续保存写入项目 code 目录', async () => {
+    const workspace = await tmpWorkspace();
+    const repository = new WorkflowRepository(workspace);
+    await repository.upsert({ requirementId: '172014', title: '旧哈希目录需求' });
+    const currentPath = getWorkflowRuntimeStatePath(workspace, '172014');
+    const legacyPath = getLegacyHashedWorkflowRuntimeStatePath(workspace, '172014');
+    await fs.mkdir(path.dirname(legacyPath), { recursive: true });
+    await fs.rename(currentPath, legacyPath);
+
+    const loaded = await repository.load('172014');
+    expect(loaded?.title).toBe('旧哈希目录需求');
+    expect((await repository.list()).map((item) => item.requirementId)).toContain('172014');
+    if (!loaded) {
+      throw new Error('expected legacy workflow');
+    }
+    await repository.save(loaded);
+
+    await expect(fs.stat(currentPath)).resolves.toBeTruthy();
   });
 
   it('缺陷类型默认生成 bugfix 分支名', async () => {
@@ -82,8 +107,9 @@ describe('WorkflowRepository', () => {
     });
 
     expect(workflow.projects).toEqual([{ name: 'opp-gateway', path: 'opp-gateway' }]);
-    const history = JSON.parse(await fs.readFile(path.join(workspace, 'docs', '.ai-delivery-console', 'project-history.json'), 'utf8'));
+    const history = JSON.parse(await fs.readFile(path.join(getConsoleStateDir(workspace), 'project-history.json'), 'utf8'));
     expect(history.projects[0].path).toBe('opp-gateway');
+    await expect(fs.stat(path.join(workspace, 'docs', '.ai-delivery-console', 'project-history.json'))).rejects.toThrow();
   });
 
   it('读取工程历史时快照工作区顶层 Git 工程', async () => {
@@ -95,8 +121,22 @@ describe('WorkflowRepository', () => {
     const history = await readProjectHistory(workspace);
 
     expect(history.map((project) => project.path)).toEqual(['opp-gateway', 'opp-learn']);
-    const stored = JSON.parse(await fs.readFile(path.join(workspace, 'docs', '.ai-delivery-console', 'project-history.json'), 'utf8'));
+    const stored = JSON.parse(await fs.readFile(path.join(getConsoleStateDir(workspace), 'project-history.json'), 'utf8'));
     expect(stored.projects.map((project: { path: string }) => project.path)).toEqual(['opp-gateway', 'opp-learn']);
+    await expect(fs.stat(path.join(workspace, 'docs', '.ai-delivery-console', 'project-history.json'))).rejects.toThrow();
+  });
+
+  it('读取旧 docs 工程历史后迁移到工作区 .ai-delivery', async () => {
+    const workspace = await tmpWorkspace();
+    const legacyPath = path.join(workspace, 'docs', '.ai-delivery-console', 'project-history.json');
+    await fs.mkdir(path.dirname(legacyPath), { recursive: true });
+    await fs.writeFile(legacyPath, JSON.stringify({ projects: [{ name: 'opp-gateway', path: 'opp-gateway' }] }), 'utf8');
+
+    const history = await readProjectHistory(workspace);
+
+    expect(history).toEqual([{ name: 'opp-gateway', path: 'opp-gateway' }]);
+    await expect(fs.stat(legacyPath)).rejects.toThrow();
+    await expect(fs.stat(path.join(getConsoleStateDir(workspace), 'project-history.json'))).resolves.toBeTruthy();
   });
 
   it('拒绝工作区外的涉及工程', async () => {
@@ -116,14 +156,13 @@ describe('WorkflowRepository', () => {
     const workspace = await tmpWorkspace();
     const projectParent = await tmpWorkspace();
     await fs.mkdir(path.join(projectParent, 'opp-api'), { recursive: true });
-    await saveSettings(workspace, { projectPaths: [projectParent] });
     const repository = new WorkflowRepository(workspace);
 
     const workflow = await repository.upsert({
       requirementId: '172014',
       title: '定位菜单',
       projects: [{ name: 'opp-api', path: 'opp-api' }]
-    });
+    }, [projectParent]);
 
     expect(workflow.projects).toEqual([{ name: 'opp-api', path: path.join(projectParent, 'opp-api') }]);
   });

@@ -6,11 +6,23 @@
         <p class="muted">{{ artifactPath || '尚未关联产物' }}</p>
       </div>
       <div>
-        <el-button :disabled="!artifactPath" :icon="View" @click="load">读取</el-button>
+        <el-button :disabled="!artifactPath" :icon="View" :loading="loading" @click="load">读取</el-button>
         <el-button :disabled="!artifactPath || !content" :icon="Download" @click="download">下载</el-button>
-        <el-button type="primary" :disabled="!artifactPath" :icon="DocumentChecked" @click="save">保存</el-button>
+        <el-button type="primary" :disabled="!artifactPath" :icon="DocumentChecked" :loading="saving" @click="save">保存</el-button>
       </div>
     </div>
+    <el-alert
+      v-if="conflictMessage"
+      class="conflict-alert"
+      type="warning"
+      show-icon
+      :closable="false"
+      :title="conflictMessage"
+    >
+      <template #default>
+        <el-button size="small" @click="load">刷新版本</el-button>
+      </template>
+    </el-alert>
     <div class="editor-layout" style="padding: 12px">
       <div class="editor-panel">
         <el-input 
@@ -50,11 +62,13 @@ import MarkdownIt from 'markdown-it';
 import { DocumentChecked, Download, FullScreen, Minus, View } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { apiClient } from '@/api/client';
+import { artifactReadUrl, rewriteMarkdownImageSources } from '@/utils/markdown-assets';
 import mermaid from 'mermaid';
 
 const props = defineProps<{
   title: string;
   artifactPath?: string;
+  projectId: string | number;
 }>();
 
 const emit = defineEmits<{
@@ -88,27 +102,16 @@ const md = new MarkdownIt({ html: false, linkify: true, breaks: true });
 md.use(mermaidPlugin);
 const content = ref('');
 const expectedHash = ref<string | undefined>();
+const baseVersionId = ref<string | number | undefined>();
+const conflictMessage = ref('');
 const isFullscreen = ref(false);
 const isScrolling = ref(false);
+const loading = ref(false);
+const saving = ref(false);
 
 const previewHtml = computed(() => {
   const rendered = md.render(content.value || '');
-  // 处理图片路径，将相对路径转换为 API 访问路径
-  if (props.artifactPath) {
-    const basePath = props.artifactPath.substring(0, props.artifactPath.lastIndexOf('/'));
-    return rendered.replace(
-      /<img([^>]*)src="([^"]+)"([^>]*)>/g,
-      (match, before, src, after) => {
-        // 如果是相对路径，转换为 API 路径
-        if (!src.startsWith('http://') && !src.startsWith('https://') && !src.startsWith('data:')) {
-          const fullPath = `${basePath}/${src}`;
-          return `<img${before}src="/api/artifacts/read?path=${encodeURIComponent(fullPath)}"${after}>`;
-        }
-        return match;
-      }
-    );
-  }
-  return rendered;
+  return rewriteMarkdownImageSources(rendered, props.artifactPath, (assetPath) => artifactReadUrl(assetPath, props.projectId));
 });
 
 // 在 DOM 更新后渲染 mermaid 图表
@@ -178,22 +181,40 @@ async function load() {
   if (!props.artifactPath) {
     return;
   }
-  const result = await apiClient.readArtifact(props.artifactPath);
-  content.value = result.content;
-  expectedHash.value = result.artifact.hash;
+  loading.value = true;
+  try {
+    const result = await apiClient.readArtifact(props.artifactPath, props.projectId);
+    content.value = result.content;
+    expectedHash.value = result.artifact.hash;
+    baseVersionId.value = result.artifact.currentVersionId || result.artifact.versionId || result.artifact.hash;
+    conflictMessage.value = '';
+  } finally {
+    loading.value = false;
+  }
 }
 
 async function save() {
   if (!props.artifactPath) {
     return;
   }
+  saving.value = true;
   try {
-    const result = await apiClient.saveArtifact(props.artifactPath, content.value, expectedHash.value);
+    const result = await apiClient.saveArtifact(props.artifactPath, content.value, expectedHash.value, baseVersionId.value);
     expectedHash.value = result.artifact.hash;
+    baseVersionId.value = result.artifact.currentVersionId || result.artifact.versionId || result.artifact.hash;
+    conflictMessage.value = '';
     emit('saved');
     ElMessage.success('已保存');
   } catch (error: any) {
+    if (error.code === 'B70021') {
+      const currentVersionId = error.data?.currentVersionId || error.data?.currentVersion?.id;
+      conflictMessage.value = currentVersionId ? `当前产物已有新版本 ${currentVersionId}` : '当前产物已有新版本';
+      ElMessage.warning('保存冲突，请刷新后合并');
+      return;
+    }
     ElMessage.error(error.message || '保存失败');
+  } finally {
+    saving.value = false;
   }
 }
 
@@ -220,6 +241,8 @@ watch(
   () => {
     content.value = '';
     expectedHash.value = undefined;
+    baseVersionId.value = undefined;
+    conflictMessage.value = '';
     if (props.artifactPath) {
       load();
     }
@@ -235,6 +258,10 @@ watch(
   gap: 12px;
   align-items: stretch;
   min-height: 450px;
+}
+
+.conflict-alert {
+  margin: 0 12px 12px;
 }
 
 .editor-panel {

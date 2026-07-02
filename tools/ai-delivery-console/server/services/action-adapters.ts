@@ -1,13 +1,27 @@
+import fs from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import type { ActionInput, ExecutionMode, RunEvent, RunRecord, RunStatus } from '../../shared/workflow';
 import { implementationStepForAction, stageForAction } from '../../shared/workflow';
 import type { RequirementWorkflow } from '../../shared/workflow';
 import { createRunId, appendRunEvent } from './run-log';
 import { assertInsideWorkspace, normalizeRequirementId } from './workspace';
-import { getAgentProvider, startAgentInTerminal, startAgentProcess } from './agent-providers';
+import {
+  beginCenterJobLease,
+  finishCenterJobForRun,
+  getAgentProvider,
+  startAgentInTerminal,
+  startAgentProcess
+} from './agent-providers';
+import {
+  buildCenterJobCreatePayload,
+  claimCenterJob,
+  createCenterJob,
+  type CenterRunnerConfig
+} from './center-runner-adapter';
 import { normalizePrdClarification } from './workflow-repository';
-import { loadSettings } from './project-settings';
 import { hasStagedTrackedChanges, readGitChanges } from './git-changes';
+import { buildArtifactPublishEvents, captureControlledArtifactSnapshot } from './manual-artifact-sharing';
+import { resolveWorkspaceOrRuntimePath } from './runtime-paths';
 
 const cliActionMap: Partial<Record<ActionInput['actionType'], string[]>> = {
   OPENSPEC_STATUS: ['openspec', 'status'],
@@ -53,13 +67,47 @@ function prdDocumentPath(workflow: RequirementWorkflow, params: Record<string, u
   return artifactPath || workflow.stages.PRD.artifactPath || `docs/${workflow.requirementId}/prd/analysis.md`;
 }
 
+function defaultPrdAnalysisPath(workflow: RequirementWorkflow): string {
+  return `docs/${normalizeRequirementId(workflow.requirementId)}/prd/analysis.md`;
+}
+
+function validationError(message: string): Error {
+  const error = new Error(message) as Error & { code?: string };
+  error.code = 'VALIDATION_ERROR';
+  return error;
+}
+
+export async function assertPrdClarificationReady(workspaceRoot: string, workflow: RequirementWorkflow, action: ActionInput): Promise<void> {
+  if (action.actionType !== 'PRD_CLARIFY') {
+    return;
+  }
+  if (workflow.requirementType === 'DEFECT') {
+    throw validationError('缺陷类型不支持 PRD 澄清');
+  }
+  const description = normalizePrdClarification(typeof action.params?.description === 'string' ? action.params.description : '');
+  if (!description) {
+    throw validationError('请输入 PRD 澄清描述');
+  }
+  const documentPath = defaultPrdAnalysisPath(workflow);
+  const absolutePath = assertInsideWorkspace(workspaceRoot, documentPath);
+  try {
+    await fs.access(absolutePath);
+  } catch (error: any) {
+    if (error.code === 'ENOENT') {
+      throw validationError('请先生成 PRD 文档，再发起 PRD 澄清');
+    }
+    throw error;
+  }
+}
+
 function openSpecPrdDocumentPath(workflow: RequirementWorkflow, params: Record<string, unknown>): string {
   const explicitPath = asString(params.prdDocumentPath);
   if (explicitPath) {
     return explicitPath;
   }
-  const artifactPath = workflow.artifacts.find((artifact) => artifact.stage === 'PRD' && artifact.exists && artifact.kind !== 'directory')?.path;
-  return artifactPath || workflow.stages.PRD.artifactPath || `docs/${workflow.requirementId}/prd/analysis.md`;
+  else {
+    return null
+  }
 }
 
 function slugText(value: string): string {
@@ -93,15 +141,25 @@ function isTechnicalDesignQuestionPath(workflow: RequirementWorkflow, filePath: 
   return normalized === legacyTechDesignQuestionPath(workflow.requirementId) || normalized.startsWith(`docs/${normalizeRequirementId(workflow.requirementId)}/technical-design/questions/`);
 }
 
+function consumedTechDesignQuestionPathSet(workflow: RequirementWorkflow): Set<string> {
+  return new Set((workflow.techDesignConsumedQuestionPaths || []).map((item) => item.replace(/\\/g, '/')));
+}
+
+function isConsumedTechDesignQuestionPath(workflow: RequirementWorkflow, filePath: string): boolean {
+  return consumedTechDesignQuestionPathSet(workflow).has(filePath.replace(/\\/g, '/'));
+}
+
 function existingTechDesignQuestionPaths(workflow: RequirementWorkflow): string[] {
   const legacyPath = legacyTechDesignQuestionPath(workflow.requirementId);
   const questionPrefix = `docs/${normalizeRequirementId(workflow.requirementId)}/technical-design/questions/`;
+  const consumedQuestionPaths = consumedTechDesignQuestionPathSet(workflow);
   return workflow.artifacts
     .filter(
       (item) =>
         item.exists &&
         item.kind !== 'directory' &&
-        (item.id === 'technical-design-questions' || item.path === legacyPath || item.path.replace(/\\/g, '/').startsWith(questionPrefix))
+        (item.id === 'technical-design-questions' || item.path === legacyPath || item.path.replace(/\\/g, '/').startsWith(questionPrefix)) &&
+        !consumedQuestionPaths.has(item.path.replace(/\\/g, '/'))
     )
     .map((item) => item.path)
     .sort((left, right) => {
@@ -115,7 +173,7 @@ function existingTechDesignQuestionPaths(workflow: RequirementWorkflow): string[
 }
 
 function techDesignSourcePaths(workflow: RequirementWorkflow, params: Record<string, unknown>): string[] {
-  const explicitPaths = asStringArray(params.sourceFiles);
+  const explicitPaths = asStringArray(params.sourceFiles).filter((filePath) => !isTechnicalDesignQuestionPath(workflow, filePath) || !isConsumedTechDesignQuestionPath(workflow, filePath));
   const questionPaths = existingTechDesignQuestionPaths(workflow);
   if (explicitPaths.length) {
     return uniqueNonEmpty([...questionPaths, ...explicitPaths]);
@@ -135,13 +193,33 @@ function uniqueNonEmpty(values: string[]): string[] {
   });
 }
 
+function existingTechnicalDesignDocumentPath(workflow: RequirementWorkflow, params: Record<string, unknown>): string {
+  const explicitPath = asString(params.designDocumentPath);
+  if (explicitPath) {
+    return explicitPath;
+  }
+  const defaultPath = `docs/${normalizeRequirementId(workflow.requirementId)}/technical-design/design_review.md`;
+  const officialArtifact = workflow.artifacts.find(
+    (artifact) => artifact.exists && artifact.kind !== 'directory' && (artifact.id === 'technical-design' || artifact.path === defaultPath)
+  );
+  if (officialArtifact) {
+    return officialArtifact.path;
+  }
+  const artifactPath = workflow.stages.TECH_DESIGN.artifactPath?.trim();
+  if (artifactPath && !isTechnicalDesignSourcePath(artifactPath) && !isTechnicalDesignQuestionPath(workflow, artifactPath)) {
+    return artifactPath;
+  }
+  return '';
+}
+
 function designInputParam(workflow: RequirementWorkflow, params: Record<string, unknown>): string {
+  const existingDesignDocument = existingTechnicalDesignDocumentPath(workflow, params);
   if (workflow.requirementType === 'DEFECT') {
     const explicitClarification = hasParam(params, 'clarification') ? asString(params.clarification) : '';
     const clarification = explicitClarification || workflow.techDesignClarification || '';
-    return uniqueNonEmpty([workflow.title, clarification, ...techDesignSourcePaths(workflow, params)]).join(',');
+    return uniqueNonEmpty([workflow.title, clarification, existingDesignDocument, ...techDesignSourcePaths(workflow, params)]).join(',');
   }
-  return [prdDocumentPath(workflow, params), ...techDesignSourcePaths(workflow, params)].filter(Boolean).join(',');
+  return uniqueNonEmpty([prdDocumentPath(workflow, params), existingDesignDocument, ...techDesignSourcePaths(workflow, params)]).join(',');
 }
 
 function technicalDesignDocumentPath(workflow: RequirementWorkflow, params: Record<string, unknown>): string {
@@ -167,7 +245,7 @@ function designQuestionInputParam(workflow: RequirementWorkflow, params: Record<
   if (workflow.requirementType === 'DEFECT') {
     return technicalDesignDocumentPath(workflow, params);
   }
-  return uniqueNonEmpty([openSpecPrdDocumentPath(workflow, params), technicalDesignDocumentPath(workflow, params)]).join(',');
+  return uniqueNonEmpty([technicalDesignDocumentPath(workflow, params)]).join(',');
 }
 
 function openSpecInputParam(workflow: RequirementWorkflow, params: Record<string, unknown>): string {
@@ -208,6 +286,8 @@ function buildSkillCommand(workflow: RequirementWorkflow, action: ActionInput): 
   switch (action.actionType) {
     case 'PRD_ANALYZE':
       return `/coding-prd-analyzer id=${requirementId}${prdClarification ? ` c=${prdClarification}` : ''}${sources ? ` ${sources}` : ''}`;
+    case 'PRD_CLARIFY':
+      return `/coding-prd-analyzer id=${requirementId} c=${description || '<clarification>'}`;
     case 'DESIGN_GENERATE':
       return `/coding-design d=${designInputParam(workflow, params)} r=${requirementId}${projects ? ` p=${projects}` : ''}${clarification ? ` c=${clarification}` : ''}`;
     case 'DESIGN_QUESTION':
@@ -259,15 +339,32 @@ export function buildActionCommand(workflow: RequirementWorkflow, action: Action
 }
 
 function isAgentAction(actionType: ActionInput['actionType']): boolean {
-  return ['PRD_ANALYZE', 'DESIGN_GENERATE', 'DESIGN_QUESTION', 'OPENSPEC_FF', 'OPENSPEC_APPLY', 'OPENSPEC_VERIFY', 'OPENSPEC_ARCHIVE', 'JUNIT_GENERATE', 'CODE_REVIEW'].includes(actionType);
+  return [
+    'PRD_ANALYZE',
+    'PRD_CLARIFY',
+    'DESIGN_GENERATE',
+    'DESIGN_QUESTION',
+    'OPENSPEC_FF',
+    'OPENSPEC_APPLY',
+    'OPENSPEC_VERIFY',
+    'OPENSPEC_ARCHIVE',
+    'JUNIT_GENERATE',
+    'CODE_REVIEW'
+  ].includes(actionType);
 }
 
-async function ensureStagedReviewHasChanges(workspaceRoot: string, workflow: RequirementWorkflow, params: Record<string, unknown>, run: RunRecord): Promise<boolean> {
+async function ensureStagedReviewHasChanges(
+  workspaceRoot: string,
+  workflow: RequirementWorkflow,
+  params: Record<string, unknown>,
+  run: RunRecord,
+  projectPaths: string[] = []
+): Promise<boolean> {
   if (run.actionType !== 'CODE_REVIEW' || reviewModeParam(params) !== 'staged') {
     return true;
   }
   try {
-    const summary = await readGitChanges(workspaceRoot, workflow.projects || [], workflow.branchName);
+    const summary = await readGitChanges(workspaceRoot, workflow.projects || [], workflow.branchName, projectPaths);
     if (hasStagedTrackedChanges(summary)) {
       return true;
     }
@@ -347,11 +444,12 @@ export function validateActionInput(workspaceRoot: string, action: ActionInput, 
       }
     }
     for (const value of asStringArray(params.sourceFiles)) {
-      assertInsideWorkspace(workspaceRoot, value);
+      resolveWorkspaceOrRuntimePath(workspaceRoot, value);
     }
   }
   const allowed = new Set<ActionInput['actionType']>([
     'PRD_ANALYZE',
+    'PRD_CLARIFY',
     'DESIGN_GENERATE',
     'DESIGN_QUESTION',
     'OPENSPEC_STATUS',
@@ -375,7 +473,8 @@ export async function executeAction(
   workspaceRoot: string,
   workflow: RequirementWorkflow,
   action: ActionInput,
-  onRunUpdate: (run: RunRecord) => Promise<void> = async () => undefined
+  onRunUpdate: (run: RunRecord) => Promise<void> = async () => undefined,
+  options: { projectPaths?: string[]; centerConfig?: CenterRunnerConfig } = {}
 ): Promise<RunRecord> {
   const normalizedAction =
     action.actionType === 'DESIGN_QUESTION' && !asString(action.params?.outputPath)
@@ -388,6 +487,7 @@ export async function executeAction(
         }
       : action;
   validateActionInput(workspaceRoot, normalizedAction);
+  await assertPrdClarificationReady(workspaceRoot, workflow, normalizedAction);
   const runId = createRunId();
   const params = normalizedAction.params || {};
   const startedAt = new Date().toISOString();
@@ -400,8 +500,20 @@ export async function executeAction(
     status: 'RUNNING',
     startedAt,
     params,
-    executionMode: executionMode(params)
+    executionMode: executionMode(params),
+    techDesignInputSnapshot: normalizedAction.techDesignInputSnapshot
   };
+  const artifactSnapshot = await captureControlledArtifactSnapshot(workspaceRoot, workflow);
+
+  async function appendChangedArtifactEvents(updatedRun: RunRecord): Promise<void> {
+    if (!['SUCCEEDED', 'FAILED', 'CANCELLED', 'COMPLETED'].includes(updatedRun.status)) {
+      return;
+    }
+    const artifactEvents = await buildArtifactPublishEvents(workspaceRoot, workflow, updatedRun, artifactSnapshot);
+    for (const event of artifactEvents) {
+      await appendRunEvent(workspaceRoot, workflow.requirementId, updatedRun.id, event);
+    }
+  }
 
   await appendRunEvent(workspaceRoot, workflow.requirementId, runId, {
     type: 'START',
@@ -417,6 +529,7 @@ export async function executeAction(
       level: 'INFO',
       message: '本地状态动作已完成'
     });
+    await appendChangedArtifactEvents(run);
     return run;
   }
 
@@ -445,6 +558,7 @@ export async function executeAction(
       message: result.status === 'SUCCEEDED' ? 'OpenSpec 命令执行完成' : 'OpenSpec 命令执行失败',
       data: { output: result.output, error: result.error }
     });
+    await appendChangedArtifactEvents(run);
     return run;
   }
 
@@ -455,7 +569,8 @@ export async function executeAction(
     return run;
   }
 
-  if (!(await ensureStagedReviewHasChanges(workspaceRoot, workflow, params, run))) {
+  const projectPaths = options.projectPaths || [];
+  if (!(await ensureStagedReviewHasChanges(workspaceRoot, workflow, params, run, projectPaths))) {
     return run;
   }
 
@@ -478,14 +593,92 @@ export async function executeAction(
     return run;
   }
 
-  const settings = await loadSettings(workspaceRoot);
-  return ['TERMINAL', 'INTERACTIVE_TERMINAL'].includes(executionMode(params))
-    ? startAgentInTerminal(workspaceRoot, workflow, run, provider, commandText, settings.projectPaths)
-    : startAgentProcess(workspaceRoot, workflow, run, provider, commandText, onRunUpdate, settings.projectPaths);
+  if (provider.id === 'codex' && workflow.id && options.centerConfig) {
+    try {
+      const centerJob = await createCenterJob(
+        options.centerConfig,
+        buildCenterJobCreatePayload(workflow, normalizedAction, run.id)
+      );
+      const claimedJob = await claimCenterJob(options.centerConfig, centerJob.id);
+      if (!claimedJob.runId) {
+        throw new Error('中心服务未返回 Run ID');
+      }
+      run.centerJobId = claimedJob.id;
+      run.centerRunId = claimedJob.runId;
+      await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
+        type: 'INFO',
+        level: 'INFO',
+        message: `已建立 Center Run 映射: ${claimedJob.runId}`,
+        agentId,
+        data: {
+          kind: 'CENTER_RUN_MAPPED',
+          centerJobId: claimedJob.id,
+          centerRunId: claimedJob.runId
+        }
+      });
+      beginCenterJobLease(run, options.centerConfig);
+    } catch (error: any) {
+      run.status = 'FAILED';
+      run.error = `无法建立 Center Run，已阻止 Codex 启动：${error?.message || 'unknown error'}`;
+      run.finishedAt = new Date().toISOString();
+      await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
+        type: 'ERROR',
+        level: 'ERROR',
+        message: run.error,
+        agentId
+      });
+      return run;
+    }
+  }
+
+  const onRunUpdateWithArtifacts = async (updatedRun: RunRecord) => {
+    if (
+      updatedRun.centerJobId
+      && options.centerConfig
+      && ['SUCCEEDED', 'FAILED', 'CANCELLED', 'COMPLETED'].includes(updatedRun.status)
+      && !updatedRun.centerSyncedAt
+    ) {
+      try {
+        await finishCenterJobForRun(updatedRun, options.centerConfig);
+        updatedRun.centerSyncedAt = new Date().toISOString();
+      } catch {
+        // 状态保留为未同步，后续需求刷新会继续补偿。
+      }
+    }
+    await appendChangedArtifactEvents(updatedRun);
+    await onRunUpdate(updatedRun);
+  };
+  if (['TERMINAL', 'INTERACTIVE_TERMINAL'].includes(executionMode(params))) {
+    const terminalRun = await startAgentInTerminal(
+      workspaceRoot,
+      workflow,
+      run,
+      provider,
+      commandText,
+      projectPaths,
+      options.centerConfig
+    );
+    if (['FAILED', 'CANCELLED'].includes(terminalRun.status)) {
+      await onRunUpdateWithArtifacts(terminalRun);
+    }
+    return terminalRun;
+  }
+  return startAgentProcess(
+    workspaceRoot,
+    workflow,
+    run,
+    provider,
+    commandText,
+    onRunUpdateWithArtifacts,
+    projectPaths,
+    options.centerConfig
+  );
 }
 
 export const internalForTests = {
   buildSkillCommand,
+  existingTechDesignQuestionPaths,
+  isTechnicalDesignQuestionPath,
   isAgentAction,
   runCli
 };

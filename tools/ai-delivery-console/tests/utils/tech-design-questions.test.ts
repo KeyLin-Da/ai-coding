@@ -16,7 +16,9 @@ describe('parseTechDesignQuestionRecords', () => {
 - 文档：docs/172014/prd/analysis.md
 
 **回答：**
-因为存在重复查询。
+## 处理结论
+
+- 因为存在重复查询。
 
 ## 2026-06-04 17:45:00 / 172014
 
@@ -36,7 +38,7 @@ describe('parseTechDesignQuestionRecords', () => {
       requirementId: '172014',
       question: '为什么需要缓存？',
       summary: '为什么需要缓存？',
-      answer: '因为存在重复查询。'
+      answer: '## 处理结论\n\n- 因为存在重复查询。'
     });
     expect(records[1]).toMatchObject({
       time: '2026-06-04 17:45:00',

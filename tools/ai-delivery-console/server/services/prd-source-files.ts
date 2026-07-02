@@ -33,7 +33,7 @@ export function assertAllowedPrdSourceFile(file: UploadedPrdSourceFile): void {
 }
 
 export function getPrdSourceFileDir(workspaceRoot: string, requirementId: string): string {
-  return path.join(workspaceRoot, 'docs', normalizeRequirementId(requirementId), 'workflow', 'file');
+  return path.join(workspaceRoot, 'docs', normalizeRequirementId(requirementId), 'prd', 'files');
 }
 
 export function getTechDesignSourceFileDir(workspaceRoot: string, requirementId: string): string {

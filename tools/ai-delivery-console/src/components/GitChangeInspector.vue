@@ -256,6 +256,7 @@ import { html as diffToHtml } from 'diff2html/bundles/js/diff2html.min.js';
 import 'diff2html/bundles/css/diff2html.min.css';
 import { apiClient } from '@/api/client';
 import type { GitChangedFile, GitChangeSummary, GitProjectChangeSummary } from '@shared/workflow';
+import { buildFileTree, extractFileDiff, filePathToneClass, flattenTreeRows, type GitTreeRow } from '@/utils/git-file-tree';
 
 const props = defineProps<{
   summary?: GitChangeSummary;
@@ -279,29 +280,6 @@ const collapsedUntrackedTreeDirectoryPaths = ref<string[]>([]);
 interface FileGroups {
   files: GitChangedFile[];
   untrackedFiles: GitChangedFile[];
-}
-
-type GitTreeNodeType = 'directory' | 'file';
-type GitTreeFileKind = 'changed' | 'untracked';
-
-interface GitTreeNode {
-  key: string;
-  name: string;
-  path: string;
-  type: GitTreeNodeType;
-  depth: number;
-  file?: GitChangedFile;
-  fileKind?: GitTreeFileKind;
-  children: GitTreeNode[];
-  changedCount: number;
-  untrackedCount: number;
-  additions: number;
-  deletions: number;
-}
-
-interface GitTreeRow extends GitTreeNode {
-  expanded: boolean;
-  hasChildren: boolean;
 }
 
 function normalizeFileGroups(files: GitChangedFile[] = [], untrackedFiles?: GitChangedFile[]): FileGroups {
@@ -354,12 +332,12 @@ const someUntrackedSelected = computed(() => selectedUntrackedCount.value > 0 &&
 
 const canStageUntracked = computed(() => Boolean(props.requirementId && selectedUntrackedCount.value && !isStagingUntracked.value));
 
-const changedTreeRows = computed<GitTreeRow[]>(() => {
+const changedTreeRows = computed<GitTreeRow<GitChangedFile>[]>(() => {
   const tree = buildFileTree(activeProject.value?.files || [], []);
   return flattenTreeRows(tree, collapsedChangedTreeDirectoryPaths.value);
 });
 
-const untrackedTreeRows = computed<GitTreeRow[]>(() => {
+const untrackedTreeRows = computed<GitTreeRow<GitChangedFile>[]>(() => {
   const tree = buildFileTree([], activeProject.value?.untrackedFiles || []);
   return flattenTreeRows(tree, collapsedUntrackedTreeDirectoryPaths.value);
 });
@@ -385,118 +363,6 @@ const currentDiffHtml = computed(() => {
   });
 });
 
-function extractFileDiff(diff: string, filePath: string): string {
-  const sections = diff
-    .split(/^diff --git /gm)
-    .filter(Boolean)
-    .map((section) => `diff --git ${section}`);
-  return sections.find((section) => section.includes(` b/${filePath}`) || section.includes(` a/${filePath}`) || section.includes(filePath)) || '';
-}
-
-function createTreeNode(input: Omit<GitTreeNode, 'children' | 'changedCount' | 'untrackedCount' | 'additions' | 'deletions'>): GitTreeNode {
-  return {
-    ...input,
-    children: [],
-    changedCount: 0,
-    untrackedCount: 0,
-    additions: 0,
-    deletions: 0
-  };
-}
-
-function splitTreePath(filePath: string): string[] {
-  return filePath.split('/').filter(Boolean);
-}
-
-function buildFileTree(files: GitChangedFile[], untrackedFiles: GitChangedFile[]): GitTreeNode {
-  const root = createTreeNode({
-    key: '__root__',
-    name: '根目录',
-    path: '',
-    type: 'directory',
-    depth: -1
-  });
-  const directories = new Map<string, GitTreeNode>();
-
-  const addFile = (file: GitChangedFile, fileKind: GitTreeFileKind) => {
-    const segments = splitTreePath(file.path);
-    const fileName = segments.pop() || file.path;
-    let parent = root;
-    let directoryPath = '';
-    const ancestors = [root];
-
-    for (const segment of segments) {
-      directoryPath = directoryPath ? `${directoryPath}/${segment}` : segment;
-      let directory = directories.get(directoryPath);
-      if (!directory) {
-        directory = createTreeNode({
-          key: `directory:${directoryPath}`,
-          name: segment,
-          path: directoryPath,
-          type: 'directory',
-          depth: parent.depth + 1
-        });
-        directories.set(directoryPath, directory);
-        parent.children.push(directory);
-      }
-      parent = directory;
-      ancestors.push(parent);
-    }
-
-    parent.children.push(
-      createTreeNode({
-        key: `${fileKind}:${file.path}`,
-        name: fileName,
-        path: file.path,
-        type: 'file',
-        depth: parent.depth + 1,
-        file,
-        fileKind
-      })
-    );
-
-    const changedCount = fileKind === 'changed' ? 1 : 0;
-    const untrackedCount = fileKind === 'untracked' ? 1 : 0;
-    const additions = file.additions || 0;
-    const deletions = file.deletions || 0;
-    for (const ancestor of ancestors) {
-      ancestor.changedCount += changedCount;
-      ancestor.untrackedCount += untrackedCount;
-      ancestor.additions += additions;
-      ancestor.deletions += deletions;
-    }
-  };
-
-  files.forEach((file) => addFile(file, 'changed'));
-  untrackedFiles.forEach((file) => addFile(file, 'untracked'));
-  sortTreeNode(root);
-  return root;
-}
-
-function sortTreeNode(node: GitTreeNode) {
-  node.children.sort((left, right) => {
-    if (left.type !== right.type) {
-      return left.type === 'directory' ? -1 : 1;
-    }
-    return left.name.localeCompare(right.name) || left.path.localeCompare(right.path);
-  });
-  node.children.forEach(sortTreeNode);
-}
-
-function flattenTreeRows(node: GitTreeNode, collapsedDirectoryPaths: string[], rows: GitTreeRow[] = []): GitTreeRow[] {
-  for (const child of node.children) {
-    const expanded = child.type === 'directory' && !collapsedDirectoryPaths.includes(child.path);
-    rows.push({
-      ...child,
-      expanded,
-      hasChildren: child.children.length > 0
-    });
-    if (child.type === 'directory' && expanded) {
-      flattenTreeRows(child, collapsedDirectoryPaths, rows);
-    }
-  }
-  return rows;
-}
 
 function toggleTreeDirectory(treeKind: 'changed' | 'untracked', directoryPath: string) {
   const source = treeKind === 'changed' ? collapsedChangedTreeDirectoryPaths : collapsedUntrackedTreeDirectoryPaths;
@@ -513,20 +379,6 @@ function treeIndentStyle(depth: number) {
   return {
     width: `${Math.max(depth, 0) * 14}px`
   };
-}
-
-function filePathToneClass(file?: GitChangedFile): string {
-  const status = file?.status || '';
-  if (status === '??') {
-    return 'git-file-path-pending';
-  }
-  if (status.includes('A')) {
-    return 'git-file-path-added';
-  }
-  if (status.includes('M')) {
-    return 'git-file-path-modified';
-  }
-  return '';
 }
 
 function isUntrackedSelected(filePath: string): boolean {

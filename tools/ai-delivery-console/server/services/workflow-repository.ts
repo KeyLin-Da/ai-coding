@@ -6,7 +6,12 @@ import { deriveCurrentStage } from '../../shared/stage-rules';
 import { normalizeRequirementId } from './workspace';
 import { saveProjectHistory } from './project-history';
 import { normalizeWorkflowProjects } from './project-resolver';
-import { loadSettings } from './project-settings';
+import {
+  getLegacyHashedWorkflowRuntimeStatePath,
+  getWorkflowRuntimeDir,
+  getWorkflowRuntimeStatePath,
+  listRuntimeRequirementIds
+} from './runtime-paths';
 
 export function normalizePrdClarification(value?: string): string | undefined {
   const withoutControls = Array.from(String(value || ''))
@@ -40,23 +45,35 @@ export class WorkflowRepository {
   constructor(private readonly workspaceRoot: string) {}
 
   getWorkflowDir(requirementId: string): string {
-    return path.join(this.workspaceRoot, 'docs', normalizeRequirementId(requirementId), 'workflow');
+    return getWorkflowRuntimeDir(this.workspaceRoot, requirementId);
   }
 
   getStatePath(requirementId: string): string {
-    return path.join(this.getWorkflowDir(requirementId), 'state.json');
+    return getWorkflowRuntimeStatePath(this.workspaceRoot, requirementId);
+  }
+
+  getLegacyStatePath(requirementId: string): string {
+    return path.join(this.workspaceRoot, 'docs', normalizeRequirementId(requirementId), 'workflow', 'state.json');
   }
 
   async load(requirementId: string): Promise<RequirementWorkflow | null> {
-    try {
-      const content = await fs.readFile(this.getStatePath(requirementId), 'utf8');
-      return withWorkflowDefaults(JSON.parse(content) as RequirementWorkflow);
-    } catch (error: any) {
-      if (error.code === 'ENOENT') {
-        return null;
+    for (const statePath of [
+      this.getStatePath(requirementId),
+      getLegacyHashedWorkflowRuntimeStatePath(this.workspaceRoot, requirementId),
+      this.getLegacyStatePath(requirementId)
+    ]) {
+      const content = await fs.readFile(statePath, 'utf8').catch((error: any) => {
+        if (error.code === 'ENOENT') {
+          return '';
+        }
+        throw error;
+      });
+      if (!content) {
+        continue;
       }
-      throw error;
+      return withWorkflowDefaults(JSON.parse(content) as RequirementWorkflow);
     }
+    return null;
   }
 
   async save(workflow: RequirementWorkflow): Promise<RequirementWorkflow> {
@@ -75,7 +92,7 @@ export class WorkflowRepository {
     return updated;
   }
 
-  async upsert(input: RequirementInput): Promise<RequirementWorkflow> {
+  async upsert(input: RequirementInput, projectPaths: string[] = []): Promise<RequirementWorkflow> {
     const requirementId = normalizeRequirementId(input.requirementId);
     const existing = await this.load(requirementId);
     if (existing) {
@@ -94,15 +111,19 @@ export class WorkflowRepository {
       const techDesignClarification = hasInputField(input, 'techDesignClarification')
         ? input.techDesignClarification
         : existing.techDesignClarification;
+      const techDesignConsumedQuestionPaths = hasInputField(input, 'techDesignConsumedQuestionPaths')
+        ? input.techDesignConsumedQuestionPaths || []
+        : existing.techDesignConsumedQuestionPaths || [];
       const techDesignSourceFiles = hasInputField(input, 'techDesignSourceFiles')
         ? input.techDesignSourceFiles || []
         : existing.techDesignSourceFiles || [];
       const projects = hasInputField(input, 'projects')
-        ? await normalizeWorkflowProjects(this.workspaceRoot, input.projects || [], (await loadSettings(this.workspaceRoot)).projectPaths)
+        ? await normalizeWorkflowProjects(this.workspaceRoot, input.projects || [], projectPaths)
         : existing.projects || [];
       await saveProjectHistory(this.workspaceRoot, projects);
       return this.save({
         ...existing,
+        id: input.id || existing.id,
         title: input.title || existing.title,
         requirementType,
         branchName,
@@ -110,15 +131,17 @@ export class WorkflowRepository {
         prdClarification,
         techDesignDocument,
         techDesignClarification,
+        techDesignConsumedQuestionPaths,
         techDesignSourceFiles,
         sources: input.sources?.length ? input.sources : existing.sources
       });
     }
     const now = new Date().toISOString();
     const requirementType: RequirementType = input.requirementType || 'REQUIREMENT';
-    const projects = await normalizeWorkflowProjects(this.workspaceRoot, input.projects || [], (await loadSettings(this.workspaceRoot)).projectPaths);
+    const projects = await normalizeWorkflowProjects(this.workspaceRoot, input.projects || [], projectPaths);
     await saveProjectHistory(this.workspaceRoot, projects);
     const workflow: RequirementWorkflow = {
+      id: input.id,
       requirementId,
       title: input.title || `需求 ${requirementId}`,
       requirementType,
@@ -127,6 +150,7 @@ export class WorkflowRepository {
       prdClarification: normalizePrdClarification(input.prdClarification),
       techDesignDocument: input.techDesignDocument,
       techDesignClarification: input.techDesignClarification,
+      techDesignConsumedQuestionPaths: input.techDesignConsumedQuestionPaths || [],
       prdSourceFiles: [],
       techDesignSourceFiles: input.techDesignSourceFiles || [],
       sources: input.sources || [],
@@ -148,15 +172,18 @@ export class WorkflowRepository {
     const docsDir = path.join(this.workspaceRoot, 'docs');
     try {
       const entries = await fs.readdir(docsDir, { withFileTypes: true });
+      const requirementIds = new Set([
+        ...(await listRuntimeRequirementIds(this.workspaceRoot)),
+        ...entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name)
+      ]);
       const workflows = await Promise.all(
-        entries
-          .filter((entry) => entry.isDirectory())
-          .map((entry) => this.load(entry.name))
+        [...requirementIds].map((requirementId) => this.load(requirementId))
       );
       return workflows.filter(Boolean).sort((a, b) => String(b?.updatedAt).localeCompare(String(a?.updatedAt))) as RequirementWorkflow[];
     } catch (error: any) {
       if (error.code === 'ENOENT') {
-        return [];
+        const workflows = await Promise.all((await listRuntimeRequirementIds(this.workspaceRoot)).map((requirementId) => this.load(requirementId)));
+        return workflows.filter(Boolean).sort((a, b) => String(b?.updatedAt).localeCompare(String(a?.updatedAt))) as RequirementWorkflow[];
       }
       throw error;
     }

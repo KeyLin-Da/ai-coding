@@ -5,7 +5,6 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { hasStagedTrackedChanges, parseGitStatusShort, readGitChanges, stageUntrackedFiles } from '../../server/services/git-changes';
-import { saveSettings } from '../../server/services/project-settings';
 
 const exec = promisify(execFile);
 
@@ -89,7 +88,6 @@ describe('git-changes', () => {
     const projectParent = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-projects-'));
     const projectRoot = path.join(projectParent, 'opp-api');
     await fs.mkdir(path.join(projectRoot, 'src'), { recursive: true });
-    await saveSettings(workspace, { projectPaths: [projectParent] });
     await git(projectRoot, ['init']);
     await fs.writeFile(path.join(projectRoot, 'src', 'a.txt'), 'old\n', 'utf8');
     await git(projectRoot, ['add', '.']);
@@ -97,7 +95,7 @@ describe('git-changes', () => {
     await git(projectRoot, ['checkout', '-b', 'feature/opp#172014']);
     await fs.writeFile(path.join(projectRoot, 'src', 'a.txt'), 'old\nnew\n', 'utf8');
 
-    const summary = await readGitChanges(workspace, [{ name: 'opp-api', path: 'opp-api' }], 'feature/opp#172014');
+    const summary = await readGitChanges(workspace, [{ name: 'opp-api', path: 'opp-api' }], 'feature/opp#172014', [projectParent]);
 
     expect(summary.projects[0].project.path).toBe(projectRoot);
     expect(summary.projects[0].files[0].path).toBe('src/a.txt');

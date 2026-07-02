@@ -1,16 +1,31 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { RunEvent, WorkflowStage } from '../../shared/workflow';
-import { assertInsideWorkspace, createId, normalizeRequirementId } from './workspace';
+import { createId } from './workspace';
+import {
+  getLegacyHashedRunRuntimeDir,
+  getRunRuntimeDir,
+  getStageLogRuntimeDir,
+  resolveWorkspaceOrRuntimePath
+} from './runtime-paths';
 
 const TERMINAL_TRANSCRIPT_MAX_BYTES = 256 * 1024;
+
+export function stripTerminalControlSequences(text: string): string {
+  return text
+    .replace(/\x1B\][^\x07]*(?:\x07|\x1B\\)/g, '')
+    .replace(/[\x1B\x9B]\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/\x1B[@-Z\\-_]/g, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n');
+}
 
 export function createRunId(): string {
   return createId('run');
 }
 
 export function getRunDir(workspaceRoot: string, requirementId: string): string {
-  return path.join(workspaceRoot, 'docs', normalizeRequirementId(requirementId), 'workflow', 'runs');
+  return getRunRuntimeDir(workspaceRoot, requirementId);
 }
 
 export function getRunPath(workspaceRoot: string, requirementId: string, runId: string): string {
@@ -19,13 +34,7 @@ export function getRunPath(workspaceRoot: string, requirementId: string, runId: 
 
 // 为每个流程阶段获取独立的日志目录
 export function getStageLogDir(workspaceRoot: string, requirementId: string, stage: WorkflowStage): string {
-  const stageMap: Record<WorkflowStage, string> = {
-    PRD: 'prd',
-    TECH_DESIGN: 'tech-design',
-    IMPLEMENTATION: 'implementation',
-    CODE_REVIEW: 'code-review'
-  };
-  return path.join(workspaceRoot, 'docs', normalizeRequirementId(requirementId), 'workflow', 'logs', stageMap[stage]);
+  return getStageLogRuntimeDir(workspaceRoot, requirementId, stage);
 }
 
 // 为每个流程阶段获取独立的日志文件路径
@@ -33,9 +42,14 @@ export function getStageLogPath(workspaceRoot: string, requirementId: string, st
   return path.join(getStageLogDir(workspaceRoot, requirementId, stage), 'command.log');
 }
 
-export async function appendRunEvent(workspaceRoot: string, requirementId: string, runId: string, event: Omit<RunEvent, 'time'>): Promise<void> {
+export async function appendRunEvent(
+  workspaceRoot: string,
+  requirementId: string,
+  runId: string,
+  event: Omit<RunEvent, 'time'> & { time?: string }
+): Promise<void> {
   await fs.mkdir(getRunDir(workspaceRoot, requirementId), { recursive: true });
-  const line = JSON.stringify({ ...event, time: new Date().toISOString() });
+  const line = JSON.stringify({ ...event, time: event.time || new Date().toISOString() });
   await fs.appendFile(getRunPath(workspaceRoot, requirementId, runId), `${line}\n`, 'utf8');
 }
 
@@ -62,18 +76,25 @@ export async function appendStageCommandLog(
 }
 
 export async function readRunEvents(workspaceRoot: string, requirementId: string, runId: string): Promise<RunEvent[]> {
-  try {
-    const content = await fs.readFile(getRunPath(workspaceRoot, requirementId, runId), 'utf8');
+  for (const runPath of [
+    getRunPath(workspaceRoot, requirementId, runId),
+    path.join(getLegacyHashedRunRuntimeDir(workspaceRoot, requirementId), `${runId}.jsonl`)
+  ]) {
+    const content = await fs.readFile(runPath, 'utf8').catch((error: any) => {
+      if (error.code === 'ENOENT') {
+        return '';
+      }
+      throw error;
+    });
+    if (!content) {
+      continue;
+    }
     return content
       .split('\n')
       .filter(Boolean)
       .map((line) => JSON.parse(line) as RunEvent);
-  } catch (error: any) {
-    if (error.code === 'ENOENT') {
-      return [];
-    }
-    throw error;
   }
+  return [];
 }
 
 export async function readTerminalTranscriptSize(workspaceRoot: string, transcriptPath?: string): Promise<number> {
@@ -81,7 +102,7 @@ export async function readTerminalTranscriptSize(workspaceRoot: string, transcri
     return 0;
   }
   try {
-    const stat = await fs.stat(assertInsideWorkspace(workspaceRoot, transcriptPath));
+    const stat = await fs.stat(resolveWorkspaceOrRuntimePath(workspaceRoot, transcriptPath));
     return stat.isFile() ? stat.size : 0;
   } catch (error: any) {
     if (error.code === 'ENOENT') {
@@ -102,7 +123,7 @@ export async function readTerminalTranscriptChunk(
   }
 
   try {
-    const absoluteTranscriptPath = assertInsideWorkspace(workspaceRoot, transcriptPath);
+    const absoluteTranscriptPath = resolveWorkspaceOrRuntimePath(workspaceRoot, transcriptPath);
     const stat = await fs.stat(absoluteTranscriptPath);
     if (!stat.isFile()) {
       return { nextOffset: offset };
@@ -120,7 +141,7 @@ export async function readTerminalTranscriptChunk(
     const file = await fs.open(absoluteTranscriptPath, 'r');
     try {
       const result = await file.read(buffer, 0, readLength, readStart);
-      const text = buffer.subarray(0, result.bytesRead).toString('utf8');
+      const text = stripTerminalControlSequences(buffer.subarray(0, result.bytesRead).toString('utf8'));
       const prefix = readStart > safeOffset ? `[AI Delivery] Transcript 过长，仅显示最新 ${maxBytes} bytes。\n` : '';
       return {
         nextOffset: stat.size,

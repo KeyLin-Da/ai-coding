@@ -38,6 +38,7 @@ export type WorkflowImplementationStep = ImplementationStep | LegacyImplementati
 
 export type ActionType =
   | 'PRD_ANALYZE'
+  | 'PRD_CLARIFY'
   | 'DESIGN_GENERATE'
   | 'DESIGN_QUESTION'
   | 'OPENSPEC_STATUS'
@@ -57,11 +58,18 @@ export interface ArtifactRef {
   stage: WorkflowStage;
   label: string;
   path: string;
-  kind: 'markdown' | 'html' | 'json' | 'directory' | 'text';
+  kind: 'markdown' | 'html' | 'json' | 'directory' | 'image' | 'text';
   exists: boolean;
   hash?: string;
   updatedAt?: string;
   summary?: string;
+  artifactId?: string | number;
+  currentVersionId?: string | number;
+  currentVersionNo?: number;
+  versionCount?: number;
+  createdBy?: string | number;
+  sourceRunId?: string | number;
+  baseVersionId?: string | number;
 }
 
 export interface ReviewIssue {
@@ -96,6 +104,14 @@ export interface RunEvent {
   data?: unknown;
 }
 
+export interface TechDesignGenerationInputSnapshot {
+  questionPaths: string[];
+  sourceFilePaths: string[];
+  clarification?: string;
+  annotationIds: string[];
+  capturedAt: string;
+}
+
 export interface RunRecord {
   id: string;
   requirementId: string;
@@ -115,7 +131,119 @@ export interface RunRecord {
   terminalScriptPath?: string;
   terminalTranscriptPath?: string;
   terminalStatusPath?: string;
+  centerJobId?: number;
+  centerRunId?: number;
+  codexSessionId?: string;
+  codexSessionPath?: string;
+  codexSessionOffset?: number;
+  codexSessionModel?: string;
+  codexTokenSnapshot?: TokenUsageSnapshot;
+  tokenUsageOutboxPath?: string;
+  centerSyncedAt?: string;
+  techDesignInputSnapshot?: TechDesignGenerationInputSnapshot;
+  techDesignInputsConsumedAt?: string;
   error?: string;
+}
+
+export interface TokenUsageSnapshot {
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  reasoningOutputTokens: number;
+  totalTokens: number;
+}
+
+export interface TokenUsageSummary {
+  runId?: string | number;
+  totalTokens: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  reasoningOutputTokens: number;
+  runCount: number;
+  detailCount: number;
+  latestOccurredAt?: string;
+}
+
+export interface RunTokenUsageDetail {
+  id?: string | number;
+  runId: string | number;
+  requirementPk?: string | number;
+  jobId?: string | number;
+  clientSessionId?: string | number;
+  agentId?: string;
+  stage?: WorkflowStage;
+  implementationStep?: WorkflowImplementationStep;
+  model?: string;
+  sourceEventType: string;
+  usageFingerprint?: string;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  reasoningOutputTokens: number;
+  totalTokens: number;
+  rawUsageJson?: string;
+  occurredAt?: string;
+  createdAt?: string;
+}
+
+export interface RunTokenUsageRun {
+  runId: string | number;
+  summary: TokenUsageSummary;
+  details: RunTokenUsageDetail[];
+}
+
+export interface RequirementTokenUsagePage {
+  requirementPk: string | number;
+  page: number;
+  pageSize: number;
+  total: number;
+  items: RunTokenUsageDetail[];
+}
+
+export interface TokenUsageBucket {
+  bucketType: 'stage' | 'agent' | string;
+  bucketKey: string;
+  summary: TokenUsageSummary;
+}
+
+export interface RequirementTokenUsageSummary {
+  requirementPk?: string | number;
+  summary: TokenUsageSummary;
+  latestRunSummary: TokenUsageSummary;
+  stageSummaries: TokenUsageBucket[];
+  agentSummaries: TokenUsageBucket[];
+}
+
+export function emptyTokenUsageSummary(runId?: string | number): TokenUsageSummary {
+  return {
+    runId,
+    totalTokens: 0,
+    inputTokens: 0,
+    cachedInputTokens: 0,
+    outputTokens: 0,
+    reasoningOutputTokens: 0,
+    runCount: 0,
+    detailCount: 0
+  };
+}
+
+export function emptyRunTokenUsage(runId: string | number): RunTokenUsageRun {
+  return {
+    runId,
+    summary: emptyTokenUsageSummary(runId),
+    details: []
+  };
+}
+
+export function emptyRequirementTokenUsage(requirementPk?: string | number): RequirementTokenUsageSummary {
+  return {
+    requirementPk,
+    summary: emptyTokenUsageSummary(),
+    latestRunSummary: emptyTokenUsageSummary(),
+    stageSummaries: [],
+    agentSummaries: []
+  };
 }
 
 export interface PrdSourceFile {
@@ -128,6 +256,133 @@ export interface PrdSourceFile {
 }
 
 export type TechDesignSourceFile = PrdSourceFile;
+
+export type TechDesignInputLedgerEntryType = 'QUESTION' | 'SOURCE_FILE' | 'CLARIFICATION';
+
+export interface TechDesignInputLedgerEntry {
+  id: string;
+  type: TechDesignInputLedgerEntryType;
+  path?: string;
+  contentHash?: string;
+  consumedAt: string;
+  consumedRunId: string;
+}
+
+export interface TechDesignInputLedger {
+  version: 1;
+  entries: TechDesignInputLedgerEntry[];
+}
+
+export type TechDesignVersionSource = 'PUBLISHED' | 'DRAFT_SNAPSHOT' | 'CURRENT_DRAFT';
+
+export interface TechDesignVersion {
+  id: string;
+  source: TechDesignVersionSource;
+  label: string;
+  artifactPath: string;
+  contentHash?: string;
+  versionNo?: number;
+  commitSha?: string;
+  createdAt?: string;
+  createdBy?: string | number;
+  sourceRunId?: string | number;
+  readable: boolean;
+  unreadableReason?: string;
+}
+
+export interface TechDesignVersionContent {
+  version: TechDesignVersion;
+  content: string;
+}
+
+export interface TechDesignVersionDiffInput {
+  leftVersionId: string;
+  rightVersionId: string;
+}
+
+export interface TechDesignVersionDiff {
+  left: TechDesignVersion;
+  right: TechDesignVersion;
+  diff: string;
+  truncated: boolean;
+}
+
+export type TechDesignAnnotationStatus = 'OPEN' | 'RESOLVED' | 'CARRIED_FORWARD' | 'STALE';
+
+export interface TechDesignAnnotationAnchor {
+  plainStart: number;
+  plainEnd: number;
+  prefixText: string;
+  suffixText: string;
+  headingPath: string[];
+  occurrence: number;
+}
+
+export interface TechDesignAnnotationReply {
+  id: string;
+  annotationId: string;
+  content: string;
+  consumedAt?: string;
+  consumedRunId?: string;
+  createdBy?: string | number;
+  createdByName?: string;
+  updatedBy?: string | number;
+  updatedByName?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TechDesignAnnotation {
+  id: string;
+  requirementId: string;
+  artifactPath: string;
+  versionId: string;
+  versionNo?: number;
+  versionSource: TechDesignVersionSource;
+  contentHash: string;
+  selectedText: string;
+  anchor: TechDesignAnnotationAnchor;
+  comment: string;
+  status: TechDesignAnnotationStatus;
+  includeInNextGeneration: boolean;
+  consumedAt?: string;
+  consumedRunId?: string;
+  createdBy?: string | number;
+  createdByName?: string;
+  updatedBy?: string | number;
+  updatedByName?: string;
+  createdAt: string;
+  updatedAt: string;
+  replies?: TechDesignAnnotationReply[];
+}
+
+export interface TechDesignAnnotationCreateInput {
+  versionId: string;
+  selectedText: string;
+  anchor: TechDesignAnnotationAnchor;
+  comment: string;
+  includeInNextGeneration?: boolean;
+}
+
+export interface TechDesignAnnotationStatusInput {
+  status?: TechDesignAnnotationStatus;
+  includeInNextGeneration?: boolean;
+}
+
+export interface TechDesignAnnotationDeleteInput {
+  expectedHash?: string;
+}
+
+export interface TechDesignAnnotationReplyCreateInput {
+  content: string;
+  expectedHash?: string;
+}
+
+export interface TechDesignAnnotationList {
+  annotations: TechDesignAnnotation[];
+  hash: string;
+  summaryPath: string;
+}
 
 export interface WorkflowProject {
   name: string;
@@ -248,6 +503,7 @@ export interface ImplementationStepState {
 }
 
 export interface RequirementWorkflow {
+  id?: string | number;
   requirementId: string;
   title: string;
   requirementType?: RequirementType;
@@ -256,6 +512,7 @@ export interface RequirementWorkflow {
   prdClarification?: string;
   techDesignDocument?: string;
   techDesignClarification?: string;
+  techDesignConsumedQuestionPaths?: string[];
   prdSourceFiles?: PrdSourceFile[];
   techDesignSourceFiles?: TechDesignSourceFile[];
   sources: string[];
@@ -269,9 +526,14 @@ export interface RequirementWorkflow {
   runs: RunRecord[];
   reviews: ReviewRecord[];
   issues: ReviewIssue[];
+  onlineClientCount?: number;
+  pendingReviewCount?: number;
+  jobStatus?: string;
+  lastEventId?: string | number;
 }
 
 export interface RequirementInput {
+  id?: string | number;
   requirementId: string;
   title?: string;
   requirementType?: RequirementType;
@@ -280,6 +542,7 @@ export interface RequirementInput {
   prdClarification?: string;
   techDesignDocument?: string;
   techDesignClarification?: string;
+  techDesignConsumedQuestionPaths?: string[];
   techDesignSourceFiles?: TechDesignSourceFile[];
   sources?: string[];
 }
@@ -287,6 +550,7 @@ export interface RequirementInput {
 export interface ActionInput {
   actionType: ActionType;
   params?: Record<string, unknown>;
+  techDesignInputSnapshot?: TechDesignGenerationInputSnapshot;
 }
 
 export interface ReviewInput {
@@ -334,6 +598,7 @@ export const statusLabels: Record<WorkflowStatus | RunStatus, string> = {
 
 export const actionTypeLabels: Record<ActionType, string> = {
   PRD_ANALYZE: 'PRD 分析',
+  PRD_CLARIFY: 'PRD 澄清',
   DESIGN_GENERATE: '技术方案生成',
   DESIGN_QUESTION: '技术方案答疑',
   OPENSPEC_STATUS: 'OpenSpec 状态检查',
@@ -424,8 +689,16 @@ export function findFirstPendingImplementationStep(
   return firstPending || implementationSteps[implementationSteps.length - 1];
 }
 
+export function areAllImplementationStepsApproved(
+  steps?: Partial<Record<WorkflowImplementationStep, Partial<ImplementationStepState>>>
+): boolean {
+  const normalized = ensureImplementationSteps(steps);
+  return implementationSteps.every((step) => normalized[step].status === 'APPROVED');
+}
+
 export const actionStageMap: Partial<Record<ActionType, WorkflowStage>> = {
   PRD_ANALYZE: 'PRD',
+  PRD_CLARIFY: 'PRD',
   DESIGN_GENERATE: 'TECH_DESIGN',
   DESIGN_QUESTION: 'TECH_DESIGN',
   OPENSPEC_STATUS: 'IMPLEMENTATION',

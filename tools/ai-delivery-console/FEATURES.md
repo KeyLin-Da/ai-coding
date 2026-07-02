@@ -125,7 +125,8 @@
 #### 模式 A：Codex CLI 自动化（推荐）
 ```bash
 # 配置一次，永久使用
-CODEX_COMMAND='codex exec -C {workspaceRoot} -'
+CODEX_COMMAND='codex exec --sandbox workspace-write -C {workspaceRoot} {projectParentAddDirArgs} -'
+CODEX_INTERACTIVE_COMMAND='codex --sandbox workspace-write -C {workspaceRoot} {projectParentAddDirArgs} --no-alt-screen {prompt}'
 
 # 页面点击「执行」即可
 # 系统自动：生成 Prompt → 调用 Codex → 展示日志

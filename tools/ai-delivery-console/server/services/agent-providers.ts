@@ -4,11 +4,23 @@ import { execSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child
 import type { AgentProvider, RequirementWorkflow, RunRecord, RunStatus } from '../../shared/workflow';
 import { serverConfig } from '../config';
 import { appendRunEvent } from './run-log';
-import { assertInsideWorkspace, normalizeRequirementId, toRelativePath } from './workspace';
+import { normalizeRequirementId } from './workspace';
 import { normalizeProjectBasePaths, resolveWorkflowProjects } from './project-resolver';
+import { getPromptRuntimeDir, getRunRuntimeDir, getRunnerRuntimeRoot, getScriptRuntimeDir, resolveWorkspaceOrRuntimePath, toRuntimePathRef } from './runtime-paths';
+import { CodexUsageNdjsonParser, type CodexUsageEvent } from './codex-usage-parser';
+import {
+  cancelCenterJob,
+  completeCenterJob,
+  failCenterJob,
+  renewCenterJob,
+  type CenterRunnerConfig
+} from './center-runner-adapter';
+import { collectCodexSessionUsage } from './codex-session-usage';
+import { recordCodexUsageEvents, retryTokenUsageOutbox } from './token-usage-recorder';
 
 const activeProcesses = new Map<string, ChildProcessWithoutNullStreams>();
 const cancelledRunIds = new Set<string>();
+const centerLeaseTimers = new Map<string, NodeJS.Timeout>();
 
 type CommandContext = Record<string, string | string[]>;
 
@@ -59,28 +71,28 @@ function defaultProviders(): AgentProvider[] {
       supportsStreaming: true,
       supportsInteractive: Boolean(serverConfig.codebuddyInteractiveCommand)
     },
-//     {
-//       id: 'qoder',
-//       name: 'Qoder CLI CN',
-//       description: '使用本机 qoderclicn CLI 执行技能 Prompt。',
-//       inputMode: 'STDIN',
-//       command: splitCommand(serverConfig.qoderCommand),
-//       interactiveCommand: splitCommand(serverConfig.qoderInteractiveCommand),
-//       available: isCliAvailable('qoderclicn'),
-//       supportsStreaming: false,
-//       supportsInteractive: Boolean(serverConfig.qoderInteractiveCommand)
-//     },
-//     {
-//       id: 'qwen',
-//       name: 'Qwen',
-//       description: qwenNodeOk ? '使用本机 Qwen CLI 执行技能 Prompt。' : '需要 Node.js ≥ 20，当前版本不满足。',
-//       inputMode: 'STDIN',
-//       command: splitCommand(serverConfig.qwenCommand),
-//       interactiveCommand: splitCommand(serverConfig.qwenInteractiveCommand),
-//       available: qwenNodeOk && isCliAvailable('qwen'),
-//       supportsStreaming: false,
-//       supportsInteractive: qwenNodeOk && Boolean(serverConfig.qwenInteractiveCommand)
-//     }
+    {
+      id: 'qoder',
+      name: 'Qoder',
+      description: '使用本机 qcode CLI 执行技能 Prompt。',
+      inputMode: 'STDIN',
+      command: splitCommand(serverConfig.qoderCommand),
+      interactiveCommand: splitCommand(serverConfig.qoderInteractiveCommand),
+      available: isCliAvailable('qcode'),
+      supportsStreaming: false,
+      supportsInteractive: Boolean(serverConfig.qoderInteractiveCommand)
+    },
+    {
+      id: 'qwen',
+      name: 'Qwen',
+      description: '使用本机 Qwen CLI 执行技能 Prompt。',
+      inputMode: 'STDIN',
+      command: splitCommand(serverConfig.qwenCommand),
+      interactiveCommand: splitCommand(serverConfig.qwenInteractiveCommand),
+      available: isCliAvailable('qwen'),
+      supportsStreaming: false,
+      supportsInteractive: Boolean(serverConfig.qwenInteractiveCommand)
+    }
   ];
 }
 
@@ -126,13 +138,17 @@ function projectAddDirArgs(projectRoots: string[]): string[] {
   return projectRoots.flatMap((projectRoot) => ['--add-dir', projectRoot]);
 }
 
+function agentReadableProjectRoots(workspaceRoot: string, projectRoots: string[]): string[] {
+  return [...projectRoots, getRunnerRuntimeRoot(workspaceRoot)];
+}
+
 function projectParentAddDirArgs(projectPaths: string[] = []): string[] {
   return normalizeProjectBasePaths(projectPaths).flatMap((projectPath) => ['--add-dir', projectPath]);
 }
 
 export async function createPromptEnvelope(workspaceRoot: string, workflow: RequirementWorkflow, run: RunRecord, commandText: string, projectPaths?: string[]): Promise<string> {
   const requirementId = normalizeRequirementId(workflow.requirementId);
-  const promptDir = path.join(workspaceRoot, 'docs', requirementId, 'workflow', 'prompts');
+  const promptDir = getPromptRuntimeDir(workspaceRoot, requirementId);
   await fs.mkdir(promptDir, { recursive: true });
   const promptPath = path.join(promptDir, `${run.id}.md`);
   const skillName = commandText.trim().split(/\s+/)[0]?.replace(/^\//, '') || 'unknown';
@@ -145,6 +161,16 @@ export async function createPromptEnvelope(workspaceRoot: string, workflow: Requ
   const projectPathsSection = configuredProjectPaths || selectedProjects
     ? `\n## 工程代码目录\n${configuredProjectPaths}${selectedProjects}`
     : '';
+  const projectDiscoverySection = projectPathsSection
+    ? `
+## 工程检索策略
+
+- “本次涉及工程”是优先搜索工程，不是完整只读检索边界。
+- 先在本次涉及工程中定位入口和主要实现；如发现 Feign、API 包、DTO、表名、MQ Topic、Redis Key、路由、配置 Key、import 等跨工程线索，可在已配置工程父目录内只读扩展检索。
+- 技术方案或答疑产物需要声明代码检索范围：优先工程、自动扩展工程、扩展依据、未检索工程及原因。
+- 自动扩展工程仅允许只读分析；需要修改时，必须明确建议用户追加为涉及工程并等待确认。
+`
+    : '';
   const content = `# AI Delivery Agent Task
 
 你将在工作区执行一个 AI 需求交付动作。
@@ -155,7 +181,7 @@ export async function createPromptEnvelope(workspaceRoot: string, workflow: Requ
 - 关联分支: ${workflow.branchName || '未绑定'}
 - 运行 ID: ${run.id}
 - Agent: ${run.agentId || 'unknown'}
-${projectPathsSection}
+${projectPathsSection}${projectDiscoverySection}
 ## 技能
 
 - 名称: ${skillName}
@@ -170,14 +196,14 @@ ${commandText}
 ## 执行要求
 
 1. 先阅读技能说明文件，并严格按技能约定执行。
-2. 交付产物、OpenSpec 工件、运行日志和报告必须写入交付工作区内的约定目录。
-3. 工程代码的读取和修改仅限于上方列出的工程代码目录；不要把工程产物写入交付工作区之外的其他位置。
+2. 交付产物、OpenSpec 工件、和报告必须写入交付工作区内的约定目录。
+3. 工程代码读取遵守上方工程目录和检索策略；工程代码修改仅限本次涉及工程或用户明确确认的工程；不要把工程产物写入交付工作区之外的其他位置。
 4. 关键执行步骤、命令、阻塞原因和产物路径需要输出到终端。
 5. 若技能要求生成文档或报告，写入技能约定目录。
 6. 如果缺少必要输入或权限，停止并说明最小补充信息。
 `;
   await fs.writeFile(promptPath, content, 'utf8');
-  return path.relative(workspaceRoot, promptPath);
+  return toRuntimePathRef(workspaceRoot, promptPath);
 }
 
 function renderCommand(command: string[], context: CommandContext): string[] {
@@ -245,10 +271,10 @@ export async function createTerminalRunScript(
   projectPaths?: string[]
 ): Promise<TerminalRunScript> {
   const promptPath = await createPromptEnvelope(workspaceRoot, workflow, run, commandText, projectPaths);
-  const absolutePromptPath = assertInsideWorkspace(workspaceRoot, promptPath);
+  const absolutePromptPath = resolveWorkspaceOrRuntimePath(workspaceRoot, promptPath);
   const requirementId = normalizeRequirementId(workflow.requirementId);
-  const scriptDir = path.join(workspaceRoot, 'docs', requirementId, 'workflow', 'scripts');
-  const runDir = path.join(workspaceRoot, 'docs', requirementId, 'workflow', 'runs');
+  const scriptDir = getScriptRuntimeDir(workspaceRoot, requirementId);
+  const runDir = getRunRuntimeDir(workspaceRoot, requirementId);
   await fs.mkdir(scriptDir, { recursive: true });
   await fs.mkdir(runDir, { recursive: true });
 
@@ -261,7 +287,7 @@ export async function createTerminalRunScript(
   if (!commandTemplate.length) {
     throw new Error(`${terminalExecutionModeLabel(run)}未配置可执行命令: ${provider.name}`);
   }
-  const projectRoots = await selectedProjectRoots(workspaceRoot, workflow, projectPaths);
+  const projectRoots = agentReadableProjectRoots(workspaceRoot, await selectedProjectRoots(workspaceRoot, workflow, projectPaths));
   const rendered = renderCommand(commandTemplate, {
     workspaceRoot,
     promptFile: absolutePromptPath,
@@ -274,8 +300,8 @@ export async function createTerminalRunScript(
     projectParentAddDirArgs: projectParentAddDirArgs(projectPaths)
   });
   const commandLine = interactiveMode ? interactiveTerminalCommandLine(rendered) : terminalCommandLine(provider, rendered);
-  const transcriptPath = toRelativePath(workspaceRoot, absoluteTranscriptPath);
-  const statusPath = toRelativePath(workspaceRoot, absoluteStatusPath);
+  const transcriptPath = toRuntimePathRef(workspaceRoot, absoluteTranscriptPath);
+  const statusPath = toRuntimePathRef(workspaceRoot, absoluteStatusPath);
   const executionModeLabel = terminalExecutionModeLabel(run);
 
   const script = `#!/bin/zsh
@@ -376,7 +402,7 @@ exit $pipestatus[1]
 
   return {
     promptPath,
-    scriptPath: toRelativePath(workspaceRoot, absoluteScriptPath),
+    scriptPath: toRuntimePathRef(workspaceRoot, absoluteScriptPath),
     statusPath,
     transcriptPath,
     commandLine
@@ -413,15 +439,41 @@ async function launchTerminalScript(workspaceRoot: string, absoluteScriptPath: s
 
 export async function refreshTerminalRunStatuses(
   workspaceRoot: string,
-  workflow: RequirementWorkflow
+  workflow: RequirementWorkflow,
+  centerConfig?: CenterRunnerConfig
 ): Promise<{ workflow: RequirementWorkflow; changed: boolean }> {
   let changed = false;
   const finalStatuses = new Set<RunStatus>(['SUCCEEDED', 'FAILED', 'CANCELLED']);
   for (const run of workflow.runs) {
-    if (!isTerminalExecutionMode(run) || !run.terminalStatusPath || finalStatuses.has(run.status)) {
+    if (!isTerminalExecutionMode(run) || !run.terminalStatusPath) {
       continue;
     }
-    const absoluteStatusPath = assertInsideWorkspace(workspaceRoot, run.terminalStatusPath);
+    if (run.agentId === 'codex') {
+      const sessionUsage = await collectCodexSessionUsage(run);
+      if (sessionUsage.events.length) {
+        await recordCodexUsageEvents(workspaceRoot, workflow, run, 'codex', sessionUsage.events, centerConfig);
+      }
+      if (await retryTokenUsageOutbox(workspaceRoot, workflow, run, centerConfig)) {
+        changed = true;
+      }
+      changed = sessionUsage.changed || changed;
+    }
+    if (finalStatuses.has(run.status)) {
+      if (run.centerJobId && centerConfig && !run.centerSyncedAt) {
+        try {
+          await finishCenterJobForRun(run, centerConfig);
+          run.centerSyncedAt = new Date().toISOString();
+          changed = true;
+        } catch {
+          // 保留未同步状态，由后续轮询或服务恢复流程重试。
+        }
+      }
+      continue;
+    }
+    if (run.centerJobId && centerConfig) {
+      await renewCenterJob(centerConfig, run.centerJobId).catch(() => undefined);
+    }
+    const absoluteStatusPath = resolveWorkspaceOrRuntimePath(workspaceRoot, run.terminalStatusPath);
     const raw = await fs.readFile(absoluteStatusPath, 'utf8').catch(() => '');
     if (!raw.trim()) {
       continue;
@@ -445,9 +497,85 @@ export async function refreshTerminalRunStatuses(
         statusPath: run.terminalStatusPath
       }
     });
+    if (run.centerJobId && centerConfig) {
+      try {
+        await finishCenterJobForRun(run, centerConfig);
+        run.centerSyncedAt = new Date().toISOString();
+      } catch (error: any) {
+        await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
+          type: 'WARN',
+          level: 'WARN',
+          message: `Center Run 状态同步失败：${error?.message || 'unknown error'}`,
+          agentId: run.agentId
+        });
+      }
+    }
     changed = true;
   }
   return { workflow, changed };
+}
+
+export async function retryWorkflowCenterRunStatuses(
+  workflow: RequirementWorkflow,
+  centerConfig?: CenterRunnerConfig
+): Promise<boolean> {
+  if (!centerConfig) {
+    return false;
+  }
+  let changed = false;
+  const finalStatuses = new Set<RunStatus>(['SUCCEEDED', 'FAILED', 'CANCELLED', 'COMPLETED']);
+  for (const run of workflow.runs) {
+    if (!run.centerJobId || run.centerSyncedAt || !finalStatuses.has(run.status)) {
+      continue;
+    }
+    try {
+      await finishCenterJobForRun(run, centerConfig);
+      run.centerSyncedAt = new Date().toISOString();
+      changed = true;
+    } catch {
+      // Center 暂不可用时保留未同步状态，下一次需求刷新继续补偿。
+    }
+  }
+  return changed;
+}
+
+export function beginCenterJobLease(run: RunRecord, centerConfig?: CenterRunnerConfig): void {
+  if (!run.centerJobId || !centerConfig) {
+    return;
+  }
+  const centerJobId = run.centerJobId;
+  clearCenterJobLease(run.id);
+  const timer = setInterval(() => {
+    renewCenterJob(centerConfig, centerJobId).catch(() => undefined);
+  }, 20_000);
+  timer.unref();
+  centerLeaseTimers.set(run.id, timer);
+}
+
+export async function finishCenterJobForRun(run: RunRecord, centerConfig?: CenterRunnerConfig): Promise<void> {
+  if (!run.centerJobId || !centerConfig) {
+    return;
+  }
+  clearCenterJobLease(run.id);
+  if (run.status === 'SUCCEEDED' || run.status === 'COMPLETED') {
+    await completeCenterJob(centerConfig, run.centerJobId);
+    return;
+  }
+  if (run.status === 'CANCELLED') {
+    await cancelCenterJob(centerConfig, run.centerJobId);
+    return;
+  }
+  if (run.status === 'FAILED') {
+    await failCenterJob(centerConfig, run.centerJobId, run.error || `Agent 运行状态: ${run.status}`);
+  }
+}
+
+function clearCenterJobLease(localRunId: string): void {
+  const timer = centerLeaseTimers.get(localRunId);
+  if (timer) {
+    clearInterval(timer);
+    centerLeaseTimers.delete(localRunId);
+  }
 }
 
 export async function startAgentProcess(
@@ -457,7 +585,8 @@ export async function startAgentProcess(
   provider: AgentProvider,
   commandText: string,
   onUpdate: (run: RunRecord) => Promise<void>,
-  projectPaths?: string[]
+  projectPaths?: string[],
+  centerConfig?: CenterRunnerConfig
 ): Promise<RunRecord> {
   if (provider.inputMode === 'MANUAL' || !provider.command?.length) {
     run.status = 'WAITING_FOR_AGENT';
@@ -488,12 +617,12 @@ export async function startAgentProcess(
   }
 
   const promptPath = await createPromptEnvelope(workspaceRoot, workflow, run, commandText, projectPaths);
-  const absolutePromptPath = assertInsideWorkspace(workspaceRoot, promptPath);
+  const absolutePromptPath = resolveWorkspaceOrRuntimePath(workspaceRoot, promptPath);
   run.promptPath = promptPath;
   run.commandText = commandText;
 
   const promptContent = await fs.readFile(absolutePromptPath, 'utf8');
-  const projectRoots = await selectedProjectRoots(workspaceRoot, workflow, projectPaths);
+  const projectRoots = agentReadableProjectRoots(workspaceRoot, await selectedProjectRoots(workspaceRoot, workflow, projectPaths));
   const rendered = renderCommand(provider.command, {
     workspaceRoot,
     promptFile: absolutePromptPath,
@@ -534,6 +663,18 @@ export async function startAgentProcess(
     child.stdin.end();
   }
 
+  const codexUsageParser = provider.id === 'codex' ? new CodexUsageNdjsonParser() : undefined;
+  const usageTasks = new Set<Promise<void>>();
+
+  const enqueueCodexUsageEvents = (events: CodexUsageEvent[]) => {
+    if (!events.length) {
+      return;
+    }
+    const task = recordCodexUsageEvents(workspaceRoot, workflow, run, provider.id, events, centerConfig).catch(() => undefined);
+    usageTasks.add(task);
+    task.finally(() => usageTasks.delete(task)).catch(() => undefined);
+  };
+
   child.stdout.on('data', (chunk) => {
     const text = String(chunk);
     appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
@@ -543,6 +684,8 @@ export async function startAgentProcess(
       text,
       agentId: provider.id
     }).catch(() => undefined);
+    const usageEvents = codexUsageParser?.push(text) || [];
+    enqueueCodexUsageEvents(usageEvents);
   });
 
   child.stderr.on('data', (chunk) => {
@@ -572,21 +715,24 @@ export async function startAgentProcess(
   });
 
   child.on('close', (code) => {
-    activeProcesses.delete(run.id);
-    const wasCancelled = cancelledRunIds.has(run.id);
-    cancelledRunIds.delete(run.id);
-    run.status = wasCancelled ? 'CANCELLED' : code === 0 ? 'SUCCEEDED' : 'FAILED';
-    run.error = wasCancelled ? undefined : code === 0 ? undefined : `Agent 退出码: ${code}`;
-    run.finishedAt = new Date().toISOString();
-    appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
-      type: wasCancelled ? 'CANCELLED' : 'EXIT',
-      level: wasCancelled ? 'WARN' : code === 0 ? 'INFO' : 'ERROR',
-      message: wasCancelled ? 'Agent 运行已取消' : code === 0 ? 'Agent 执行完成' : `Agent 执行失败，退出码 ${code}`,
-      agentId: provider.id,
-      data: { code }
-    })
-      .then(() => onUpdate(run))
-      .catch(() => undefined);
+    (async () => {
+      activeProcesses.delete(run.id);
+      enqueueCodexUsageEvents(codexUsageParser?.flush() || []);
+      await Promise.allSettled([...usageTasks]);
+      const wasCancelled = cancelledRunIds.has(run.id);
+      cancelledRunIds.delete(run.id);
+      run.status = wasCancelled ? 'CANCELLED' : code === 0 ? 'SUCCEEDED' : 'FAILED';
+      run.error = wasCancelled ? undefined : code === 0 ? undefined : `Agent 退出码: ${code}`;
+      run.finishedAt = new Date().toISOString();
+      await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
+        type: wasCancelled ? 'CANCELLED' : 'EXIT',
+        level: wasCancelled ? 'WARN' : code === 0 ? 'INFO' : 'ERROR',
+        message: wasCancelled ? 'Agent 运行已取消' : code === 0 ? 'Agent 执行完成' : `Agent 执行失败，退出码 ${code}`,
+        agentId: provider.id,
+        data: { code }
+      });
+      await onUpdate(run);
+    })().catch(() => undefined);
   });
 
   const timeout = setTimeout(() => {
@@ -618,7 +764,8 @@ export async function startAgentInTerminal(
   run: RunRecord,
   provider: AgentProvider,
   commandText: string,
-  projectPaths?: string[]
+  projectPaths?: string[],
+  centerConfig?: CenterRunnerConfig
 ): Promise<RunRecord> {
   const requestedMode = isInteractiveTerminalRun(run) ? 'INTERACTIVE_TERMINAL' : 'TERMINAL';
   run.executionMode = requestedMode;
@@ -677,8 +824,9 @@ export async function startAgentInTerminal(
   });
 
   try {
-    await launchTerminalScript(workspaceRoot, assertInsideWorkspace(workspaceRoot, terminal.scriptPath));
+    await launchTerminalScript(workspaceRoot, resolveWorkspaceOrRuntimePath(workspaceRoot, terminal.scriptPath));
     run.status = 'TERMINAL_OPENED';
+    beginCenterJobLease(run, centerConfig);
     await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
       type: 'INFO',
       level: 'INFO',

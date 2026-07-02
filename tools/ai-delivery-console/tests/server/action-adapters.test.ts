@@ -3,10 +3,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { AgentProvider, RequirementWorkflow, RunRecord } from '../../shared/workflow';
 import { createEmptyStages } from '../../shared/workflow';
 import {
+  assertPrdClarificationReady,
   executeAction,
   internalForTests
 } from '../../server/services/action-adapters';
@@ -21,6 +22,8 @@ import {
   terminalCommandLine
 } from '../../server/services/agent-providers';
 import { readRunEvents } from '../../server/services/run-log';
+import { resolveWorkspaceOrRuntimePath } from '../../server/services/runtime-paths';
+import { serverConfig } from '../../server/config';
 
 const exec = promisify(execFile);
 
@@ -60,6 +63,203 @@ function runRecord(id: string): RunRecord {
 }
 
 describe('action-adapters', () => {
+  it('Center 需求中的 Codex 动作先创建精确 Run，再上传 token 并完成 Job', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-center-run-'));
+    const originalProvidersJson = serverConfig.agentProvidersJson;
+    serverConfig.agentProvidersJson = JSON.stringify([
+      {
+        id: 'codex',
+        name: 'Test Codex',
+        inputMode: 'PROMPT_FILE',
+        command: [
+          process.execPath,
+          '-e',
+          'console.log(JSON.stringify({type:"turn.completed",id:"turn-1",usage:{input_tokens:10,cached_input_tokens:4,output_tokens:2,reasoning_output_tokens:1}}));'
+        ],
+        available: true,
+        supportsStreaming: true
+      }
+    ]);
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (url.endsWith('/api/ai-delivery/jobs')) {
+        return response({ id: 500, requirementPk: 100, actionType: 'PRD_ANALYZE', status: 'QUEUED' });
+      }
+      if (url.endsWith('/api/ai-delivery/jobs/500/claim')) {
+        return response({ id: 500, requirementPk: 100, actionType: 'PRD_ANALYZE', status: 'CLAIMED', runId: 900 });
+      }
+      if (url.endsWith('/api/ai-delivery/run-token-usages')) {
+        return response({ detail: { id: 1 } });
+      }
+      if (url.endsWith('/api/ai-delivery/jobs/500/complete')) {
+        return response({ id: 500, status: 'SUCCEEDED', runId: 900 });
+      }
+      return response({});
+    });
+    const item = { ...workflow(), id: 100 };
+    let resolveUpdate!: (run: RunRecord) => void;
+    const updatedPromise = new Promise<RunRecord>((resolve) => {
+      resolveUpdate = resolve;
+    });
+
+    try {
+      const started = await executeAction(
+        root,
+        item,
+        {
+          actionType: 'PRD_ANALYZE',
+          params: { agentId: 'codex', executionMode: 'BACKGROUND' }
+        },
+        async (run) => resolveUpdate(run),
+        {
+          centerConfig: {
+            centerBaseUrl: 'http://127.0.0.1:8728',
+            userId: 1,
+            clientSessionId: 10,
+            fetchImpl: fetchImpl as unknown as typeof fetch
+          }
+        }
+      );
+      const completed = await updatedPromise;
+
+      expect(started.centerJobId).toBe(500);
+      expect(started.centerRunId).toBe(900);
+      expect(completed.status).toBe('SUCCEEDED');
+      expect(fetchImpl.mock.calls.map(([url]) => String(url))).toEqual(expect.arrayContaining([
+        'http://127.0.0.1:8728/api/ai-delivery/jobs',
+        'http://127.0.0.1:8728/api/ai-delivery/jobs/500/claim',
+        'http://127.0.0.1:8728/api/ai-delivery/run-token-usages',
+        'http://127.0.0.1:8728/api/ai-delivery/jobs/500/complete'
+      ]));
+      const usageCall = fetchImpl.mock.calls.find(([url]) => String(url).endsWith('/run-token-usages'));
+      expect(String(usageCall?.[1]?.body)).toContain('"runId":900');
+    } finally {
+      serverConfig.agentProvidersJson = originalProvidersJson;
+    }
+  });
+
+  it('Center Run 建立失败时阻止 Codex 启动', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-center-run-'));
+    const markerPath = path.join(root, 'agent-started.txt');
+    const originalProvidersJson = serverConfig.agentProvidersJson;
+    serverConfig.agentProvidersJson = JSON.stringify([
+      {
+        id: 'codex',
+        name: 'Test Codex',
+        inputMode: 'PROMPT_FILE',
+        command: [process.execPath, '-e', `require("node:fs").writeFileSync(${JSON.stringify(markerPath)}, "started")`],
+        available: true,
+        supportsStreaming: true
+      }
+    ]);
+
+    try {
+      const run = await executeAction(
+        root,
+        { ...workflow(), id: 100 },
+        {
+          actionType: 'PRD_ANALYZE',
+          params: { agentId: 'codex', executionMode: 'BACKGROUND' }
+        },
+        async () => undefined,
+        {
+          centerConfig: {
+            centerBaseUrl: 'http://127.0.0.1:8728',
+            userId: 1,
+            clientSessionId: 10,
+            fetchImpl: (async () => ({
+              ok: false,
+              json: async () => ({ success: false, message: 'center down' })
+            })) as unknown as typeof fetch
+          }
+        }
+      );
+
+      expect(run.status).toBe('FAILED');
+      expect(run.error).toContain('已阻止 Codex 启动');
+      await expect(fs.access(markerPath)).rejects.toThrow();
+    } finally {
+      serverConfig.agentProvidersJson = originalProvidersJson;
+    }
+  });
+
+  it('生成 PRD 澄清命令时不携带来源参数', () => {
+    const item = {
+      ...workflow(),
+      sources: ['https://prd.example.com/doc'],
+      prdSourceFiles: [
+        {
+          id: 'source-1',
+          name: '来源.pdf',
+          path: 'docs/172014/prd/files/source-1.pdf',
+          size: 100,
+          uploadedAt: new Date().toISOString()
+        }
+      ]
+    };
+
+    expect(
+      internalForTests.buildSkillCommand(item, {
+        actionType: 'PRD_CLARIFY',
+        params: {
+          description: '补充异常场景'
+        }
+      })
+    ).toBe('/coding-prd-analyzer id=172014 c=补充异常场景');
+  });
+
+  it('PRD 澄清校验要求普通需求、非空描述和已存在 PRD 文档', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-prd-clarify-'));
+    const item = workflow();
+
+    await expect(
+      assertPrdClarificationReady(root, item, {
+        actionType: 'PRD_CLARIFY',
+        params: { description: '补充异常场景' }
+      })
+    ).rejects.toThrow('请先生成 PRD 文档');
+
+    await fs.mkdir(path.join(root, 'docs', '172014', 'prd'), { recursive: true });
+    await fs.writeFile(path.join(root, 'docs', '172014', 'prd', 'analysis.md'), '# PRD');
+
+    await expect(
+      assertPrdClarificationReady(root, item, {
+        actionType: 'PRD_CLARIFY',
+        params: { description: '   ' }
+      })
+    ).rejects.toThrow('请输入 PRD 澄清描述');
+
+    await expect(
+      assertPrdClarificationReady(
+        root,
+        { ...item, requirementType: 'DEFECT' },
+        {
+          actionType: 'PRD_CLARIFY',
+          params: { description: '补充异常场景' }
+        }
+      )
+    ).rejects.toThrow('缺陷类型不支持 PRD 澄清');
+
+    await expect(
+      assertPrdClarificationReady(root, item, {
+        actionType: 'PRD_CLARIFY',
+        params: { description: '补充异常场景' }
+      })
+    ).resolves.toBeUndefined();
+  });
+
+  it('PRD 澄清执行在校验失败时不创建运行记录', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-prd-clarify-run-'));
+    await expect(
+      executeAction(root, workflow(), {
+        actionType: 'PRD_CLARIFY',
+        params: { description: '补充异常场景' }
+      })
+    ).rejects.toThrow('请先生成 PRD 文档');
+
+    const eventsDir = path.join(root, 'docs', '172014', 'workflow', 'runs');
+    await expect(fs.readdir(eventsDir)).rejects.toThrow();
+  });
+
   it('普通需求生成技术方案命令时保留 PRD 文档上下文', () => {
     const item = {
       ...workflow(),
@@ -76,6 +276,35 @@ describe('action-adapters', () => {
 
     expect(internalForTests.buildSkillCommand(item, { actionType: 'DESIGN_GENERATE', params: {} })).toBe(
       '/coding-design d=docs/172014/prd/analysis.md,docs/172014/technical-design/files/source-1.png r=172014'
+    );
+  });
+
+  it('普通需求再次生成技术方案命令时携带已有评审文档', () => {
+    const item = {
+      ...workflow(),
+      artifacts: [
+        {
+          id: 'technical-design',
+          stage: 'TECH_DESIGN' as const,
+          label: '技术方案评审文档',
+          path: 'docs/172014/technical-design/design_review.md',
+          kind: 'markdown' as const,
+          exists: true
+        }
+      ],
+      techDesignSourceFiles: [
+        {
+          id: 'source-1',
+          name: '补充图.png',
+          path: 'docs/172014/technical-design/files/source-1.png',
+          size: 100,
+          uploadedAt: new Date().toISOString()
+        }
+      ]
+    };
+
+    expect(internalForTests.buildSkillCommand(item, { actionType: 'DESIGN_GENERATE', params: {} })).toBe(
+      '/coding-design d=docs/172014/prd/analysis.md,docs/172014/technical-design/design_review.md,docs/172014/technical-design/files/source-1.png r=172014'
     );
   });
 
@@ -114,6 +343,100 @@ describe('action-adapters', () => {
     expect(internalForTests.buildSkillCommand(item, { actionType: 'DESIGN_GENERATE', params: {} })).toBe(
       '/coding-design d=docs/172014/prd/analysis.md,docs/172014/technical-design/questions/20260604-173000-question.md,docs/172014/technical-design/questions.md,docs/172014/technical-design/files/source-1.png r=172014'
     );
+  });
+
+  it('普通需求再次生成技术方案命令时不再自动携带本地批注摘要', () => {
+    const item = {
+      ...workflow(),
+      artifacts: [
+        {
+          id: 'technical-design',
+          stage: 'TECH_DESIGN' as const,
+          label: '技术方案评审文档',
+          path: 'docs/172014/technical-design/design_review.md',
+          kind: 'markdown' as const,
+          exists: true
+        },
+        {
+          id: 'technical-design-annotations',
+          stage: 'TECH_DESIGN' as const,
+          label: '技术方案批注记录',
+          path: 'docs/172014/technical-design/annotations/comments.md',
+          kind: 'markdown' as const,
+          exists: true
+        },
+        {
+          id: 'technical-design-questions',
+          stage: 'TECH_DESIGN' as const,
+          label: '技术方案答疑记录',
+          path: 'docs/172014/technical-design/questions.md',
+          kind: 'markdown' as const,
+          exists: true
+        }
+      ],
+      techDesignSourceFiles: [
+        {
+          id: 'source-1',
+          name: '补充图.png',
+          path: 'docs/172014/technical-design/files/source-1.png',
+          size: 100,
+          uploadedAt: new Date().toISOString()
+        }
+      ]
+    };
+
+    expect(internalForTests.buildSkillCommand(item, { actionType: 'DESIGN_GENERATE', params: {} })).toBe(
+      '/coding-design d=docs/172014/prd/analysis.md,docs/172014/technical-design/design_review.md,docs/172014/technical-design/questions.md,docs/172014/technical-design/files/source-1.png r=172014'
+    );
+  });
+
+  it('普通需求再次生成技术方案命令时过滤已消费答疑记录', () => {
+    const item = {
+      ...workflow(),
+      techDesignConsumedQuestionPaths: ['docs/172014/technical-design/questions/20260604-173000-question.md'],
+      artifacts: [
+        {
+          id: 'technical-design',
+          stage: 'TECH_DESIGN' as const,
+          label: '技术方案评审文档',
+          path: 'docs/172014/technical-design/design_review.md',
+          kind: 'markdown' as const,
+          exists: true
+        },
+        {
+          id: 'technical-design-question-1',
+          stage: 'TECH_DESIGN' as const,
+          label: '已消费答疑',
+          path: 'docs/172014/technical-design/questions/20260604-173000-question.md',
+          kind: 'markdown' as const,
+          exists: true
+        },
+        {
+          id: 'technical-design-question-2',
+          stage: 'TECH_DESIGN' as const,
+          label: '新增答疑',
+          path: 'docs/172014/technical-design/questions/20260605-101500-question.md',
+          kind: 'markdown' as const,
+          exists: true
+        }
+      ]
+    };
+
+    const command = internalForTests.buildSkillCommand(item, {
+      actionType: 'DESIGN_GENERATE',
+      params: {
+        sourceFiles: [
+          'docs/172014/technical-design/questions/20260604-173000-question.md',
+          'docs/172014/technical-design/questions/20260605-101500-question.md',
+          'docs/172014/technical-design/files/source-1.png'
+        ]
+      }
+    });
+
+    expect(command).toBe(
+      '/coding-design d=docs/172014/prd/analysis.md,docs/172014/technical-design/design_review.md,docs/172014/technical-design/questions/20260605-101500-question.md,docs/172014/technical-design/files/source-1.png r=172014'
+    );
+    expect(command).not.toContain('20260604-173000-question.md');
   });
 
   it('生成技术方案答疑命令并默认使用独立输出路径', () => {
@@ -200,6 +523,96 @@ describe('action-adapters', () => {
     const command = internalForTests.buildSkillCommand(item, { actionType: 'DESIGN_GENERATE', params: {} });
 
     expect(command).toBe('/coding-design d=邀请好友积分异常,后台配置为 1，实际奖励 10,docs/172014/technical-design/files/source-1.png r=172014');
+    expect(command).not.toContain('/prd/');
+  });
+
+  it('缺陷再次生成技术方案命令时携带已有评审文档且不自动携带 PRD', () => {
+    const item = {
+      ...workflow(),
+      title: '邀请好友积分异常',
+      requirementType: 'DEFECT' as const,
+      currentStage: 'TECH_DESIGN' as const,
+      stages: createEmptyStages('DEFECT'),
+      artifacts: [
+        {
+          id: 'technical-design',
+          stage: 'TECH_DESIGN' as const,
+          label: '技术方案评审文档',
+          path: 'docs/172014/technical-design/design_review.md',
+          kind: 'markdown' as const,
+          exists: true
+        }
+      ],
+      techDesignClarification: '后台配置为 1，实际奖励 10',
+      techDesignSourceFiles: [
+        {
+          id: 'source-1',
+          name: '配置截图.png',
+          path: 'docs/172014/technical-design/files/source-1.png',
+          size: 100,
+          uploadedAt: new Date().toISOString()
+        }
+      ]
+    };
+
+    const command = internalForTests.buildSkillCommand(item, { actionType: 'DESIGN_GENERATE', params: {} });
+
+    expect(command).toBe(
+      '/coding-design d=邀请好友积分异常,后台配置为 1，实际奖励 10,docs/172014/technical-design/design_review.md,docs/172014/technical-design/files/source-1.png r=172014'
+    );
+    expect(command).not.toContain('/prd/');
+  });
+
+  it('缺陷再次生成技术方案命令时不再自动携带本地批注摘要', () => {
+    const item = {
+      ...workflow(),
+      title: '邀请好友积分异常',
+      requirementType: 'DEFECT' as const,
+      currentStage: 'TECH_DESIGN' as const,
+      stages: createEmptyStages('DEFECT'),
+      artifacts: [
+        {
+          id: 'technical-design',
+          stage: 'TECH_DESIGN' as const,
+          label: '技术方案评审文档',
+          path: 'docs/172014/technical-design/design_review.md',
+          kind: 'markdown' as const,
+          exists: true
+        },
+        {
+          id: 'technical-design-annotations',
+          stage: 'TECH_DESIGN' as const,
+          label: '技术方案批注记录',
+          path: 'docs/172014/technical-design/annotations/comments.md',
+          kind: 'markdown' as const,
+          exists: true
+        },
+        {
+          id: 'technical-design-questions',
+          stage: 'TECH_DESIGN' as const,
+          label: '技术方案答疑记录',
+          path: 'docs/172014/technical-design/questions.md',
+          kind: 'markdown' as const,
+          exists: true
+        }
+      ],
+      techDesignClarification: '后台配置为 1，实际奖励 10',
+      techDesignSourceFiles: [
+        {
+          id: 'source-1',
+          name: '配置截图.png',
+          path: 'docs/172014/technical-design/files/source-1.png',
+          size: 100,
+          uploadedAt: new Date().toISOString()
+        }
+      ]
+    };
+
+    const command = internalForTests.buildSkillCommand(item, { actionType: 'DESIGN_GENERATE', params: {} });
+
+    expect(command).toBe(
+      '/coding-design d=邀请好友积分异常,后台配置为 1，实际奖励 10,docs/172014/technical-design/design_review.md,docs/172014/technical-design/questions.md,docs/172014/technical-design/files/source-1.png r=172014'
+    );
     expect(command).not.toContain('/prd/');
   });
 
@@ -300,7 +713,49 @@ describe('action-adapters', () => {
     expect(run.error).toContain('暂存区没有已暂存文件');
     expect(events.some((event) => event.message.includes('暂存区没有已暂存文件'))).toBe(true);
   });
+
+  it('staged 模式代码评审使用当前用户项目私有工程目录做 Git 预检查', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-review-'));
+    const projectParent = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-projects-'));
+    const projectRoot = path.join(projectParent, 'opp-learn');
+    await fs.mkdir(path.join(projectRoot, 'src'), { recursive: true });
+    await git(projectRoot, ['init']);
+    await fs.writeFile(path.join(projectRoot, 'src', 'a.txt'), 'old\n', 'utf8');
+    await git(projectRoot, ['add', '.']);
+    await git(projectRoot, ['-c', 'user.email=test@example.com', '-c', 'user.name=Test', 'commit', '-m', 'init']);
+    await fs.writeFile(path.join(projectRoot, 'src', 'a.txt'), 'old\nnew\n', 'utf8');
+    await git(projectRoot, ['add', 'src/a.txt']);
+    const item = {
+      ...workflow(),
+      projects: [{ name: 'opp-learn', path: 'opp-learn' }]
+    };
+
+    const run = await executeAction(
+      root,
+      item,
+      {
+        actionType: 'CODE_REVIEW',
+        params: {
+          reviewMode: 'staged',
+          agentId: 'missing-agent'
+        }
+      },
+      async () => undefined,
+      { projectPaths: [projectParent] }
+    );
+
+    expect(run.status).toBe('WAITING_FOR_AGENT');
+    expect(run.error).toBeUndefined();
+    expect(run.commandText).toContain('p=opp-learn');
+  });
 });
+
+function response(data: unknown) {
+  return {
+    ok: true,
+    json: async () => ({ success: true, data })
+  };
+}
 
 describe('agent-providers', () => {
   it('内置 CLI 执行时实时追加 stdout 和 stderr 事件', async () => {
@@ -325,8 +780,29 @@ describe('agent-providers', () => {
     expect(providers.map((provider) => provider.id)).toEqual(expect.arrayContaining(['codex']));
     const codex = providers.find((provider) => provider.id === 'codex');
     expect(codex?.inputMode).toBe('STDIN');
-    expect(codex?.command).toEqual(['codex', 'exec', '-C', '{workspaceRoot}', '{projectParentAddDirArgs}', '-']);
-    expect(codex?.interactiveCommand).toEqual(['codex', '-C', '{workspaceRoot}', '{projectParentAddDirArgs}', '--no-alt-screen', '{prompt}']);
+    expect(codex?.command).toEqual([
+      'codex',
+      'exec',
+      '--json',
+      '--sandbox',
+      'workspace-write',
+      '-C',
+      '{workspaceRoot}',
+      '{projectParentAddDirArgs}',
+      '{projectAddDirArgs}',
+      '-'
+    ]);
+    expect(codex?.interactiveCommand).toEqual([
+      'codex',
+      '--sandbox',
+      'workspace-write',
+      '-C',
+      '{workspaceRoot}',
+      '{projectParentAddDirArgs}',
+      '{projectAddDirArgs}',
+      '--no-alt-screen',
+      '{prompt}'
+    ]);
     expect(codex?.supportsInteractive).toBe(true);
   });
 
@@ -335,7 +811,7 @@ describe('agent-providers', () => {
     await fs.mkdir(path.join(root, '.codex', 'skills', 'coding-prd-analyzer'), { recursive: true });
     await fs.writeFile(path.join(root, '.codex', 'skills', 'coding-prd-analyzer', 'SKILL.md'), 'skill');
     const promptPath = await createPromptEnvelope(root, workflow(), runRecord('run-1'), '/coding-prd-analyzer id=172014');
-    const content = await fs.readFile(path.join(root, promptPath), 'utf8');
+    const content = await fs.readFile(resolveWorkspaceOrRuntimePath(root, promptPath), 'utf8');
     expect(content).toContain('/coding-prd-analyzer id=172014');
     expect(content).toContain('.codex/skills/coding-prd-analyzer/SKILL.md');
   });
@@ -350,7 +826,7 @@ describe('agent-providers', () => {
       projects: [{ name: 'opp-api', path: 'opp-api' }]
     };
     const promptPath = await createPromptEnvelope(root, item, runRecord('run-projects'), '/coding-prd-analyzer id=172014', [projectParent]);
-    const content = await fs.readFile(path.join(root, promptPath), 'utf8');
+    const content = await fs.readFile(resolveWorkspaceOrRuntimePath(root, promptPath), 'utf8');
 
     expect(content).toContain(`- 交付工作区: ${root}`);
     expect(content).toContain('## 工程代码目录');
@@ -442,11 +918,11 @@ describe('agent-providers', () => {
     };
 
     const terminal = await createTerminalRunScript(root, workflow(), run, provider, '/coding-prd-analyzer id=172014');
-    const script = await fs.readFile(path.join(root, terminal.scriptPath), 'utf8');
+    const script = await fs.readFile(resolveWorkspaceOrRuntimePath(root, terminal.scriptPath), 'utf8');
 
-    expect(terminal.scriptPath).toBe('docs/172014/workflow/scripts/run-terminal-script.command');
-    expect(terminal.transcriptPath).toBe('docs/172014/workflow/runs/run-terminal-script.terminal.log');
-    expect(terminal.statusPath).toBe('docs/172014/workflow/runs/run-terminal-script.terminal-status.json');
+    expect(terminal.scriptPath).toBe('.ai-delivery-runtime/requirements/172014/scripts/run-terminal-script.command');
+    expect(terminal.transcriptPath).toBe('.ai-delivery-runtime/requirements/172014/runs/run-terminal-script.terminal.log');
+    expect(terminal.statusPath).toBe('.ai-delivery-runtime/requirements/172014/runs/run-terminal-script.terminal-status.json');
     expect(script).toContain('AI Delivery');
     expect(script).toContain('/coding-prd-analyzer id=172014');
     expect(script).toContain('terminal-status.json');
@@ -470,7 +946,7 @@ describe('agent-providers', () => {
     };
 
     const terminal = await createTerminalRunScript(root, workflow(), run, provider, '/coding-prd-analyzer id=172014');
-    const script = await fs.readFile(path.join(root, terminal.scriptPath), 'utf8');
+    const script = await fs.readFile(resolveWorkspaceOrRuntimePath(root, terminal.scriptPath), 'utf8');
 
     expect(terminal.commandLine).toContain("'interactive-agent'");
     expect(terminal.commandLine).not.toContain('background-agent');
@@ -515,13 +991,13 @@ describe('agent-providers', () => {
       ...runRecord('run-terminal-finished'),
       status: 'TERMINAL_OPENED',
       executionMode: 'TERMINAL',
-      terminalStatusPath: 'docs/172014/workflow/runs/run-terminal-finished.terminal-status.json',
-      terminalTranscriptPath: 'docs/172014/workflow/runs/run-terminal-finished.terminal.log'
+      terminalStatusPath: '.ai-delivery-runtime/requirements/172014/runs/run-terminal-finished.terminal-status.json',
+      terminalTranscriptPath: '.ai-delivery-runtime/requirements/172014/runs/run-terminal-finished.terminal.log'
     };
     item.runs.push(run);
-    await fs.mkdir(path.join(root, 'docs', '172014', 'workflow', 'runs'), { recursive: true });
+    await fs.mkdir(path.dirname(resolveWorkspaceOrRuntimePath(root, run.terminalStatusPath)), { recursive: true });
     await fs.writeFile(
-      path.join(root, run.terminalStatusPath),
+      resolveWorkspaceOrRuntimePath(root, run.terminalStatusPath),
       JSON.stringify({
         status: 'SUCCEEDED',
         exitCode: 0,
@@ -545,13 +1021,13 @@ describe('agent-providers', () => {
       ...runRecord('run-interactive-finished'),
       status: 'TERMINAL_OPENED',
       executionMode: 'INTERACTIVE_TERMINAL',
-      terminalStatusPath: 'docs/172014/workflow/runs/run-interactive-finished.terminal-status.json',
-      terminalTranscriptPath: 'docs/172014/workflow/runs/run-interactive-finished.terminal.log'
+      terminalStatusPath: '.ai-delivery-runtime/requirements/172014/runs/run-interactive-finished.terminal-status.json',
+      terminalTranscriptPath: '.ai-delivery-runtime/requirements/172014/runs/run-interactive-finished.terminal.log'
     };
     item.runs.push(run);
-    await fs.mkdir(path.join(root, 'docs', '172014', 'workflow', 'runs'), { recursive: true });
+    await fs.mkdir(path.dirname(resolveWorkspaceOrRuntimePath(root, run.terminalStatusPath)), { recursive: true });
     await fs.writeFile(
-      path.join(root, run.terminalStatusPath),
+      resolveWorkspaceOrRuntimePath(root, run.terminalStatusPath),
       JSON.stringify({
         status: 'SUCCEEDED',
         exitCode: 0,

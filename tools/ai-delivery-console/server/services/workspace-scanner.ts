@@ -77,6 +77,9 @@ function artifactKindForFile(filePath: string): ArtifactRef['kind'] {
   if (ext === '.json') {
     return 'json';
   }
+  if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'].includes(ext)) {
+    return 'image';
+  }
   return 'text';
 }
 
@@ -105,6 +108,17 @@ export async function scanRequirementArtifacts(
   if (techDesignQuestions) {
     artifacts.push(techDesignQuestions);
   }
+  const techDesignInputLedger = await existingFileArtifact(
+    workspaceRoot,
+    'technical-design-input-ledger',
+    'TECH_DESIGN',
+    '技术方案输入消费台账',
+    `docs/${id}/technical-design/input-ledger.json`,
+    'json'
+  );
+  if (techDesignInputLedger) {
+    artifacts.push(techDesignInputLedger);
+  }
   const techDesignQuestionFiles = await listFiles(path.join(workspaceRoot, 'docs', id, 'technical-design', 'questions'), 2);
   for (const file of techDesignQuestionFiles.filter((item) => /\.md$/i.test(item))) {
     const relative = path.relative(workspaceRoot, file);
@@ -114,6 +128,20 @@ export async function scanRequirementArtifacts(
         `technical-design-question-${artifacts.length}`,
         'TECH_DESIGN',
         `技术方案答疑 ${path.basename(file, path.extname(file))}`,
+        relative,
+        'markdown'
+      )
+    );
+  }
+  const techDesignAnnotationSnapshots = await listFiles(path.join(workspaceRoot, 'docs', id, 'technical-design', 'annotation-snapshots'), 1);
+  for (const file of techDesignAnnotationSnapshots.filter((item) => /\.md$/i.test(item))) {
+    const relative = path.relative(workspaceRoot, file);
+    artifacts.push(
+      await fileArtifact(
+        workspaceRoot,
+        `technical-design-annotation-snapshot-${artifacts.length}`,
+        'TECH_DESIGN',
+        `技术方案批注消费快照 ${path.basename(file, path.extname(file))}`,
         relative,
         'markdown'
       )
@@ -155,9 +183,19 @@ export async function scanRequirementArtifacts(
       path: `docs/${id}/code-review/commit/summary.md`
     },
     {
+      id: 'code-review-commit-all',
+      label: '代码评审详细报告（commit 正式评审）',
+      path: `docs/${id}/code-review/commit/code_review_result_all.md`
+    },
+    {
       id: 'code-review-staged',
       label: '代码评审（staged 暂存区预审）',
       path: `docs/${id}/code-review/staged/summary.md`
+    },
+    {
+      id: 'code-review-staged-all',
+      label: '代码评审详细报告（staged 暂存区预审）',
+      path: `docs/${id}/code-review/staged/code_review_result_all.md`
     }
   ];
   for (const item of requirementReviewArtifacts) {

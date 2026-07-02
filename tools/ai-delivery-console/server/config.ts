@@ -1,26 +1,33 @@
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 const toolDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const require = createRequire(import.meta.url);
+const { loadProfileEnv } = require('../scripts/env-loader.cjs') as { loadProfileEnv: (rootDir: string) => void };
+
+loadProfileEnv(toolDir);
 
 export const serverConfig = {
-  port: Number(process.env.AI_DELIVERY_PORT || 8718),
+  port: Number(process.env.VITE_AI_DELIVERY_PORT || 8718),
   toolDir,
   workspaceRoot: path.resolve(process.env.AI_DELIVERY_WORKSPACE_ROOT || path.join(toolDir, '..', '..')),
   agentProvidersPath: process.env.AGENT_PROVIDERS_PATH,
   agentProvidersJson: process.env.AGENT_PROVIDERS_JSON,
   defaultAgentId: process.env.DEFAULT_AGENT_ID || 'manual',
-  agentTimeout: Number(process.env.AGENT_TIMEOUT || 600000),
-  codexCommand: process.env.CODEX_COMMAND || 'codex exec -C {workspaceRoot} {projectParentAddDirArgs} -',
-  codexInteractiveCommand: process.env.CODEX_INTERACTIVE_COMMAND || 'codex -C {workspaceRoot} {projectParentAddDirArgs} --no-alt-screen {prompt}',
+  agentTimeout: Number(process.env.AGENT_TIMEOUT || 3600000),
+  codexCommand: process.env.CODEX_COMMAND || 'codex exec --json --sandbox workspace-write -C {workspaceRoot} {projectParentAddDirArgs} {projectAddDirArgs} -',
+  codexInteractiveCommand:
+    process.env.CODEX_INTERACTIVE_COMMAND ||
+    'codex --sandbox workspace-write -C {workspaceRoot} {projectParentAddDirArgs} {projectAddDirArgs} --no-alt-screen {prompt}',
   codebuddyCommand:
     process.env.CODEBUDDY_COMMAND ||
     'codebuddy --add-dir {workspaceRoot} {projectParentAddDirArgs} --allowedTools "Bash,Read,Write" --permission-mode bypassPermissions -p -',
   codebuddyInteractiveCommand:
     process.env.CODEBUDDY_INTERACTIVE_COMMAND ||
     'codebuddy --add-dir {workspaceRoot} {projectParentAddDirArgs} --allowedTools "Bash,Read,Write" --permission-mode bypassPermissions {prompt}',
-  qoderCommand: process.env.QODER_COMMAND || 'qoderclicn -w {workspaceRoot} -',
-  qoderInteractiveCommand: process.env.QODER_INTERACTIVE_COMMAND || 'qoderclicn -w {workspaceRoot} -',
+  qoderCommand: process.env.QODER_COMMAND || 'qcode -w {workspaceRoot} -',
+  qoderInteractiveCommand: process.env.QODER_INTERACTIVE_COMMAND || 'qcode -w {workspaceRoot} -',
   qwenCommand: process.env.QWEN_COMMAND || 'qwen -',
   qwenInteractiveCommand: process.env.QWEN_INTERACTIVE_COMMAND || 'qwen -'
 };

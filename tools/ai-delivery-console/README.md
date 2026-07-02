@@ -2,9 +2,9 @@
 
 **OpenSpec + 自定义技能可视化交付台**
 
-> **当前版本：** v0.1.0 | **最后更新：** 2026-05-26
+> **当前版本：** v0.1.0 | **最后更新：** 2026-06-17
 
-面向本地工作区的可视化工具，用于按需求号聚合 PRD、技术方案、OpenSpec 实施验证、单元测试报告和代码评审报告。让 AI 辅助编程的整个流程清晰可见、可控可追溯。
+面向 Git-backed AI 交付工作区的可视化工具。网页版和桌面端都以中心服务为唯一共享事实源，用于按需求号聚合 PRD、技术方案、OpenSpec 实施验证、单元测试报告和代码评审报告。Local Runner 只负责本机 Git、OpenSpec 和 Agent CLI 执行，不再承载独立 workflow 数据源。
 
 ## 🎯 解决的核心痛点
 
@@ -36,7 +36,7 @@
 **痛点：** 手动执行多个技能命令容易遗漏步骤，分支切换、产物检查、状态同步全靠人工记忆。
 
 **解决方案：**
-- ✅ **可视化工作流引擎**：5 个阶段（PRD → 设计 → 验证 → 测试 → 评审）状态一目了然
+- ✅ **可视化工作流引擎**：4 个阶段（PRD → 技术方案 → 实施验证 → 代码评审）状态一目了然
 - ✅ **一键式操作**：点击按钮即可触发对应的 Skill 执行，无需记忆复杂命令
 - ✅ **并发安全控制**：需求级锁文件机制，避免多人同时修改同一需求导致冲突
 - ✅ **自动产物刷新**：执行完成后自动重新索引文件，实时展示最新内容
@@ -57,7 +57,7 @@
 
 - 🎯 **一站式管理**：一个界面掌控从需求到代码的全链路交付
 - 📊 **可视化工作流**：直观展示每个阶段的进度和状态
-- 🔄 **实时反馈**：SSE 技术实时展示 Agent 执行日志
+- 🔄 **实时反馈**：中心 WebSocket 同步流程、产物和运行事件，HTTP 补偿接口支持断线恢复
 - 🔒 **安全可靠**：工作区路径限制、锁文件机制、hash 校验三重保障
 - ⚡ **灵活集成**：支持 Codex CLI 自动化或自定义 Agent Provider
 - 📈 **产物聚合**：自动索引所有相关文档和报告
@@ -74,11 +74,150 @@ npm run server:dev
 npm run dev
 ```
 
-默认 Runner 地址为 `http://127.0.0.1:8718`，前端开发服务为 `http://127.0.0.1:5178`。如果需要指定工作区根目录：
+默认中心服务地址为 `http://127.0.0.1:8728`，Local Runner 地址为 `http://127.0.0.1:8718`，浏览器单一入口为 `http://127.0.0.1:5178`。HTTP(S) 页面通过同源路径 `/center-api/*` 和 `/runner-api/*` 分别代理到 Center 与 Runner，Center WebSocket 也通过 `/center-api/*` upgrade，避免浏览器 CORS 与 HTTPS 页面访问 HTTP Runner 的 Mixed Content。网页版和桌面端读取需求、阶段、产物索引、审核、问题和运行日志时都请求中心服务；Runner 只提供本机桥接、Agent 执行、Git 同步和 bootstrap import。
+
+Runner 与 Center 仍是独立进程，`8718` 只是 Runner 内部上游端口。若将 `dist` 部署到独立 Web 服务器，必须在该服务器复刻以下路径契约：`/runner-api` 转发 Runner 并移除前缀，`/center-api` 转发 Center、移除前缀并支持 WebSocket upgrade。
+
+### 环境 Profile
+
+控制台内置 local、dev、prd 三套 env profile：
+
+```text
+.env.local   # 本机开发，中心服务和 Runner 默认都在 127.0.0.1
+.env.dev     # 联调环境，中心服务指向 dev，Runner 仍默认使用本机
+.env.prd     # 生产构建默认值
+.env.<profile>.local # 个人覆盖，不进入 Git
+.env.example # 变量模板
+```
+
+常用脚本：
+
+```bash
+npm run dev:local
+npm run dev:dev
+npm run dev:prd
+
+npm run server:dev:local
+npm run server:dev:dev
+npm run server:dev:prd
+
+npm run desktop:dev:local
+npm run desktop:dev:dev
+npm run desktop:dev:prd
+
+npm run build:local
+npm run build:dev
+npm run build:prd
+```
+
+兼容入口仍然可用：`npm run dev`、`npm run server:dev`、`npm run desktop:dev` 默认走 local，`npm run build` 默认走 prd。受控 profile 只声明环境差异，未声明项使用代码默认值；个人 Center tunnel 或 allowed hosts 写入 `.env.<profile>.local`。文件优先级为 `.env` < `.env.<profile>` < `.env.<profile>.local`，shell 显式变量优先级最高。
+
+如果需要指定 Runner 使用的工作区根目录：
 
 ```bash
 AI_DELIVERY_WORKSPACE_ROOT=/Users/key.lin/work/Projects/ai-coding npm run server:dev
 ```
+
+## 🖥️ Remote-only 协作模式
+
+控制台当前采用 remote-only 架构：
+
+- **中心服务**：保存需求流程、阶段状态、审核、问题、Job、运行日志、实时事件和 Git 产物版本索引。
+- **Local Runner**：负责本机 Git clone/pull/push、OpenSpec、Agent CLI、终端执行和 bootstrap import，不提供独立 workflow CRUD。
+- **网页端和桌面端一致**：两端都读取中心服务；本机配置只影响当前客户端如何执行和同步，不影响其他用户看到的共享事实。
+
+### Git-backed 产物仓
+
+每个登录用户需要在「个人中心 / 交付工作区」完成两项配置：
+
+- `deliveryWorkspaceRoot`: 用户本机选择的全局交付工作区，项目产物仓会 clone 到 `<deliveryWorkspaceRoot>/<projectCode>`。
+- Git SSH 凭证：点击生成后，私钥只保存到 `<deliveryWorkspaceRoot>/.ai-delivery/keys/{fingerprint}`，中心只保存公钥、fingerprint、平台和状态。
+
+项目创建时必须填写 AI 产物 Git 仓地址、平台和默认分支，创建后不支持修改。项目仓只存 AI 交付产物和 Agent skill 目录：
+
+```text
+docs/{需求号}/
+docs/code_review/
+openspec/changes/
+openspec/specs/
+.codex/skills/
+.codebuddy/skills/
+.qoder/skills/
+.qwen/skills/
+```
+
+Runner 在 clone 项目仓后会把工具链仓 `skills/coding-*` 同步到项目仓各 Agent skill 目录，不会创建 `<projectCode>/skills`。
+
+### 开发态启动桌面客户端
+
+```bash
+cd tools/ai-delivery-console
+npm install
+npm run dev
+npm run desktop:dev
+```
+
+开发态桌面窗口默认加载 `http://127.0.0.1:5178`。生产打包时应用会加载 `dist/index.html`，安装包输出到 `release/`：
+
+```bash
+npm run desktop:build
+```
+
+### 连接中心服务
+
+中心服务、Runner 和 Agent CLI 命令通过 env profile 或启动环境变量配置：
+
+- `VITE_AI_DELIVERY_CENTER_BASE_URL`: Center 代理上游与 Electron 直连地址，例如 `http://127.0.0.1:8728`
+- `VITE_AI_DELIVERY_RUNNER_BASE_URL`: Runner 代理上游与 Electron 直连地址，默认 `http://127.0.0.1:8718`
+- `VITE_AI_DELIVERY_PORT`、`VITE_AI_DELIVERY_DEV_PORT`、`VITE_AI_DELIVERY_PREVIEW_PORT`: 可选端口覆盖，默认分别为 `8718`、`5178`、`4178`
+- `VITE_AI_DELIVERY_ALLOWED_HOSTS`: 可选 Vite Host 白名单，个人 tunnel 域名应配置在 `.env.<profile>.local`
+- `CODEX_COMMAND`、`CODEBUDDY_COMMAND`、`QODER_COMMAND`、`QWEN_COMMAND`: 覆盖默认 Agent CLI 命令
+- `AGENT_PROVIDERS_JSON` / `AGENT_PROVIDERS_PATH`: 高级场景下整体覆盖或扩展后端 Provider 列表
+
+个人中心只保留用户会日常维护的配置：
+
+- 「交付工作区」：用户本机全局交付产物仓目录、项目产物仓状态、Git SSH 凭证。
+- 「工程目录」：当前项目可访问的本机工程父目录。
+
+本机配置通过 Electron `safeStorage` 或浏览器本地存储保存到当前客户端。中心服务只接收必要的客户端会话、OS 和能力摘要，不保存 Agent token 或终端命令密钥。
+
+### 远程协作数据流
+
+1. 用户在桌面端创建或打开需求。
+2. 中心服务返回共享 workflow、阶段、审核、issue 和 artifact 当前版本。
+3. 客户端获取 WebSocket ticket 后订阅中心事件，按 `lastEventId` 断线补偿。
+4. 本机 Local Runner 领取 Job 后执行 Agent/OpenSpec/Git。
+5. 执行日志上传为 run events；阶段审核通过和公开同步先展示文件列表与 diff，用户确认后由 Runner git add/commit/pull --rebase/push。
+6. push 成功后 Runner 回写中心 Git 版本索引；中心广播 `artifact.git-sync.completed`，其他用户收到 `project.repo.pull-required` 后需要拉取最新仓库。
+
+WebSocket 连接失败时，远程模式仍可通过 HTTP 读取列表、详情和补偿事件；页面会显示实时连接异常，运行日志和在线状态不会实时追加，用户可手动刷新恢复最新状态。
+
+### Bootstrap 导入旧产物
+
+本地 Runner 提供 bootstrap importer，用于把已有 `docs/{需求号}`、`openspec/changes`、`docs/code_review` 和 workflow run log 导入中心索引。Git-backed 模式下，导入会先把受控产物复制到项目 AI 产物仓，执行 Git 同步，再向中心写入 import session、metadata 和 Git version 索引。
+
+```bash
+npm run bootstrap:plan -- \
+  --workspaceRoot /path/to/old-workspace \
+  --centerBaseUrl http://127.0.0.1:8728 \
+  --projectId 1 \
+  --userId 1
+
+npm run bootstrap:import -- \
+  --workspaceRoot /path/to/old-workspace \
+  --centerBaseUrl http://127.0.0.1:8728 \
+  --projectId 1 \
+  --userId 1 \
+  --clientSessionId 16
+```
+
+先运行 `bootstrap:plan` 做 dry-run。导入计划会输出 requirement、stage、artifact、skipped、conflicts 和 `estimatedUploadBytes`，并过滤源码、依赖目录、本地 token、绝对路径和私密配置。正式导入必须提供 `clientSessionId`，用于定位当前客户端项目仓和 Git 同步状态。旧 COS 产物仅作为 `LEGACY_COS` 历史只读兼容；新流程不得再把 COS 作为产物事实源。
+
+常见处理：
+
+- `缺少 --clientSessionId`: 正式导入无法定位当前客户端交付工作区，先在桌面端完成项目仓初始化。
+- `不受控产物路径`: 文件不属于受控产物目录或疑似敏感材料，需手动确认后放入受控目录。
+- `Git sync failed`: 中心 metadata 会继续保留导入结果，失败 artifact 会记录到 manifest，可修复 Git 仓后重新执行 import resume。
 
 ## 📸 界面展示
 
@@ -110,7 +249,7 @@ AI_DELIVERY_WORKSPACE_ROOT=/Users/key.lin/work/Projects/ai-coding npm run server
 
 ![实施验证阶段](screenshots/04-implementation-verify.png)
 
-> 💡 **功能亮点**：任务清单可视化、测试覆盖率统计、运行日志实时展示（SSE）。
+> 💡 **功能亮点**：任务清单可视化、测试覆盖率统计、运行日志通过中心 WebSocket 实时展示。
 
 ---
 
@@ -122,7 +261,7 @@ AI_DELIVERY_WORKSPACE_ROOT=/Users/key.lin/work/Projects/ai-coding npm run server
 
 ---
 
-### 运行日志 - SSE 实时终端输出
+### 运行日志 - 实时终端输出
 
 ![运行日志](screenshots/06-run-log-sse.png)
 
@@ -211,23 +350,21 @@ AI_DELIVERY_WORKSPACE_ROOT=/Users/key.lin/work/Projects/ai-coding npm run server
 所有产物遵循统一的目录结构，便于自动化索引和检索：
 
 - **PRD**：`docs/{需求号}/prd/analysis.md`
-- **PRD 来源文件快照**：`docs/{需求号}/prd/file/**`
+- **PRD 来源文件快照**：`docs/{需求号}/prd/files/**`
 - **技术方案**：`docs/{需求号}/technical-design/design_review.md`
 - **OpenSpec**：`openspec/changes/req-{需求号}`
 - **单元测试报告**：`docs/{需求号}/junit/**`
 - **代码评审**：`docs/code_review/code_review_{分支名}/summary.md`
-- **工作流元数据**：`docs/{需求号}/workflow/state.json`
-- **运行日志**：`docs/{需求号}/workflow/runs/{runId}.jsonl`
-- **阶段命令日志**：`docs/{需求号}/workflow/logs/{stage}/command.log`
+- **Runner 私有运行态**：`<deliveryWorkspaceRoot>/.ai-delivery/runtime/**`
 
-PRD 阶段的「澄清描述」会保存到 workflow 的 `prdClarification` 字段，并在调用 `coding-prd-analyzer` 时作为 `/coding-prd-analyzer` 的 `c` 参数传递；未填写时不会使用需求标题兜底。本地上传的 PDF、图片、Markdown 会快照到 `docs/{需求号}/prd/file/`，并作为 PRD 来源路径传入技能调用，可在页面删除。
+PRD 阶段的「澄清描述」会保存到 workflow 的 `prdClarification` 字段，并在调用 `coding-prd-analyzer` 时作为 `/coding-prd-analyzer` 的 `c` 参数传递；未填写时不会使用需求标题兜底。本地上传的 PDF、图片、Markdown 会快照到 `docs/{需求号}/prd/files/`，并作为 PRD 来源路径传入技能调用，可在页面删除。`state.json`、锁、Prompt、脚本、run log、terminal transcript 和阶段命令日志属于 Runner 私有运行态，不进入项目 Git 仓。
 
 ### 新增：流程独立命令行日志
 
-从 v0.1.0 开始，每个工作流阶段维护独立的命令执行日志文件，便于追踪和审计：
+从 v0.1.0 开始，每个工作流阶段维护独立的命令执行日志文件，便于追踪和审计。日志保存到用户本机 Runner runtime，不纳入项目 Git 同步：
 
 ```
-docs/{需求号}/workflow/logs/
+<deliveryWorkspaceRoot>/.ai-delivery/runtime/{project}/requirements/{需求号}/logs/
 ├── prd/command.log          # PRD 阶段的命令日志
 ├── tech-design/command.log  # 技术方案阶段的命令日志
 ├── implementation/command.log  # 实施阶段的命令日志
@@ -241,13 +378,19 @@ docs/{需求号}/workflow/logs/
 `coding-prd-analyzer`、`coding-design`、`coding-junit`、`coding-review` 不是普通 CLI。Runner 支持选择 Agent Provider 执行技能，默认包含：
 
 - **`codex`**：使用 `CODEX_COMMAND` 配置的 Codex CLI 命令执行 Prompt Envelope（默认选中）。
+- **`codebuddy`**：使用 `CODEBUDDY_COMMAND` 配置的 CodeBuddy CLI 命令执行 Prompt Envelope。
+- **`qoder`**：使用 `QODER_COMMAND` 配置的 Qoder CLI 命令，默认可执行名为 `qcode`。
+- **`qwen`**：使用 `QWEN_COMMAND` 配置的 Qwen CLI 命令。
 - **自定义 Agent**：可通过配置文件注册其他 Agent Provider。
 
 ### 默认 Codex 命令
 
 ```bash
-CODEX_COMMAND='codex exec -C {workspaceRoot} -'
+CODEX_COMMAND='codex exec --sandbox workspace-write -C {workspaceRoot} {projectParentAddDirArgs} {projectAddDirArgs} -'
+CODEX_INTERACTIVE_COMMAND='codex --sandbox workspace-write -C {workspaceRoot} {projectParentAddDirArgs} {projectAddDirArgs} --no-alt-screen {prompt}'
 ```
+
+`workspaceRoot` 是项目 AI 产物仓；`projectParentAddDirArgs` 会把关联工程父目录展开为 `--add-dir <工程父目录>`，`projectAddDirArgs` 会把本次涉及工程展开为 `--add-dir <工程目录>`。Codex 需要以 `workspace-write` 或更高权限运行，`--add-dir` 才会成为额外可写根。
 
 ### 注册自定义 Agent
 
@@ -268,20 +411,31 @@ CODEX_COMMAND='codex exec -C {workspaceRoot} -'
 
 ### 工作流程
 
-1. Runner 会把技能动作包装成 `docs/{需求号}/workflow/prompts/{runId}.md`
-2. 将 stdout/stderr 写入 `docs/{需求号}/workflow/runs/{runId}.jsonl`
-3. 页面通过 SSE 实时展示终端输出
-4. 用户可以复制生成的命令文本交给 Agent 执行；执行完成后在页面点击「刷新产物」重新索引文件。
+1. Runner 会把技能动作包装成 runtime 下的 `prompts/{runId}.md`
+2. 将 stdout/stderr 写入 runtime 下的 `runs/{runId}.jsonl`
+3. 平台发起 Codex 动作时先创建并认领 Center Job/Run，本地 `run-...` 与 Center 数字 Run ID 会同时保存在运行记录中
+4. Codex 后台执行解析 `turn.completed.usage`；本地终端和交互终端解析 Codex 原生 Session JSONL 的 `token_count`
+5. Token 明细先写入本地 run event，再上传 Center；上传失败时进入本地 outbox，后续打开需求或轮询运行状态时自动补传
+6. Agent 输出上传为中心 run event，并通过 WebSocket run 订阅追加到页面日志
+7. 用户可以复制生成的命令文本交给 Agent 执行；执行完成后在页面点击「刷新产物」重新索引文件。
+
+### Token 用量统计
+
+交付平台发起的 Codex 后台、本地终端和交互终端执行都会采集 token，并在需求详情、阶段工具栏、运行日志抽屉和需求列表展示。统计字段包括输入 token、缓存输入 token、输出 token、推理输出 token 和总 token。
+
+终端模式读取 `$CODEX_HOME/sessions/` 下 Codex 原生 Session JSONL，通过 Prompt 中的本地 Run ID 精确关联运行；系统不会解析终端屏幕文本估算 token。平台外手工启动、且 Prompt 中没有交付平台 Run ID 的 Codex Session 不属于交付平台统计范围。
+
+这里展示的 token 仅表示模型请求/响应的 token 数量，用于排查高消耗运行和做需求维度统计，不代表人民币、美元或任何实际账单金额。费用核算仍以模型供应商或组织账单系统为准。
 
 ### 本地终端执行
 
 对于需要真实 TTY 交互、确认权限或使用 Agent 原生界面的动作，可以在页面执行方式中选择「本地终端」。Runner 会：
 
-1. 生成 Prompt Envelope：`docs/{需求号}/workflow/prompts/{runId}.md`
-2. 生成可执行脚本：`docs/{需求号}/workflow/scripts/{runId}.command`
+1. 生成 Prompt Envelope：runtime 下的 `prompts/{runId}.md`
+2. 生成可执行脚本：runtime 下的 `scripts/{runId}.command`
 3. 使用 `open -a Terminal {scriptFile}` 打开 macOS Terminal
-4. 将终端 transcript 写入 `docs/{需求号}/workflow/runs/{runId}.terminal.log`
-5. 将退出状态写入 `docs/{需求号}/workflow/runs/{runId}.terminal-status.json`
+4. 将终端 transcript 写入 runtime 下的 `runs/{runId}.terminal.log`
+5. 将退出状态写入 runtime 下的 `runs/{runId}.terminal-status.json`
 
 页面再次加载需求或需求列表时会读取状态文件，把 `TERMINAL_OPENED` 同步为成功或失败。脚本由 Runner 根据已注册 Agent Provider 生成，页面不能传入任意命令。
 
@@ -291,9 +445,11 @@ CODEX_COMMAND='codex exec -C {workspaceRoot} -'
 
 - ✅ **路径限制**：Runner 只允许读写当前工作区内的文件路径。
 - ✅ **参数化执行**：OpenSpec 命令使用参数数组执行，不使用 shell 字符串拼接，防止注入攻击。
-- ✅ **显式配置**：Agent Provider 只能来自本地显式配置，页面不能直接传入任意命令。
+- ✅ **显式配置**：Agent Provider 只能来自 Runner 后端默认配置、env 或显式 Provider 配置文件，页面不能直接传入任意命令。
 - ✅ **并发控制**：修改型动作使用需求级锁文件，避免同一需求并发写入。
 - ✅ **Hash 校验**：Markdown 保存会比较文件 hash，发现外部修改时阻止覆盖，防止数据丢失。
+- ✅ **本地配置隔离**：桌面端 workspace 映射、Agent token、终端偏好只保存在本机安全存储。
+- ✅ **中心权限校验**：远程产物预览、版本发布、审核、issue、Job 和事件订阅均由中心服务校验团队/项目权限。
 
 ---
 
@@ -302,7 +458,7 @@ CODEX_COMMAND='codex exec -C {workspaceRoot} -'
 - **前端框架**：Vue 3 + TypeScript + Vite
 - **状态管理**：Pinia
 - **UI 组件**：Element Plus
-- **实时通信**：Server-Sent Events (SSE)
+- **实时通信**：中心 WebSocket/STOMP，HTTP 补偿接口用于断线恢复
 - **后端服务**：Node.js + Express
 - **代码高亮**：highlight.js
 - **Markdown 渲染**：markdown-it + mermaid
@@ -322,10 +478,10 @@ CODEX_COMMAND='codex exec -C {workspaceRoot} -'
 ## 💬 常见问题
 
 ### Q: 如何查看 Agent 执行的详细日志？
-A: 在每个需求详情页，点击「运行日志」按钮，会打开抽屉展示 SSE 实时输出的终端日志。
+A: 在每个需求详情页点击「运行日志」按钮，会打开抽屉展示实时终端日志。日志来自中心 WebSocket run event，断线后会通过补偿接口补齐。
 
 ### Q: 支持哪些 Agent Provider？
-A: 默认支持 `codex`（Codex CLI）。可通过配置文件注册其他自定义 Agent。下拉框默认选中 Codex，简化了用户操作流程。
+A: 默认支持 `codex`、`codebuddy`、`qoder`、`qwen`。命令模板通过 env 变量配置，也可通过 `AGENT_PROVIDERS_JSON` 或 `AGENT_PROVIDERS_PATH` 扩展。
 
 ### Q: 如何处理并发冲突？
 A: 系统会自动使用需求级锁文件，当某个需求正在执行修改操作时，其他操作会被阻塞，直到锁释放。

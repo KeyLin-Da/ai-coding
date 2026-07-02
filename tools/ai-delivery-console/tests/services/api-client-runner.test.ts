@@ -1,0 +1,537 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AgentProvider, RequirementWorkflow } from '../../shared/workflow';
+import { createEmptyStages } from '../../shared/workflow';
+import { apiClient } from '../../src/api/client';
+import { setApiRuntimeConfig } from '../../src/api/runtime';
+
+function workflow(): RequirementWorkflow {
+  const now = new Date().toISOString();
+  return {
+    requirementId: '172014',
+    title: '补充材料',
+    requirementType: 'DEFECT',
+    sources: [],
+    currentStage: 'TECH_DESIGN',
+    status: 'DRAFT',
+    createdAt: now,
+    updatedAt: now,
+    stages: createEmptyStages('DEFECT'),
+    artifacts: [
+      {
+        id: 'technical-design',
+        stage: 'TECH_DESIGN',
+        label: '技术方案评审文档',
+        path: 'docs/172014/technical-design/design_review.md',
+        kind: 'markdown',
+        exists: true
+      }
+    ],
+    runs: [],
+    reviews: [],
+    issues: []
+  };
+}
+
+function centerRequirement() {
+  return {
+    id: 100,
+    projectId: 10,
+    requirementId: '172014',
+    title: '补充材料',
+    requirementType: 'DEFECT',
+    branchName: 'bugfix/opp#172014',
+    currentStage: 'TECH_DESIGN',
+    status: 'DRAFT',
+    stages: [
+      {
+        stage: 'TECH_DESIGN',
+        status: 'DRAFT'
+      }
+    ],
+    projectNames: ['opp-admin-vue']
+  };
+}
+
+function okResponse(data: unknown) {
+  return Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve({ success: true, data })
+  } as Response);
+}
+
+describe('apiClient Runner docs endpoints', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    const values = new Map<string, string>();
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: (key: string) => values.get(key) || null,
+        setItem: (key: string, value: string) => values.set(key, value),
+        removeItem: (key: string) => values.delete(key),
+        clear: () => values.clear()
+      }
+    });
+    setApiRuntimeConfig({
+      centerBaseUrl: 'https://center.example.com',
+      runnerBaseUrl: 'http://127.0.0.1:8718',
+      userId: '1',
+      projectId: '10',
+      clientSessionId: '20'
+    });
+  });
+
+  it('需求列表优先从 Runner 读取中心状态和本地产物合并结果', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => okResponse([workflow()]));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiClient.listRequirements();
+
+    expect(result[0].requirementType).toBe('DEFECT');
+    expect(result[0].artifacts).toHaveLength(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/runner-api/api/ai-delivery/requirements?projectId=10');
+    expect(init.headers['X-Project-Id']).toBe('10');
+  });
+
+  it('Agent Provider 列表从本地 Runner 读取', async () => {
+    const agents: AgentProvider[] = [
+      {
+        id: 'codex',
+        name: 'Codex',
+        inputMode: 'STDIN',
+        available: true,
+        supportsStreaming: true
+      }
+    ];
+    const fetchMock = vi.fn().mockImplementation(() => okResponse(agents));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiClient.listAgents();
+
+    expect(result).toEqual(agents);
+    expect(fetchMock).toHaveBeenCalledWith('/runner-api/api/ai-delivery/agents', expect.any(Object));
+  });
+
+  it('需求详情优先从 Runner 合并接口读取，保留本地扫描产物', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => okResponse(workflow()));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiClient.getRequirement('172014');
+
+    expect(result.currentStage).toBe('TECH_DESIGN');
+    expect(result.artifacts[0].path).toBe('docs/172014/technical-design/design_review.md');
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/runner-api/api/ai-delivery/requirements/172014?projectId=10',
+      expect.any(Object)
+    );
+  });
+
+  it('创建或编辑需求通过 Runner 同步中心和本地涉及工程', async () => {
+    const expected = {
+      ...workflow(),
+      id: 100,
+      projects: [
+        { name: 'opp-api', path: '/workspace/opp-api' },
+        { name: 'opp-learn', path: '/workspace/opp-learn' }
+      ]
+    };
+    const fetchMock = vi.fn().mockImplementation(() => okResponse(expected));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiClient.createRequirement({
+      id: 100,
+      requirementId: '172014',
+      title: '补充材料',
+      requirementType: 'DEFECT',
+      branchName: 'bugfix/opp#172014',
+      projects: expected.projects
+    });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/runner-api/api/ai-delivery/requirements');
+    expect(JSON.parse(String(init.body))).toEqual({
+      id: 100,
+      projectId: 10,
+      requirementId: '172014',
+      title: '补充材料',
+      requirementType: 'DEFECT',
+      branchName: 'bugfix/opp#172014',
+      projects: expected.projects
+    });
+    expect(result.projects).toEqual(expected.projects);
+  });
+
+  it('审核提交使用中心需求主键而不是业务需求编号', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      okResponse({
+        id: 501,
+        requirementPk: 100,
+        stage: 'IMPLEMENTATION',
+        implementationStep: 'START_CHANGE',
+        decision: 'APPROVED'
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiClient.submitReview({
+      requirementId: '172014',
+      requirementPk: 100,
+      stage: 'IMPLEMENTATION',
+      implementationStep: 'START_CHANGE',
+      decision: 'APPROVED',
+      comment: '开始变更通过'
+    });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/center-api/api/ai-delivery/reviews');
+    expect(JSON.parse(String(init.body))).toEqual({
+      requirementPk: 100,
+      stage: 'IMPLEMENTATION',
+      implementationStep: 'START_CHANGE',
+      decision: 'APPROVED',
+      comment: '开始变更通过'
+    });
+  });
+
+  it('Runner 不可用时需求详情兜底中心服务，仍能打开基础详情', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('runner down'))
+      .mockImplementationOnce(() => okResponse(centerRequirement()));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiClient.getRequirement('172014');
+
+    expect(result.currentStage).toBe('TECH_DESIGN');
+    expect(result.artifacts).toEqual([]);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/runner-api/api/ai-delivery/requirements/172014?projectId=10',
+      expect.any(Object)
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/center-api/api/ai-delivery/requirements/172014?projectId=10',
+      expect.any(Object)
+    );
+  });
+
+  it('补充材料上传提交到本地 Runner', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => okResponse(workflow()));
+    vi.stubGlobal('fetch', fetchMock);
+    const file = new File(['# design'], '补充说明.md', { type: 'text/markdown' });
+
+    await apiClient.uploadTechDesignFiles('172014', [file]);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/runner-api/api/ai-delivery/requirements/172014/tech-design-files',
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.any(FormData)
+      })
+    );
+  });
+
+  it('流程动作提交到本地 Runner 执行', async () => {
+    const current = workflow();
+    const fetchMock = vi.fn().mockImplementation(() =>
+      okResponse({
+        run: {
+          id: 'run-1',
+          requirementId: current.requirementId,
+          actionType: 'DESIGN_GENERATE',
+          status: 'RUNNING',
+          startedAt: new Date().toISOString(),
+          params: {}
+        },
+        workflow: current
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiClient.runAction('172014', { actionType: 'DESIGN_GENERATE' });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/runner-api/api/ai-delivery/requirements/172014/actions',
+      expect.objectContaining({
+        method: 'POST'
+      })
+    );
+  });
+
+  it('命令预览提交到本地 Runner', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => okResponse({ commandText: '/coding-design r=172014 d=test' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiClient.previewActionCommand('172014', { actionType: 'DESIGN_GENERATE' });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/runner-api/api/ai-delivery/requirements/172014/actions/command',
+      expect.objectContaining({
+        method: 'POST'
+      })
+    );
+  });
+
+  it('公开分享列表通过 Runner 读取以补齐本地产物仓绑定', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => okResponse([]));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiClient.listPublicArtifactShares({
+      projectId: 10,
+      requirementId: '172014',
+      artifactPath: 'docs/172014/technical-design/design_review.md'
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/runner-api/api/ai-delivery/artifact-shares?projectId=10&requirementId=172014&artifactPath=docs%2F172014%2Ftechnical-design%2Fdesign_review.md',
+      expect.any(Object)
+    );
+  });
+
+  it('历史公开分享通过 Runner 重新生成 token', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      okResponse({
+        id: 1,
+        projectId: 10,
+        requirementId: '172014',
+        artifactPath: 'docs/172014/technical-design/design_review.md',
+        status: 'ENABLED',
+        publicPath: '/share/artifacts/token-2'
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiClient.regeneratePublicArtifactShareToken(1);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/runner-api/api/ai-delivery/artifact-shares/1/token/regenerate',
+      expect.objectContaining({ method: 'POST' })
+    );
+  });
+
+  it('产物读取显式携带项目 ID 且保留 Runner 运行时请求头', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      okResponse({
+        artifact: workflow().artifacts[0],
+        content: '# 技术方案'
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiClient.readArtifact('docs/172014/technical-design/questions/review.md', 42);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(
+      '/runner-api/api/ai-delivery/artifacts?path=docs%2F172014%2Ftechnical-design%2Fquestions%2Freview.md&projectId=42'
+    );
+    expect(init.headers['X-User-Id']).toBe('1');
+    expect(init.headers['X-Project-Id']).toBe('10');
+    expect(init.headers['X-Client-Session-Id']).toBe('20');
+  });
+
+  it('运行日志从中心补偿 API 读取', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      okResponse([
+        {
+          id: 1,
+          runId: 100,
+          seq: 1,
+          createdAt: '2026-06-10T01:22:46.000Z',
+          type: 'STDOUT',
+          level: 'INFO',
+          message: '开始执行',
+          payloadJson: '{"step":"start"}'
+        }
+      ])
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const events = await apiClient.getRunEvents('172014', '100');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/center-api/api/ai-delivery/runs/100/events?afterSeq=0',
+      expect.any(Object)
+    );
+    expect(events[0]).toMatchObject({
+      time: '2026-06-10T01:22:46.000Z',
+      type: 'STDOUT',
+      text: '开始执行',
+      data: { step: 'start' }
+    });
+  });
+
+  it('本地 Runner 字符串 runId 的运行日志从 Runner 读取', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      okResponse([
+        {
+          time: '2026-06-17T11:06:58.000Z',
+          type: 'START',
+          level: 'INFO',
+          message: '开始执行本地 run'
+        }
+      ])
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const events = await apiClient.getRunEvents('164946', 'run-20260617110658-10d25f');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/runner-api/api/ai-delivery/runs/run-20260617110658-10d25f/events?requirementId=164946',
+      expect.any(Object)
+    );
+    expect(events[0]).toMatchObject({
+      type: 'START',
+      message: '开始执行本地 run'
+    });
+  });
+
+  it('中心 runId 的 token usage 明细从中心 API 读取并归一化空值', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      okResponse({
+        runId: 100,
+        summary: {
+          runId: 100,
+          totalTokens: 12,
+          inputTokens: 10,
+          outputTokens: 2,
+          detailCount: 1,
+          runCount: 1
+        },
+        details: [
+          {
+            id: 1,
+            runId: 100,
+            sourceEventType: 'turn.completed',
+            inputTokens: 10,
+            outputTokens: 2,
+            totalTokens: 12
+          }
+        ]
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const usage = await apiClient.getRunTokenUsages('172014', '100');
+
+    expect(fetchMock).toHaveBeenCalledWith('/center-api/api/ai-delivery/runs/100/token-usages', expect.any(Object));
+    expect(usage.summary).toMatchObject({
+      totalTokens: 12,
+      cachedInputTokens: 0,
+      reasoningOutputTokens: 0
+    });
+    expect(usage.details[0].sourceEventType).toBe('turn.completed');
+  });
+
+  it('需求 token usage 明细使用中心分页接口', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      okResponse({
+        requirementPk: 100,
+        page: 2,
+        pageSize: 20,
+        total: 21,
+        items: [
+          {
+            id: 21,
+            runId: 900,
+            sourceEventType: 'token_count',
+            inputTokens: 10,
+            totalTokens: 10
+          }
+        ]
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const page = await apiClient.getRequirementTokenUsageDetails(100, 2, 20);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/center-api/api/ai-delivery/requirements/100/token-usages?page=2&pageSize=20',
+      expect.any(Object)
+    );
+    expect(page).toMatchObject({ page: 2, pageSize: 20, total: 21 });
+    expect(page.items[0]).toMatchObject({ runId: 900, cachedInputTokens: 0, reasoningOutputTokens: 0 });
+  });
+
+  it('本地字符串 runId 的 token usage 从本地 TOKEN_USAGE 事件汇总', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      okResponse([
+        {
+          time: '2026-06-22T10:20:00.000Z',
+          type: 'INFO',
+          level: 'INFO',
+          message: 'Token usage',
+          text: '{"type":"turn.completed"}',
+          agentId: 'codex',
+          data: {
+            kind: 'TOKEN_USAGE',
+            sourceEventType: 'turn.completed',
+            usage: {
+              inputTokens: 10,
+              cachedInputTokens: 4,
+              outputTokens: 2,
+              reasoningOutputTokens: 1,
+              totalTokens: 12
+            }
+          }
+        }
+      ])
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const usage = await apiClient.getRunTokenUsages('172014', 'run-local');
+
+    expect(fetchMock).toHaveBeenCalledWith('/runner-api/api/ai-delivery/runs/run-local/events?requirementId=172014', expect.any(Object));
+    expect(usage.summary.totalTokens).toBe(12);
+    expect(usage.details[0]).toMatchObject({
+      runId: 'run-local',
+      agentId: 'codex',
+      inputTokens: 10
+    });
+  });
+
+  it('需求 token usage 汇总从中心 API 读取', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      okResponse({
+        requirementPk: 100,
+        summary: { totalTokens: 20, inputTokens: 15, outputTokens: 5, detailCount: 2, runCount: 1 },
+        latestRunSummary: { runId: 900, totalTokens: 12, inputTokens: 10, outputTokens: 2, detailCount: 1, runCount: 1 },
+        stageSummaries: [],
+        agentSummaries: []
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const usage = await apiClient.getRequirementTokenUsageSummary(100);
+
+    expect(fetchMock).toHaveBeenCalledWith('/center-api/api/ai-delivery/requirements/100/token-usage-summary', expect.any(Object));
+    expect(usage.summary.totalTokens).toBe(20);
+    expect(usage.latestRunSummary.runId).toBe(900);
+  });
+
+  it('本地 Runner 字符串 runId 的实时日志使用 Runner SSE', () => {
+    const eventSource = vi.fn();
+    vi.stubGlobal('EventSource', eventSource);
+
+    apiClient.openRunEventStream('164946', 'run-20260617110658-10d25f');
+
+    expect(eventSource).toHaveBeenCalledWith(
+      '/runner-api/api/ai-delivery/runs/run-20260617110658-10d25f/stream?requirementId=164946&tail=1&projectId=10&clientSessionId=20&userId=1&centerBaseUrl=https%3A%2F%2Fcenter.example.com'
+    );
+  });
+
+  it('取消运行提交到本地 Runner', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => okResponse({ cancelled: true }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiClient.cancelRun('172014', 'run-20260610012246-5eef8c');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/runner-api/api/ai-delivery/runs/run-20260610012246-5eef8c/cancel',
+      expect.objectContaining({
+        method: 'POST'
+      })
+    );
+  });
+});

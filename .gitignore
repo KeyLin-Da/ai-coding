@@ -1,5 +1,6 @@
 .idea
 *iml
+target/
 
 # 排除的工程目录
 openspec/*

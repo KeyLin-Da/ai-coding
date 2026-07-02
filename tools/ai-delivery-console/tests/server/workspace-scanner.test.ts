@@ -17,8 +17,10 @@ async function makeFixture() {
   await fs.writeFile(path.join(root, 'docs', '172014', 'prd', 'analysis.md'), '# PRD');
   await fs.writeFile(path.join(root, 'docs', '172014', 'technical-design', 'design_review.md'), '# Design');
   await fs.writeFile(path.join(root, 'docs', '172014', 'technical-design', 'questions.md'), '# Questions');
+  await fs.writeFile(path.join(root, 'docs', '172014', 'technical-design', 'input-ledger.json'), '{"version":1,"entries":[]}');
   await fs.writeFile(path.join(root, 'docs', '172014', 'technical-design', 'questions', '20260604-173000-question.md'), '# Question');
   await fs.writeFile(path.join(root, 'docs', '172014', 'technical-design', 'file', 'old-design.md'), '# Old Design');
+  await fs.writeFile(path.join(root, 'docs', '172014', 'technical-design', 'file', 'screenshot.png'), 'png');
   await fs.writeFile(path.join(root, 'docs', '172014', 'junit', 'req-172014', 'report.md'), '# JUnit');
   await fs.writeFile(path.join(root, 'docs', '172014', 'code-review', 'summary.md'), '# Review Index');
   await fs.writeFile(path.join(root, 'docs', '172014', 'code-review', 'commit', 'summary.md'), '# Commit Review');
@@ -35,9 +37,11 @@ describe('workspace-scanner', () => {
       expect.arrayContaining([
         'docs/172014/prd/analysis.md',
         'docs/172014/technical-design/design_review.md',
+        'docs/172014/technical-design/input-ledger.json',
         'docs/172014/technical-design/questions/20260604-173000-question.md',
         'docs/172014/technical-design/questions.md',
         'docs/172014/technical-design/file/old-design.md',
+        'docs/172014/technical-design/file/screenshot.png',
         'openspec/changes/req-172014',
         'docs/172014/junit/req-172014/report.md',
         'docs/172014/code-review/summary.md',
@@ -58,6 +62,20 @@ describe('workspace-scanner', () => {
       stage: 'TECH_DESIGN',
       label: '技术方案答疑 20260604-173000-question',
       kind: 'markdown',
+      exists: true
+    });
+    const imageFile = artifacts.find((item) => item.path === 'docs/172014/technical-design/file/screenshot.png');
+    expect(imageFile).toMatchObject({
+      stage: 'TECH_DESIGN',
+      label: 'screenshot.png',
+      kind: 'image',
+      exists: true
+    });
+    const ledger = artifacts.find((item) => item.id === 'technical-design-input-ledger');
+    expect(ledger).toMatchObject({
+      stage: 'TECH_DESIGN',
+      label: '技术方案输入消费台账',
+      kind: 'json',
       exists: true
     });
   });

@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { normalizeRequirementId } from './workspace';
+import { getWorkflowRuntimeDir } from './runtime-paths';
 
 export class WorkflowLock {
   private lockPath = '';
@@ -8,8 +8,7 @@ export class WorkflowLock {
   constructor(private readonly workspaceRoot: string, private readonly requirementId: string) {}
 
   async acquire(): Promise<void> {
-    const id = normalizeRequirementId(this.requirementId);
-    const dir = path.join(this.workspaceRoot, 'docs', id, 'workflow');
+    const dir = getWorkflowRuntimeDir(this.workspaceRoot, this.requirementId);
     await fs.mkdir(dir, { recursive: true });
     this.lockPath = path.join(dir, '.lock');
     const handle = await fs.open(this.lockPath, 'wx');

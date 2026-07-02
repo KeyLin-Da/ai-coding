@@ -1,20 +1,19 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { WorkflowProject } from '../../shared/workflow';
-import { loadSettings } from './project-settings';
 import { canonicalProjectPath } from './project-resolver';
+import { readConsoleStateFile, writeConsoleStateFile } from './console-state';
 
 interface ProjectHistoryFile {
   projects: Array<WorkflowProject & { lastUsedAt?: string }>;
 }
 
-function historyPath(workspaceRoot: string): string {
-  return path.join(workspaceRoot, 'docs', '.ai-delivery-console', 'project-history.json');
-}
-
 async function readSavedProjectHistory(workspaceRoot: string): Promise<WorkflowProject[]> {
   try {
-    const content = await fs.readFile(historyPath(workspaceRoot), 'utf8');
+    const content = await readConsoleStateFile(workspaceRoot, 'project-history.json');
+    if (!content.trim()) {
+      return [];
+    }
     const parsed = JSON.parse(content) as ProjectHistoryFile;
     return (parsed.projects || []).map((project) => ({
       name: project.name || path.basename(project.path),
@@ -49,20 +48,18 @@ export async function snapshotWorkspaceProjects(workspaceRoot: string): Promise<
   return projects;
 }
 
-export async function readProjectHistory(workspaceRoot: string): Promise<WorkflowProject[]> {
-  const settings = await loadSettings(workspaceRoot);
-  if (settings.projectPaths.length) {
-    return listProjectsFromConfiguredPaths(workspaceRoot);
+export async function readProjectHistory(workspaceRoot: string, projectPaths: string[] = []): Promise<WorkflowProject[]> {
+  if (projectPaths.length) {
+    return listProjectsFromConfiguredPaths(workspaceRoot, projectPaths);
   }
   await snapshotWorkspaceProjects(workspaceRoot);
   return readSavedProjectHistory(workspaceRoot);
 }
 
-export async function listProjectsFromConfiguredPaths(workspaceRoot: string): Promise<WorkflowProject[]> {
-  const settings = await loadSettings(workspaceRoot);
+export async function listProjectsFromConfiguredPaths(workspaceRoot: string, projectPaths: string[] = []): Promise<WorkflowProject[]> {
   const projects: WorkflowProject[] = [];
   
-  for (const basePath of settings.projectPaths) {
+  for (const basePath of projectPaths) {
     try {
       const entries = await fs.readdir(basePath, { withFileTypes: true });
       for (const entry of entries) {
@@ -103,7 +100,5 @@ export async function saveProjectHistory(workspaceRoot: string, projects: Workfl
   for (const project of projects) {
     merged.set(project.path, { ...project, lastUsedAt: now });
   }
-  const filePath = historyPath(workspaceRoot);
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, `${JSON.stringify({ projects: [...merged.values()] }, null, 2)}\n`, 'utf8');
+  await writeConsoleStateFile(workspaceRoot, 'project-history.json', `${JSON.stringify({ projects: [...merged.values()] }, null, 2)}\n`);
 }
