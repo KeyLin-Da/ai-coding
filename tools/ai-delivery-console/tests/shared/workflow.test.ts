@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { RunRecord } from '../../shared/workflow';
 import {
   areAllImplementationStepsApproved,
   createEmptyImplementationSteps,
@@ -26,8 +27,8 @@ describe('workflow helpers', () => {
   });
 
   it('按需求类型返回适用阶段', () => {
-    expect(workflowStagesForType('REQUIREMENT')).toEqual(['PRD', 'TECH_DESIGN', 'IMPLEMENTATION', 'CODE_REVIEW']);
-    expect(workflowStagesForType('DEFECT')).toEqual(['TECH_DESIGN', 'IMPLEMENTATION', 'CODE_REVIEW']);
+    expect(workflowStagesForType('REQUIREMENT')).toEqual(['PRD', 'TECH_DESIGN', 'IMPLEMENTATION', 'CODE_REVIEW', 'RETROSPECTIVE']);
+    expect(workflowStagesForType('DEFECT')).toEqual(['TECH_DESIGN', 'IMPLEMENTATION', 'CODE_REVIEW', 'RETROSPECTIVE']);
     expect(isStageApplicableToType('PRD', 'DEFECT')).toBe(false);
     expect(isStageApplicableToType('TECH_DESIGN', 'DEFECT')).toBe(true);
     expect(statusLabels.SKIPPED).toBe('已跳过');
@@ -71,6 +72,21 @@ describe('workflow helpers', () => {
     });
 
     expect(Object.keys(steps)).toEqual(['START_CHANGE', 'ARTIFACT_REVIEW', 'APPLY', 'CHANGE_INSPECTION']);
+  });
+
+  it('兼容缺少 OpenSpec 工件输入快照的旧 run', () => {
+    const run: RunRecord = {
+      id: 'run-legacy',
+      requirementId: '172014',
+      actionType: 'OPENSPEC_FF',
+      stage: 'IMPLEMENTATION',
+      implementationStep: 'ARTIFACT_REVIEW',
+      status: 'SUCCEEDED',
+      startedAt: '2026-07-14T10:00:00.000Z',
+      params: {}
+    };
+
+    expect(run.openSpecArtifactInputSnapshot).toBeUndefined();
   });
 
   it('判定实施验证子步骤全部通过时只认可四个新流程步骤均为 APPROVED', () => {

@@ -91,7 +91,8 @@ export function getStageLogRuntimeDir(workspaceRoot: string, requirementId: stri
     PRD: 'prd',
     TECH_DESIGN: 'tech-design',
     IMPLEMENTATION: 'implementation',
-    CODE_REVIEW: 'code-review'
+    CODE_REVIEW: 'code-review',
+    RETROSPECTIVE: 'retrospective'
   };
   return path.join(getRequirementRuntimeDir(workspaceRoot, requirementId), 'logs', stageMap[stage]);
 }

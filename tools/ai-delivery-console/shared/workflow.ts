@@ -1,4 +1,6 @@
-export const workflowStages = ['PRD', 'TECH_DESIGN', 'IMPLEMENTATION', 'CODE_REVIEW'] as const;
+import type { MemoryRecallActionInput } from './memory';
+
+export const workflowStages = ['PRD', 'TECH_DESIGN', 'IMPLEMENTATION', 'CODE_REVIEW', 'RETROSPECTIVE'] as const;
 
 export type WorkflowStage = (typeof workflowStages)[number];
 
@@ -50,6 +52,7 @@ export type ActionType =
   | 'OPENSPEC_ARCHIVE'
   | 'JUNIT_GENERATE'
   | 'CODE_REVIEW'
+  | 'RETROSPECTIVE_GENERATE'
   | 'RETURN_TO_IMPLEMENTATION'
   | 'REFRESH_ARTIFACTS';
 
@@ -112,6 +115,25 @@ export interface TechDesignGenerationInputSnapshot {
   capturedAt: string;
 }
 
+export interface OpenSpecArtifactInputSnapshot {
+  baseTechDesignVersionId: string;
+  baseTechDesignVersionLabel?: string;
+  baseContentHash?: string;
+  targetTechDesignVersionId: string;
+  targetTechDesignVersionLabel?: string;
+  targetContentHash?: string;
+  contextPath: string;
+  adjustment?: string;
+  capturedAt: string;
+}
+
+export interface OpenSpecArtifactActionParams {
+  baseTechDesignVersionId?: string;
+  targetTechDesignVersionId?: string;
+  artifactAdjustment?: string;
+  openSpecArtifactContextPath?: string;
+}
+
 export interface RunRecord {
   id: string;
   requirementId: string;
@@ -142,6 +164,7 @@ export interface RunRecord {
   centerSyncedAt?: string;
   techDesignInputSnapshot?: TechDesignGenerationInputSnapshot;
   techDesignInputsConsumedAt?: string;
+  openSpecArtifactInputSnapshot?: OpenSpecArtifactInputSnapshot;
   error?: string;
 }
 
@@ -493,6 +516,19 @@ export interface StageState {
   comment?: string;
 }
 
+export interface RetrospectiveWorkflowState {
+  summaryPath?: string;
+  evidencePath?: string;
+  candidateCount?: number;
+  pendingCandidateCount?: number;
+  recallFeedbackCount?: number;
+  unresolvedRiskCount?: number;
+  riskAcceptedAt?: string;
+  riskAcceptedBy?: string;
+  invalidatedAt?: string;
+  invalidatedReason?: string;
+}
+
 export interface ImplementationStepState {
   step: WorkflowImplementationStep;
   status: WorkflowStatus;
@@ -522,6 +558,7 @@ export interface RequirementWorkflow {
   updatedAt: string;
   stages: Record<WorkflowStage, StageState>;
   implementationSteps?: Partial<Record<WorkflowImplementationStep, ImplementationStepState>>;
+  retrospective?: RetrospectiveWorkflowState;
   artifacts: ArtifactRef[];
   runs: RunRecord[];
   reviews: ReviewRecord[];
@@ -551,6 +588,8 @@ export interface ActionInput {
   actionType: ActionType;
   params?: Record<string, unknown>;
   techDesignInputSnapshot?: TechDesignGenerationInputSnapshot;
+  openSpecArtifactInputSnapshot?: OpenSpecArtifactInputSnapshot;
+  memoryRecall?: MemoryRecallActionInput;
 }
 
 export interface ReviewInput {
@@ -567,7 +606,8 @@ export const stageLabels: Record<WorkflowStage, string> = {
   PRD: 'PRD',
   TECH_DESIGN: '技术方案',
   IMPLEMENTATION: '实施验证',
-  CODE_REVIEW: '代码评审'
+  CODE_REVIEW: '代码评审',
+  RETROSPECTIVE: '交付复盘'
 };
 
 export const requirementTypeLabels: Record<RequirementType, string> = {
@@ -610,6 +650,7 @@ export const actionTypeLabels: Record<ActionType, string> = {
   OPENSPEC_ARCHIVE: '归档 OpenSpec 变更',
   JUNIT_GENERATE: '单元测试生成',
   CODE_REVIEW: '代码评审',
+  RETROSPECTIVE_GENERATE: '交付复盘生成',
   RETURN_TO_IMPLEMENTATION: '打回实施',
   REFRESH_ARTIFACTS: '刷新产物'
 };
@@ -626,7 +667,8 @@ export function createEmptyStages(requirementType: RequirementType = 'REQUIREMEN
     PRD: { stage: 'PRD', status: 'DRAFT' },
     TECH_DESIGN: { stage: 'TECH_DESIGN', status: 'NOT_STARTED' },
     IMPLEMENTATION: { stage: 'IMPLEMENTATION', status: 'NOT_STARTED' },
-    CODE_REVIEW: { stage: 'CODE_REVIEW', status: 'NOT_STARTED' }
+    CODE_REVIEW: { stage: 'CODE_REVIEW', status: 'NOT_STARTED' },
+    RETROSPECTIVE: { stage: 'RETROSPECTIVE', status: 'NOT_STARTED' }
   };
   if (requirementType === 'DEFECT') {
     stages.PRD.status = 'SKIPPED';
@@ -637,9 +679,30 @@ export function createEmptyStages(requirementType: RequirementType = 'REQUIREMEN
 
 export function workflowStagesForType(requirementType: RequirementType = 'REQUIREMENT'): WorkflowStage[] {
   if (requirementType === 'DEFECT') {
-    return ['TECH_DESIGN', 'IMPLEMENTATION', 'CODE_REVIEW'];
+    return ['TECH_DESIGN', 'IMPLEMENTATION', 'CODE_REVIEW', 'RETROSPECTIVE'];
   }
   return [...workflowStages];
+}
+
+export function ensureWorkflowStages(
+  workflow: Pick<RequirementWorkflow, 'currentStage' | 'requirementType'> & {
+    stages?: Partial<Record<WorkflowStage, Partial<StageState>>>;
+  }
+): Record<WorkflowStage, StageState> {
+  const defaults = createEmptyStages(workflow.requirementType || 'REQUIREMENT');
+  const existingStages = workflow.stages || {};
+  for (const stage of workflowStages) {
+    const existing = existingStages[stage];
+    defaults[stage] = {
+      ...defaults[stage],
+      ...(existing || {}),
+      stage
+    };
+  }
+  if (!existingStages.RETROSPECTIVE && workflow.currentStage === 'DONE') {
+    defaults.RETROSPECTIVE.status = 'SKIPPED';
+  }
+  return defaults;
 }
 
 export function workflowStagesForWorkflow(workflow?: Pick<RequirementWorkflow, 'requirementType'>): WorkflowStage[] {
@@ -710,6 +773,7 @@ export const actionStageMap: Partial<Record<ActionType, WorkflowStage>> = {
   OPENSPEC_ARCHIVE: 'CODE_REVIEW',
   JUNIT_GENERATE: 'IMPLEMENTATION',
   CODE_REVIEW: 'CODE_REVIEW',
+  RETROSPECTIVE_GENERATE: 'RETROSPECTIVE',
   RETURN_TO_IMPLEMENTATION: 'CODE_REVIEW'
 };
 

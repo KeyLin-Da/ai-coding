@@ -19,7 +19,7 @@ import { normalizePrdClarification, WorkflowRepository } from './services/workfl
 import { scanRequirementArtifacts } from './services/workspace-scanner';
 import { WorkflowLock } from './services/workflow-lock';
 import { assertPrdClarificationReady, buildActionCommand, executeAction, validateActionInput } from './services/action-adapters';
-import { appendStageCommandLog, readRunEvents, readRunEventsWithTranscript, readTerminalTranscriptChunk, readTerminalTranscriptSize } from './services/run-log';
+import { appendRunEvent, appendStageCommandLog, readRunEvents, readRunEventsWithTranscript, readTerminalTranscriptChunk, readTerminalTranscriptSize } from './services/run-log';
 import { readArtifact, saveArtifact } from './services/markdown-service';
 import { applyReview, refreshCodeReviewIssues, returnToImplementation } from './services/review-service';
 import {
@@ -106,6 +106,26 @@ import {
   resolveSharePathInWorkspace
 } from './services/artifact-share-paths';
 import { findArtifactShareRoot, findArtifactShareToken, rememberArtifactShareLocation } from './services/artifact-share-locations';
+import { MemoryRepository } from './services/memory-repository';
+import { extractMemoryCandidatesForDesignRun } from './services/memory-candidate-service';
+import { getRetrospectiveSummary, importRetrospectiveRunOutputs } from './services/retrospective-service';
+import {
+  confirmMemoryRecallForRun,
+  markMemoryRecallApplied,
+  prepareMemoryRecallForRun,
+  previewMemoryRecallForRun
+} from './services/memory-recall-service';
+import { prepareOpenSpecArtifactAction } from './services/open-spec-artifact-inputs';
+import { defaultMemorySearchConfig, mergeMemorySearchConfig } from './services/memory-search-config';
+import { rebuildMemoryEmbeddingIndex } from './services/memory-embedding-service';
+import type {
+  MemoryCandidateConfirmInput,
+  MemoryCandidateUpdateInput,
+  MemoryCardCreateInput,
+  MemoryCardUpdateInput,
+  MemoryRecallConfirmInput,
+  MemorySearchConfig
+} from '../shared/memory';
 
 interface ArtifactShareCreateInput {
   projectId?: number | string;
@@ -380,6 +400,51 @@ export async function finalizeSuccessfulTechDesignRuns(
   return { workflow: nextWorkflow, changed };
 }
 
+export async function finalizeSuccessfulTechDesignMemoryFeedback(
+  root: string,
+  workflow: RequirementWorkflow,
+  context?: LocalRequestContext
+): Promise<void> {
+  for (const run of workflow.runs) {
+    if (
+      run.actionType !== 'DESIGN_GENERATE'
+      || !run.techDesignInputSnapshot
+      || !['SUCCEEDED', 'COMPLETED'].includes(run.status)
+    ) {
+      continue;
+    }
+    await markMemoryRecallApplied(root, workflow, run, context?.projectId ? String(context.projectId) : undefined);
+  }
+}
+
+export async function finalizeSuccessfulRetrospectiveRuns(
+  root: string,
+  workflow: RequirementWorkflow,
+  context?: LocalRequestContext
+): Promise<{ workflow: RequirementWorkflow; changed: boolean; parseError?: string }> {
+  let nextWorkflow = workflow;
+  let changed = false;
+  let parseError: string | undefined;
+  for (const run of workflow.runs) {
+    if (run.actionType !== 'RETROSPECTIVE_GENERATE' || !['SUCCEEDED', 'COMPLETED'].includes(run.status)) {
+      continue;
+    }
+    const before = JSON.stringify({
+      retrospective: nextWorkflow.retrospective,
+      stage: nextWorkflow.stages.RETROSPECTIVE
+    });
+    const result = await importRetrospectiveRunOutputs(root, nextWorkflow, run, context?.projectId ? String(context.projectId) : undefined);
+    nextWorkflow = result.workflow;
+    parseError = parseError || result.parseError;
+    const after = JSON.stringify({
+      retrospective: nextWorkflow.retrospective,
+      stage: nextWorkflow.stages.RETROSPECTIVE
+    });
+    changed = changed || before !== after || result.importedCandidateCount > 0;
+  }
+  return { workflow: nextWorkflow, changed, parseError };
+}
+
 function implementationStatusForRun(run: RunRecord): WorkflowStatus {
   if (run.status === 'SUCCEEDED') {
     return 'READY_FOR_REVIEW';
@@ -390,7 +455,7 @@ function implementationStatusForRun(run: RunRecord): WorkflowStatus {
   return 'IN_PROGRESS';
 }
 
-function applyImplementationRun(workflow: RequirementWorkflow, run: RunRecord): RequirementWorkflow {
+export function applyImplementationRun(workflow: RequirementWorkflow, run: RunRecord): RequirementWorkflow {
   if (!isImplementationStep(run.implementationStep)) {
     return workflow;
   }
@@ -400,6 +465,33 @@ function applyImplementationRun(workflow: RequirementWorkflow, run: RunRecord): 
     status: implementationStatusForRun(run),
     runId: run.id
   };
+  if (run.actionType === 'OPENSPEC_FF' && ['SUCCEEDED', 'COMPLETED'].includes(run.status)) {
+    const invalidationComment = 'OpenSpec 工件已基于新技术方案版本重新生成，需重新审核后继续实施';
+    if (implementationSteps.APPLY.status !== 'NOT_STARTED') {
+      implementationSteps.APPLY = {
+        ...implementationSteps.APPLY,
+        status: 'DRAFT',
+        comment: invalidationComment,
+        approvedAt: undefined,
+        rejectedAt: undefined
+      };
+    }
+    if (implementationSteps.CHANGE_INSPECTION.status !== 'NOT_STARTED') {
+      implementationSteps.CHANGE_INSPECTION = {
+        ...implementationSteps.CHANGE_INSPECTION,
+        status: 'NOT_STARTED',
+        comment: invalidationComment,
+        approvedAt: undefined,
+        rejectedAt: undefined
+      };
+    }
+  }
+  const implementationStageStatus =
+    run.actionType === 'OPENSPEC_FF' && ['SUCCEEDED', 'COMPLETED'].includes(run.status)
+      ? 'IN_PROGRESS'
+      : workflow.stages.IMPLEMENTATION.status === 'APPROVED'
+        ? 'APPROVED'
+        : 'IN_PROGRESS';
   return {
     ...workflow,
     implementationSteps,
@@ -407,7 +499,7 @@ function applyImplementationRun(workflow: RequirementWorkflow, run: RunRecord): 
       ...workflow.stages,
       IMPLEMENTATION: {
         ...workflow.stages.IMPLEMENTATION,
-        status: workflow.stages.IMPLEMENTATION.status === 'APPROVED' ? 'APPROVED' : 'IN_PROGRESS',
+        status: implementationStageStatus,
         runId: run.id
       }
     }
@@ -542,8 +634,14 @@ function statusForError(error: any): number {
   if (badRequestCodes.has(code || '')) {
     return 400;
   }
+  if (['B71002', 'B71003', 'B71004'].includes(code || '')) {
+    return 400;
+  }
   if (conflictCodes.has(code || '')) {
     return 409;
+  }
+  if (code === 'B71001') {
+    return 404;
   }
     return 500;
 }
@@ -858,6 +956,161 @@ export function createRouter(workspaceRoot: string) {
         return;
       }
 
+      if (request.method === 'GET' && pathname === '/api/ai-delivery/memory/cards') {
+        const { root } = await resolveWorkflowStore(requestContext);
+        const repository = new MemoryRepository(root);
+        const status = url.searchParams.getAll('status');
+        send(response, 200, {
+          data: await repository.listCards({
+            projectId: url.searchParams.get('projectId') || requestContext.projectId,
+            status: (status.length ? status : url.searchParams.get('status')) as any,
+            type: url.searchParams.get('type') as any,
+            keyword: url.searchParams.get('keyword') || '',
+            module: url.searchParams.get('module') || '',
+            stage: url.searchParams.get('stage') as any,
+            page: Number(url.searchParams.get('page') || 1),
+            pageSize: Number(url.searchParams.get('pageSize') || 50)
+          })
+        });
+        return;
+      }
+
+      if (request.method === 'POST' && pathname === '/api/ai-delivery/memory/cards') {
+        const { root } = await resolveWorkflowStore(requestContext, true);
+        const input = await parseBody<MemoryCardCreateInput>(request);
+        send(response, 200, {
+          data: await new MemoryRepository(root).createManualCard({
+            ...input,
+            projectId: input.projectId || requestContext.projectId
+          })
+        });
+        return;
+      }
+
+      const memoryCardMatch = match(pathname, /^\/api\/ai-delivery\/memory\/cards\/([^/]+)$/);
+      if (request.method === 'GET' && memoryCardMatch) {
+        const { root } = await resolveWorkflowStore(requestContext);
+        send(response, 200, { data: await new MemoryRepository(root).getCard(decodeURIComponent(memoryCardMatch[1])) });
+        return;
+      }
+
+      if (request.method === 'POST' && memoryCardMatch) {
+        const { root } = await resolveWorkflowStore(requestContext, true);
+        const input = await parseBody<MemoryCardUpdateInput>(request);
+        send(response, 200, { data: await new MemoryRepository(root).updateCard(decodeURIComponent(memoryCardMatch[1]), input) });
+        return;
+      }
+
+      const memoryCardRevisionsMatch = match(pathname, /^\/api\/ai-delivery\/memory\/cards\/([^/]+)\/revisions$/);
+      if (request.method === 'GET' && memoryCardRevisionsMatch) {
+        const { root } = await resolveWorkflowStore(requestContext);
+        send(response, 200, { data: await new MemoryRepository(root).listCardRevisions(decodeURIComponent(memoryCardRevisionsMatch[1])) });
+        return;
+      }
+
+      if (request.method === 'GET' && pathname === '/api/ai-delivery/memory/candidates') {
+        const { root } = await resolveWorkflowStore(requestContext);
+        const repository = new MemoryRepository(root);
+        const status = url.searchParams.getAll('status');
+        send(response, 200, {
+          data: await repository.listCandidates({
+            projectId: url.searchParams.get('projectId') || requestContext.projectId,
+            requirementId: url.searchParams.get('requirementId') || undefined,
+            status: (status.length ? status : url.searchParams.get('status')) as any,
+            keyword: url.searchParams.get('keyword') || '',
+            page: Number(url.searchParams.get('page') || 1),
+            pageSize: Number(url.searchParams.get('pageSize') || 50)
+          })
+        });
+        return;
+      }
+
+      if (request.method === 'POST' && pathname === '/api/ai-delivery/memory/candidates/extract') {
+        const input = await parseBody<{ requirementId: string; runId?: string }>(request);
+        const { root, workflow } = await loadMergedWorkflow(requestContext, input.requirementId, true);
+        if (!workflow) {
+          send(response, 404, { message: '需求不存在' });
+          return;
+        }
+        const run = input.runId
+          ? workflow.runs.find((item) => item.id === input.runId)
+          : workflow.runs.find((item) => item.actionType === 'DESIGN_GENERATE' && ['SUCCEEDED', 'COMPLETED'].includes(item.status));
+        if (!run) {
+          send(response, 400, { message: '未找到可提炼候选经验的技术方案生成记录' });
+          return;
+        }
+        send(response, 200, { data: await extractMemoryCandidatesForDesignRun(root, workflow, run, requestContext.projectId) });
+        return;
+      }
+
+      const memoryCandidateUpdateMatch = match(pathname, /^\/api\/ai-delivery\/memory\/candidates\/([^/]+)$/);
+      if (request.method === 'POST' && memoryCandidateUpdateMatch) {
+        const { root } = await resolveWorkflowStore(requestContext, true);
+        const input = await parseBody<MemoryCandidateUpdateInput>(request);
+        send(response, 200, { data: await new MemoryRepository(root).updateCandidate(decodeURIComponent(memoryCandidateUpdateMatch[1]), input) });
+        return;
+      }
+
+      const memoryCandidateConfirmMatch = match(pathname, /^\/api\/ai-delivery\/memory\/candidates\/([^/]+)\/confirm$/);
+      if (request.method === 'POST' && memoryCandidateConfirmMatch) {
+        const { root } = await resolveWorkflowStore(requestContext, true);
+        const input = await parseBody<MemoryCandidateConfirmInput>(request);
+        send(response, 200, { data: await new MemoryRepository(root).confirmCandidate(decodeURIComponent(memoryCandidateConfirmMatch[1]), input) });
+        return;
+      }
+
+      const memoryCandidateIgnoreMatch = match(pathname, /^\/api\/ai-delivery\/memory\/candidates\/([^/]+)\/ignore$/);
+      if (request.method === 'POST' && memoryCandidateIgnoreMatch) {
+        const { root } = await resolveWorkflowStore(requestContext, true);
+        const input = await parseBody<{ reason?: string }>(request);
+        send(response, 200, { data: await new MemoryRepository(root).updateCandidateStatus(decodeURIComponent(memoryCandidateIgnoreMatch[1]), 'IGNORED', input.reason) });
+        return;
+      }
+
+      const memoryCandidateStatusMatch = match(pathname, /^\/api\/ai-delivery\/memory\/candidates\/([^/]+)\/status$/);
+      if (request.method === 'POST' && memoryCandidateStatusMatch) {
+        const { root } = await resolveWorkflowStore(requestContext, true);
+        const input = await parseBody<{ status: any; reason?: string }>(request);
+        send(response, 200, { data: await new MemoryRepository(root).updateCandidateStatus(decodeURIComponent(memoryCandidateStatusMatch[1]), input.status, input.reason) });
+        return;
+      }
+
+      if (request.method === 'GET' && pathname === '/api/ai-delivery/memory/recalls') {
+        const { root } = await resolveWorkflowStore(requestContext);
+        send(response, 200, {
+          data: await new MemoryRepository(root).listRecallRecords({
+            projectId: url.searchParams.get('projectId') || requestContext.projectId,
+            requirementId: url.searchParams.get('requirementId') || undefined,
+            memoryId: url.searchParams.get('memoryId') || undefined,
+            page: Number(url.searchParams.get('page') || 1),
+            pageSize: Number(url.searchParams.get('pageSize') || 50)
+          })
+        });
+        return;
+      }
+
+      if (request.method === 'GET' && pathname === '/api/ai-delivery/memory/search-config') {
+        send(response, 200, { data: defaultMemorySearchConfig() });
+        return;
+      }
+
+      if (request.method === 'POST' && pathname === '/api/ai-delivery/memory/search-config') {
+        const input = await parseBody<Partial<MemorySearchConfig>>(request);
+        send(response, 200, { data: mergeMemorySearchConfig(input) });
+        return;
+      }
+
+      if (request.method === 'POST' && pathname === '/api/ai-delivery/memory/embeddings/rebuild') {
+        const input = await parseBody<{ config?: Partial<MemorySearchConfig> }>(request);
+        const { root } = await resolveWorkflowStore(requestContext, true);
+        const repository = new MemoryRepository(root);
+        const cards = await repository.listAllCards({ projectId: requestContext.projectId });
+        send(response, 200, {
+          data: await rebuildMemoryEmbeddingIndex(root, cards, mergeMemorySearchConfig(input.config || {}))
+        });
+        return;
+      }
+
       if (request.method === 'GET' && pathname === '/api/ai-delivery/requirements') {
         const { root, repository } = await resolveWorkflowStore(requestContext);
         let workflows: RequirementWorkflow[];
@@ -871,18 +1124,22 @@ export function createRouter(workspaceRoot: string) {
             }
             const refreshed = await refreshTerminalRunStatuses(root, merged, centerRunnerConfig(requestContext));
             const finalized = await finalizeSuccessfulTechDesignRuns(root, refreshed.workflow, requestContext);
-            await retryWorkflowTokenUsageOutboxes(root, finalized.workflow, centerRunnerConfig(requestContext));
-            await retryWorkflowCenterRunStatuses(finalized.workflow, centerRunnerConfig(requestContext));
-            return saveWithArtifacts(root, repository, finalized.workflow);
+            await finalizeSuccessfulTechDesignMemoryFeedback(root, finalized.workflow, requestContext);
+            const retrospectiveFinalized = await finalizeSuccessfulRetrospectiveRuns(root, finalized.workflow, requestContext);
+            await retryWorkflowTokenUsageOutboxes(root, retrospectiveFinalized.workflow, centerRunnerConfig(requestContext));
+            await retryWorkflowCenterRunStatuses(retrospectiveFinalized.workflow, centerRunnerConfig(requestContext));
+            return saveWithArtifacts(root, repository, retrospectiveFinalized.workflow);
           }));
         } catch {
           workflows = await Promise.all((await repository.list()).map(async (workflow) => {
             const merged = await mergeTechDesignInputLedgerIntoWorkflow(root, workflow);
             const refreshed = await refreshTerminalRunStatuses(root, merged, centerRunnerConfig(requestContext));
             const finalized = await finalizeSuccessfulTechDesignRuns(root, refreshed.workflow, requestContext);
-            return refreshed.changed || finalized.changed
-              ? saveWithArtifacts(root, repository, finalized.workflow)
-              : finalized.workflow;
+            await finalizeSuccessfulTechDesignMemoryFeedback(root, finalized.workflow, requestContext);
+            const retrospectiveFinalized = await finalizeSuccessfulRetrospectiveRuns(root, finalized.workflow, requestContext);
+            return refreshed.changed || finalized.changed || retrospectiveFinalized.changed
+              ? saveWithArtifacts(root, repository, retrospectiveFinalized.workflow)
+              : retrospectiveFinalized.workflow;
           }));
         }
         send(response, 200, { data: workflows });
@@ -921,15 +1178,28 @@ export function createRouter(workspaceRoot: string) {
         workflow = await mergeTechDesignInputLedgerIntoWorkflow(store.root, workflow);
         const refreshed = await refreshTerminalRunStatuses(store.root, workflow, centerRunnerConfig(requestContext));
         const finalized = await finalizeSuccessfulTechDesignRuns(store.root, refreshed.workflow, requestContext);
-        workflow = finalized.workflow;
+        await finalizeSuccessfulTechDesignMemoryFeedback(store.root, finalized.workflow, requestContext);
+        const retrospectiveFinalized = await finalizeSuccessfulRetrospectiveRuns(store.root, finalized.workflow, requestContext);
+        workflow = retrospectiveFinalized.workflow;
         const outboxChanged = await retryWorkflowTokenUsageOutboxes(store.root, workflow, centerRunnerConfig(requestContext));
         const centerStatusChanged = await retryWorkflowCenterRunStatuses(workflow, centerRunnerConfig(requestContext));
-        if (refreshed.changed || finalized.changed || outboxChanged || centerStatusChanged) {
+        if (refreshed.changed || finalized.changed || retrospectiveFinalized.changed || outboxChanged || centerStatusChanged) {
           workflow = await store.repository.save(workflow);
         }
         send(response, 200, { data: workflow });
         scheduleArtifactIndexRefresh(store.root, store.repository, workflow);
         scheduleRequirementWorkspaceStateReport(requestContext, workflow);
+        return;
+      }
+
+      const retrospectiveMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/retrospective$/);
+      if (request.method === 'GET' && retrospectiveMatch) {
+        const { root, workflow } = await loadMergedWorkflow(requestContext, retrospectiveMatch[1], true);
+        if (!workflow) {
+          send(response, 404, { message: '需求不存在' });
+          return;
+        }
+        send(response, 200, { data: await getRetrospectiveSummary(root, workflow, requestContext.projectId ? String(requestContext.projectId) : undefined) });
         return;
       }
 
@@ -1419,6 +1689,82 @@ export function createRouter(workspaceRoot: string) {
         return;
       }
 
+      const requirementMemoryRecallMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/memory\/recall$/);
+      if (request.method === 'POST' && requirementMemoryRecallMatch) {
+        const requirementId = requirementMemoryRecallMatch[1];
+        const input = await parseBody<{ actionType?: ActionInput['actionType']; runId?: string; stage?: any }>(request);
+        const { root, workflow } = await loadMergedWorkflow(requestContext, requirementId, true);
+        if (!workflow) {
+          send(response, 404, { message: '需求不存在' });
+          return;
+        }
+        const runId = input.runId || `manual-${Date.now()}`;
+        send(response, 200, {
+          data: await prepareMemoryRecallForRun(root, workflow, {
+            projectId: requestContext.projectId,
+            actionType: input.actionType || 'DESIGN_GENERATE',
+            stage: input.stage || workflow.currentStage,
+            runId
+          })
+        });
+        return;
+      }
+
+      const requirementMemoryRecallPreviewMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/memory\/recall-preview$/);
+      if (request.method === 'POST' && requirementMemoryRecallPreviewMatch) {
+        const requirementId = requirementMemoryRecallPreviewMatch[1];
+        const input = await parseBody<{
+          actionType?: ActionInput['actionType'];
+          stage?: any;
+          sourceFilePaths?: string[];
+          clarification?: string;
+          runIntent?: string;
+        }>(request);
+        const { root, workflow } = await loadMergedWorkflow(requestContext, requirementId, true);
+        if (!workflow) {
+          send(response, 404, { message: '需求不存在' });
+          return;
+        }
+        send(response, 200, {
+          data: await previewMemoryRecallForRun(root, workflow, {
+            projectId: requestContext.projectId,
+            actionType: input.actionType || 'DESIGN_GENERATE',
+            stage: input.stage || workflow.currentStage,
+            sourceFilePaths: Array.isArray(input.sourceFilePaths) ? input.sourceFilePaths : [],
+            clarification: typeof input.clarification === 'string' ? input.clarification : '',
+            runIntent: typeof input.runIntent === 'string' ? input.runIntent : ''
+          })
+        });
+        return;
+      }
+
+      const requirementMemoryRecallConfirmMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/memory\/recall-confirm$/);
+      if (request.method === 'POST' && requirementMemoryRecallConfirmMatch) {
+        const requirementId = requirementMemoryRecallConfirmMatch[1];
+        const input = await parseBody<MemoryRecallConfirmInput>(request);
+        const { root, workflow } = await loadMergedWorkflow(requestContext, requirementId, true);
+        if (!workflow) {
+          send(response, 404, { message: '需求不存在' });
+          return;
+        }
+        send(response, 200, {
+          data: await confirmMemoryRecallForRun(root, workflow, {
+            projectId: requestContext.projectId,
+            actionType: input.actionType || 'DESIGN_GENERATE',
+            stage: input.stage || workflow.currentStage,
+            runId: input.runId || `manual-${Date.now()}`,
+            previewId: input.previewId,
+            selectedMemoryIds: input.selectedMemoryIds || [],
+            dismissed: input.dismissed || [],
+            force: input.force,
+            sourceFilePaths: Array.isArray(input.sourceFilePaths) ? input.sourceFilePaths : [],
+            clarification: typeof input.clarification === 'string' ? input.clarification : '',
+            runIntent: typeof input.runIntent === 'string' ? input.runIntent : ''
+          })
+        });
+        return;
+      }
+
       const actionMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/actions$/);
       if (request.method === 'POST' && actionMatch) {
         const requirementId = actionMatch[1];
@@ -1517,11 +1863,22 @@ export function createRouter(workspaceRoot: string) {
             if (['SUCCEEDED', 'COMPLETED'].includes(updatedRun.status)) {
               try {
                 updatedWorkflow = (await finalizeSuccessfulTechDesignRuns(root, updatedWorkflow, requestContext)).workflow;
+                await markMemoryRecallApplied(root, updatedWorkflow, updatedRun, requestContext.projectId);
+                const retrospectiveResult = await importRetrospectiveRunOutputs(root, updatedWorkflow, updatedRun, requestContext.projectId);
+                updatedWorkflow = retrospectiveResult.workflow;
+                if (retrospectiveResult.parseError) {
+                  await appendRunEvent(root, requirementId, updatedRun.id, {
+                    type: 'WARN',
+                    level: 'WARN',
+                    message: retrospectiveResult.parseError,
+                    agentId: updatedRun.agentId
+                  });
+                }
               } catch (error: any) {
                 await appendRunEvent(root, requirementId, updatedRun.id, {
                   type: 'WARN',
                   level: 'WARN',
-                  message: `技术方案增量输入消费失败，将在刷新时重试：${error?.message || 'unknown error'}`,
+                  message: `动作成功后的产物整理失败，将在刷新时重试：${error?.message || 'unknown error'}`,
                   agentId: updatedRun.agentId
                 });
               }
@@ -1532,7 +1889,8 @@ export function createRouter(workspaceRoot: string) {
             await repository.save(updatedWorkflow);
           }, {
             projectPaths,
-            centerConfig: centerRunnerConfig(requestContext)
+            centerConfig: centerRunnerConfig(requestContext),
+            projectId: requestContext.projectId
           });
           
           const stage = run.stage || stageForAction(effectiveAction.actionType);
@@ -1554,6 +1912,17 @@ export function createRouter(workspaceRoot: string) {
           workflow.runs.unshift(run);
           workflow = applyImplementationRun(workflow, run);
           workflow = await consumeTechDesignInputsAfterRun(root, workflow, run, requestContext);
+          await markMemoryRecallApplied(root, workflow, run, requestContext.projectId);
+          const retrospectiveResult = await importRetrospectiveRunOutputs(root, workflow, run, requestContext.projectId);
+          workflow = retrospectiveResult.workflow;
+          if (retrospectiveResult.parseError) {
+            await appendRunEvent(root, requirementId, run.id, {
+              type: 'WARN',
+              level: 'WARN',
+              message: retrospectiveResult.parseError,
+              agentId: run.agentId
+            });
+          }
           if (shouldRefreshArtifactsAfterRun(run)) {
             workflow = await refreshArtifacts(root, workflow);
           }
@@ -1567,7 +1936,7 @@ export function createRouter(workspaceRoot: string) {
             );
           }
           // PRD分析、技术方案生成等可能产生产物的操作，执行完成后自动刷新产物索引
-          if (['PRD_ANALYZE', 'PRD_CLARIFY', 'DESIGN_GENERATE', 'DESIGN_QUESTION', 'OPENSPEC_NEW_CHANGE', 'OPENSPEC_ARCHIVE'].includes(effectiveAction.actionType)) {
+          if (['PRD_ANALYZE', 'PRD_CLARIFY', 'DESIGN_GENERATE', 'DESIGN_QUESTION', 'OPENSPEC_NEW_CHANGE', 'OPENSPEC_ARCHIVE', 'RETROSPECTIVE_GENERATE'].includes(effectiveAction.actionType)) {
             workflow.artifacts = await scanRequirementArtifacts(
               root,
               workflow.requirementId,
@@ -1580,6 +1949,7 @@ export function createRouter(workspaceRoot: string) {
           if (effectiveAction.actionType === 'RETURN_TO_IMPLEMENTATION') {
             const issues = await refreshCodeReviewIssues(root, workflow);
             workflow = returnToImplementation(workflow, issues);
+            await new MemoryRepository(root).markRetrospectiveCandidatesPendingVerify(workflow.requirementId, '代码评审打回实施，复盘需重新确认');
           }
           workflow = await repository.save(workflow);
           await reportRequirementWorkspaceState(requestContext, workflow).catch(() => undefined);
@@ -1623,7 +1993,10 @@ export function createRouter(workspaceRoot: string) {
             }
           };
         }
-        send(response, 200, { data: { commandText: buildActionCommand(workflow, action) } });
+        const effectiveAction = action.actionType === 'OPENSPEC_FF'
+          ? await prepareOpenSpecArtifactAction(root, workflow, action)
+          : action;
+        send(response, 200, { data: { commandText: buildActionCommand(workflow, effectiveAction) } });
         return;
       }
 
@@ -1661,14 +2034,16 @@ export function createRouter(workspaceRoot: string) {
           if (workflow) {
             const refreshed = await refreshTerminalRunStatuses(root, workflow, centerRunnerConfig(requestContext));
             const finalized = await finalizeSuccessfulTechDesignRuns(root, refreshed.workflow, requestContext);
-            const outboxChanged = await retryWorkflowTokenUsageOutboxes(root, finalized.workflow, centerRunnerConfig(requestContext));
-            const centerStatusChanged = await retryWorkflowCenterRunStatuses(finalized.workflow, centerRunnerConfig(requestContext));
-            const currentRun = finalized.workflow.runs.find((item) => item.id === runStreamMatch[1]);
+            await finalizeSuccessfulTechDesignMemoryFeedback(root, finalized.workflow, requestContext);
+            const retrospectiveFinalized = await finalizeSuccessfulRetrospectiveRuns(root, finalized.workflow, requestContext);
+            const outboxChanged = await retryWorkflowTokenUsageOutboxes(root, retrospectiveFinalized.workflow, centerRunnerConfig(requestContext));
+            const centerStatusChanged = await retryWorkflowCenterRunStatuses(retrospectiveFinalized.workflow, centerRunnerConfig(requestContext));
+            const currentRun = retrospectiveFinalized.workflow.runs.find((item) => item.id === runStreamMatch[1]);
             const artifactsChanged = shouldRefreshArtifactsAfterRun(currentRun);
             const workflowToSave = artifactsChanged
-              ? await refreshArtifacts(root, finalized.workflow)
-              : finalized.workflow;
-            workflow = refreshed.changed || finalized.changed || outboxChanged || centerStatusChanged || artifactsChanged
+              ? await refreshArtifacts(root, retrospectiveFinalized.workflow)
+              : retrospectiveFinalized.workflow;
+            workflow = refreshed.changed || finalized.changed || retrospectiveFinalized.changed || outboxChanged || centerStatusChanged || artifactsChanged
               ? await repository.save(workflowToSave)
               : workflowToSave;
           }
@@ -2121,6 +2496,21 @@ export function createRouter(workspaceRoot: string) {
             return;
           }
           await assertWritableWorkflow(requestContext, workflow);
+          if (input.stage === 'RETROSPECTIVE') {
+            const retrospective = await getRetrospectiveSummary(root, workflow, requestContext.projectId ? String(requestContext.projectId) : undefined);
+            workflow = {
+              ...workflow,
+              retrospective: {
+                ...(workflow.retrospective || {}),
+                summaryPath: retrospective.summaryPath,
+                evidencePath: retrospective.evidencePath,
+                candidateCount: retrospective.candidateCount,
+                pendingCandidateCount: retrospective.pendingCandidateCount,
+                recallFeedbackCount: retrospective.recallFeedbackCount,
+                unresolvedRiskCount: retrospective.unresolvedRiskCount
+              }
+            };
+          }
           workflow = await applyReview(root, workflow, input);
           if (input.stage === 'CODE_REVIEW') {
             workflow.issues = await refreshCodeReviewIssues(root, workflow);

@@ -7,6 +7,7 @@ import Settings from '@/views/Settings.vue';
 import ProjectRepositoryRequired from '@/views/ProjectRepositoryRequired.vue';
 import ArtifactPreviewPage from '@/views/ArtifactPreviewPage.vue';
 import PublicArtifactPreviewPage from '@/views/PublicArtifactPreviewPage.vue';
+import ProjectMemory from '@/views/ProjectMemory.vue';
 import { useAuthStore } from '@/stores/auth';
 import { useProjectStore } from '@/stores/project';
 
@@ -33,6 +34,30 @@ const router = createRouter({
       name: 'requirement-detail',
       component: RequirementDetail,
       props: true
+    },
+    {
+      path: '/memory',
+      name: 'project-memory',
+      component: ProjectMemory,
+      props: { view: 'cards' }
+    },
+    {
+      path: '/memory/candidates',
+      name: 'project-memory-candidates',
+      component: ProjectMemory,
+      props: { view: 'candidates' }
+    },
+    {
+      path: '/memory/recalls',
+      name: 'project-memory-recalls',
+      component: ProjectMemory,
+      props: { view: 'recalls' }
+    },
+    {
+      path: '/memory/archived',
+      name: 'project-memory-archived',
+      component: ProjectMemory,
+      props: { view: 'archived' }
     },
     {
       path: '/artifacts/preview',

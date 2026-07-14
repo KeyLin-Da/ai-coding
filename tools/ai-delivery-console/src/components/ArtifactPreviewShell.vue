@@ -110,6 +110,7 @@
               class="markdown-preview artifact-markdown"
               :class="readingModeClass"
               v-html="previewHtml"
+              @click="handleMarkdownPreviewClick"
               @mouseup="captureSelection"
               @keyup="captureSelection"
             ></article>
@@ -247,6 +248,10 @@ const zoomStepPercent = 10;
 const sequenceReadableZoomThreshold = 130;
 const sequenceReadableScale = 0.1;
 const sequenceReadableMinWidth = 2300;
+const sequenceDiagramMinZoomPercent = 60;
+const sequenceDiagramMaxZoomPercent = 300;
+const sequenceDiagramDefaultZoomPercent = 100;
+const sequenceDiagramZoomStepPercent = 10;
 const markdownRendererVersion = 'markdown-v1';
 const mermaidRendererVersion = 'mermaid-v1';
 const mermaidTheme = 'default';
@@ -787,6 +792,95 @@ function readSvgNaturalWidth(svg: SVGElement) {
   return naturalWidth;
 }
 
+function clampSequenceDiagramZoomPercent(value: number) {
+  return Math.min(sequenceDiagramMaxZoomPercent, Math.max(sequenceDiagramMinZoomPercent, value));
+}
+
+function readSequenceDiagramZoomPercent(diagram: HTMLElement) {
+  const value = Number(diagram.dataset.sequenceZoomPercent);
+  if (!Number.isFinite(value)) {
+    return sequenceDiagramDefaultZoomPercent;
+  }
+  return clampSequenceDiagramZoomPercent(value);
+}
+
+function updateSequenceDiagramToolbar(diagram: HTMLElement) {
+  const toolbar = diagram.querySelector<HTMLElement>('[data-sequence-zoom-toolbar="true"]');
+  if (!toolbar) {
+    return;
+  }
+  const zoom = readSequenceDiagramZoomPercent(diagram);
+  const percent = toolbar.querySelector<HTMLElement>('[data-sequence-zoom-percent="true"]');
+  const zoomOutButton = toolbar.querySelector<HTMLButtonElement>('[data-sequence-zoom-action="out"]');
+  const zoomInButton = toolbar.querySelector<HTMLButtonElement>('[data-sequence-zoom-action="in"]');
+  const resetButton = toolbar.querySelector<HTMLButtonElement>('[data-sequence-zoom-action="reset"]');
+  if (percent) {
+    percent.textContent = `${zoom}%`;
+  }
+  if (zoomOutButton) {
+    zoomOutButton.disabled = zoom <= sequenceDiagramMinZoomPercent;
+  }
+  if (zoomInButton) {
+    zoomInButton.disabled = zoom >= sequenceDiagramMaxZoomPercent;
+  }
+  if (resetButton) {
+    resetButton.disabled = zoom === sequenceDiagramDefaultZoomPercent;
+  }
+}
+
+function ensureSequenceDiagramToolbar(diagram: HTMLElement) {
+  if (diagram.dataset.sequenceZoomPercent == null) {
+    diagram.dataset.sequenceZoomPercent = String(sequenceDiagramDefaultZoomPercent);
+  }
+  if (!diagram.querySelector('[data-sequence-zoom-toolbar="true"]')) {
+    const toolbar = document.createElement('div');
+    toolbar.className = 'sequence-diagram-toolbar';
+    toolbar.dataset.sequenceZoomToolbar = 'true';
+    toolbar.setAttribute('aria-label', '时序图缩放');
+    toolbar.innerHTML = `
+      <button type="button" class="sequence-diagram-zoom-button" data-sequence-zoom-action="out" title="缩小时序图" aria-label="缩小时序图">-</button>
+      <span class="sequence-diagram-zoom-percent" data-sequence-zoom-percent="true">100%</span>
+      <button type="button" class="sequence-diagram-zoom-button" data-sequence-zoom-action="in" title="放大时序图" aria-label="放大时序图">+</button>
+      <button type="button" class="sequence-diagram-reset-button" data-sequence-zoom-action="reset" title="恢复时序图 100%" aria-label="恢复时序图 100%">1:1</button>
+    `;
+    diagram.prepend(toolbar);
+  }
+  updateSequenceDiagramToolbar(diagram);
+}
+
+function applyMermaidSvgSize(diagram: HTMLElement, svg: SVGElement) {
+  const isSequenceDiagram = diagram.dataset.mermaidType === 'sequence';
+  if (isSequenceDiagram) {
+    const sequenceZoomPercent = readSequenceDiagramZoomPercent(diagram);
+    const shouldUseReadableSequenceSize =
+      zoomPercent.value >= sequenceReadableZoomThreshold || sequenceZoomPercent !== sequenceDiagramDefaultZoomPercent;
+    if (shouldUseReadableSequenceSize) {
+      const naturalWidth = readSvgNaturalWidth(svg);
+      const baseWidth = Math.ceil(Math.max(naturalWidth * sequenceReadableScale, sequenceReadableMinWidth));
+      const targetWidth = Math.ceil(baseWidth * (sequenceZoomPercent / 100));
+      svg.style.width = `${targetWidth}px`;
+      svg.style.minWidth = `${targetWidth}px`;
+      svg.style.maxWidth = 'none';
+      svg.style.height = 'auto';
+      return;
+    }
+  }
+  svg.style.width = '';
+  svg.style.minWidth = '';
+  svg.style.maxWidth = '100%';
+  svg.style.height = 'auto';
+}
+
+function setSequenceDiagramZoomPercent(diagram: HTMLElement, value: number) {
+  hideSelectionMenu();
+  diagram.dataset.sequenceZoomPercent = String(clampSequenceDiagramZoomPercent(value));
+  const svg = diagram.querySelector<SVGElement>('svg');
+  if (svg) {
+    applyMermaidSvgSize(diagram, svg);
+  }
+  updateSequenceDiagramToolbar(diagram);
+}
+
 function enhanceMermaidDiagrams() {
   if (!markdownPreviewRef.value) {
     return;
@@ -796,20 +890,10 @@ function enhanceMermaidDiagrams() {
     if (!svg) {
       return;
     }
-    const shouldUseReadableSequenceSize = diagram.dataset.mermaidType === 'sequence' && zoomPercent.value >= sequenceReadableZoomThreshold;
-    if (shouldUseReadableSequenceSize) {
-      const naturalWidth = readSvgNaturalWidth(svg);
-      const targetWidth = Math.ceil(Math.max(naturalWidth * sequenceReadableScale, sequenceReadableMinWidth));
-      svg.style.width = `${targetWidth}px`;
-      svg.style.minWidth = `${targetWidth}px`;
-      svg.style.maxWidth = 'none';
-      svg.style.height = 'auto';
-      return;
+    if (diagram.dataset.mermaidType === 'sequence') {
+      ensureSequenceDiagramToolbar(diagram);
     }
-    svg.style.width = '';
-    svg.style.minWidth = '';
-    svg.style.maxWidth = '100%';
-    svg.style.height = 'auto';
+    applyMermaidSvgSize(diagram, svg);
   });
 }
 
@@ -1220,6 +1304,33 @@ function openVersionDiff() {
   versionDiffDialog.value?.open(requirementId.value, techDesignVersions.value, selectedVersionId.value);
 }
 
+function handleMarkdownPreviewClick(event: MouseEvent) {
+  const target = event.target as HTMLElement | null;
+  const button = target?.closest<HTMLButtonElement>('[data-sequence-zoom-action]');
+  if (!button || !markdownPreviewRef.value?.contains(button)) {
+    return;
+  }
+  const diagram = button.closest<HTMLElement>('.mermaid-diagram');
+  if (!diagram || diagram.dataset.mermaidType !== 'sequence') {
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  const currentZoom = readSequenceDiagramZoomPercent(diagram);
+  const action = button.dataset.sequenceZoomAction;
+  if (action === 'in') {
+    setSequenceDiagramZoomPercent(diagram, currentZoom + sequenceDiagramZoomStepPercent);
+    return;
+  }
+  if (action === 'out') {
+    setSequenceDiagramZoomPercent(diagram, currentZoom - sequenceDiagramZoomStepPercent);
+    return;
+  }
+  if (action === 'reset') {
+    setSequenceDiagramZoomPercent(diagram, sequenceDiagramDefaultZoomPercent);
+  }
+}
+
 function handleZoomShortcut(event: KeyboardEvent) {
   if (event.key === 'Escape') {
     clearSelectionDraft();
@@ -1370,6 +1481,7 @@ function clonePreviewForExport() {
   if (!clone) {
     return '';
   }
+  clone.querySelectorAll('.tech-design-annotation-svg-highlight').forEach((node) => node.remove());
   clone.querySelectorAll('.tech-design-annotation-highlight').forEach((node) => {
     const parent = node.parentNode;
     if (!parent) {
@@ -1450,13 +1562,54 @@ function buildExportHtml(name: string) {
       height: auto;
     }
     .mermaid-diagram {
+      position: relative;
       width: 100%;
       margin: 24px 0 28px;
       overflow-x: auto;
       overflow-y: hidden;
     }
+    .mermaid-sequence-diagram {
+      padding-top: 42px;
+    }
     .mermaid-diagram svg {
       display: block;
+    }
+    .sequence-diagram-toolbar {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      z-index: 2;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 6px;
+      border: 1px solid #d8e0ec;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.94);
+      box-shadow: 0 6px 18px rgba(15, 23, 42, 0.1);
+    }
+    .sequence-diagram-zoom-button,
+    .sequence-diagram-reset-button {
+      height: 24px;
+      min-width: 24px;
+      padding: 0 7px;
+      color: #334155;
+      border: 1px solid #d8e0ec;
+      border-radius: 5px;
+      background: #ffffff;
+      cursor: pointer;
+    }
+    .sequence-diagram-zoom-button:disabled,
+    .sequence-diagram-reset-button:disabled {
+      color: #94a3b8;
+      cursor: not-allowed;
+      background: #f8fafc;
+    }
+    .sequence-diagram-zoom-percent {
+      min-width: 44px;
+      color: #334155;
+      font-size: 12px;
+      text-align: center;
     }
     @media print {
       body {
@@ -1468,6 +1621,9 @@ function buildExportHtml(name: string) {
       .mermaid-diagram {
         overflow: visible;
         break-inside: avoid;
+      }
+      .sequence-diagram-toolbar {
+        display: none;
       }
       pre, table {
         break-inside: avoid;
@@ -1785,6 +1941,7 @@ defineExpose({ downloadMarkdownArtifact, downloadOriginalArtifact });
 }
 
 .artifact-markdown :deep(.mermaid-diagram) {
+  position: relative;
   width: 100%;
   margin: 24px 0 28px;
   padding: 8px 0 14px;
@@ -1792,10 +1949,63 @@ defineExpose({ downloadMarkdownArtifact, downloadOriginalArtifact });
   overflow-y: hidden;
 }
 
+.artifact-markdown :deep(.mermaid-sequence-diagram) {
+  padding-top: 46px;
+}
+
 .artifact-markdown :deep(.mermaid-diagram svg) {
   display: block;
   max-width: 100%;
   height: auto;
+}
+
+.artifact-markdown :deep(.sequence-diagram-toolbar) {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 6px;
+  border: 1px solid #d8e0ec;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.1);
+}
+
+.artifact-preview-shell.eye-care .artifact-markdown :deep(.sequence-diagram-toolbar) {
+  border-color: #d6c8a7;
+  background: rgba(255, 250, 234, 0.96);
+}
+
+.artifact-markdown :deep(.sequence-diagram-zoom-button),
+.artifact-markdown :deep(.sequence-diagram-reset-button) {
+  height: 24px;
+  min-width: 24px;
+  padding: 0 7px;
+  color: #334155;
+  border: 1px solid #d8e0ec;
+  border-radius: 5px;
+  background: #ffffff;
+  font-size: 12px;
+  line-height: 22px;
+  cursor: pointer;
+}
+
+.artifact-markdown :deep(.sequence-diagram-zoom-button:disabled),
+.artifact-markdown :deep(.sequence-diagram-reset-button:disabled) {
+  color: #94a3b8;
+  cursor: not-allowed;
+  background: #f8fafc;
+}
+
+.artifact-markdown :deep(.sequence-diagram-zoom-percent) {
+  min-width: 44px;
+  color: #334155;
+  font-size: 12px;
+  text-align: center;
 }
 
 .artifact-markdown :deep(.mermaid-render-error) {
@@ -1899,6 +2109,12 @@ defineExpose({ downloadMarkdownArtifact, downloadOriginalArtifact });
 
 .selection-annotation-menu__button:active {
   background: #1e40af;
+}
+
+@media print {
+  .artifact-markdown :deep(.sequence-diagram-toolbar) {
+    display: none;
+  }
 }
 
 @media (max-width: 760px) {

@@ -151,7 +151,7 @@ function hasIncompleteImplementationApproval(
   reviews: ReviewRecord[],
   currentStage: WorkflowStage | 'DONE'
 ): boolean {
-  if (currentStage === 'CODE_REVIEW' || currentStage === 'DONE') {
+  if (currentStage === 'CODE_REVIEW' || currentStage === 'RETROSPECTIVE' || currentStage === 'DONE') {
     return false;
   }
   return (
@@ -250,9 +250,16 @@ export function mergeRequirementWorkflow(centerWorkflow: RequirementWorkflow, lo
     jobStatus: centerWorkflow.jobStatus,
     lastEventId: centerWorkflow.lastEventId
   };
+  const derivedCurrentStage = deriveCurrentStage(merged);
+  const currentStage = centerWorkflow.currentStage === 'DONE' && derivedCurrentStage !== 'DONE'
+    ? derivedCurrentStage
+    : centerWorkflow.currentStage === 'DONE'
+      ? 'DONE'
+      : derivedCurrentStage;
   return {
     ...merged,
-    currentStage: centerWorkflow.currentStage === 'DONE' ? 'DONE' : deriveCurrentStage(merged)
+    currentStage,
+    status: currentStage === 'DONE' ? 'DONE' : merged.status === 'DONE' ? 'IN_PROGRESS' : merged.status
   };
 }
 

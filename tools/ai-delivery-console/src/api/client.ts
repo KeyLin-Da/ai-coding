@@ -27,8 +27,26 @@ import type {
   WorkflowProject
 } from '@shared/workflow';
 import { createEmptyStages, emptyRequirementTokenUsage, emptyRunTokenUsage, emptyTokenUsageSummary } from '@shared/workflow';
+import type {
+  MemoryCandidate,
+  MemoryCandidateConfirmInput,
+  MemoryCandidateFilter,
+  MemoryCandidateUpdateInput,
+  MemoryCard,
+  MemoryCardCreateInput,
+  MemoryCardFilter,
+  MemoryCardRevision,
+  MemoryCardUpdateInput,
+  MemoryPage,
+  MemoryRecallConfirmInput,
+  MemoryRecallFilter,
+  MemoryRecallPreviewResult,
+  MemoryRecallRecord,
+  MemorySearchConfig,
+  RetrospectiveSummary
+} from '@shared/memory';
 import { apiRuntimeHeaders, getApiRuntimeConfig, resolveApiUrl, resolveRunnerApiUrl } from './runtime';
-import { loadWorkflowItemCache, loadWorkflowListCache, saveWorkflowCache, saveWorkflowItemCache } from '@/services/workflow-cache';
+import { loadWorkflowItemCache, loadWorkflowListCache, normalizeWorkflowCacheItem, saveWorkflowCache, saveWorkflowItemCache } from '@/services/workflow-cache';
 
 export interface DeleteTechDesignQuestionInput {
   id?: string;
@@ -360,6 +378,22 @@ function requireRemoteProjectId(): string {
   return projectId;
 }
 
+function queryString(input: Record<string, unknown>): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(input)) {
+    if (value === undefined || value === null || value === '') {
+      continue;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((item) => params.append(key, String(item)));
+    } else {
+      params.set(key, String(value));
+    }
+  }
+  const value = params.toString();
+  return value ? `?${value}` : '';
+}
+
 function centerRequirementToWorkflow(item: CenterRequirementVO): RequirementWorkflow {
   const stages = createEmptyStages(item.requirementType || 'REQUIREMENT');
   for (const stage of item.stages || []) {
@@ -374,7 +408,7 @@ function centerRequirementToWorkflow(item: CenterRequirementVO): RequirementWork
       };
     }
   }
-  return {
+  return normalizeRequirementWorkflow({
     id: item.id,
     requirementId: item.requirementId,
     title: item.title,
@@ -391,7 +425,15 @@ function centerRequirementToWorkflow(item: CenterRequirementVO): RequirementWork
     runs: [],
     reviews: [],
     issues: []
-  };
+  });
+}
+
+function normalizeRequirementWorkflow(workflow: RequirementWorkflow): RequirementWorkflow {
+  return normalizeWorkflowCacheItem(workflow);
+}
+
+function normalizeRequirementWorkflows(workflows: RequirementWorkflow[]): RequirementWorkflow[] {
+  return workflows.map(normalizeRequirementWorkflow);
 }
 
 function centerRunEventToRunEvent(item: CenterRunEventVO): RunEvent {
@@ -733,8 +775,9 @@ export const apiClient = {
         .then((items) => items.map(centerRequirementToWorkflow));
     return runnerRequest<RequirementWorkflow[]>(`/api/ai-delivery/requirements?projectId=${encodeURIComponent(requireRemoteProjectId())}`)
       .then((items) => {
-        saveWorkflowCache(items);
-        return items;
+        const normalized = normalizeRequirementWorkflows(items);
+        saveWorkflowCache(normalized);
+        return normalized;
       })
       .catch(() =>
         centerFallback()
@@ -754,6 +797,114 @@ export const apiClient = {
   listAgents() {
     return runnerRequest<AgentProvider[]>('/api/ai-delivery/agents');
   },
+  listMemoryCards(filter: MemoryCardFilter = {}) {
+    return runnerRequest<MemoryPage<MemoryCard>>(`/api/ai-delivery/memory/cards${queryString(filter as Record<string, unknown>)}`);
+  },
+  createMemoryCard(input: MemoryCardCreateInput) {
+    return runnerRequest<MemoryCard>('/api/ai-delivery/memory/cards', {
+      method: 'POST',
+      body: JSON.stringify(input)
+    });
+  },
+  updateMemoryCard(memoryId: string, input: MemoryCardUpdateInput) {
+    return runnerRequest<MemoryCard>(`/api/ai-delivery/memory/cards/${encodeURIComponent(memoryId)}`, {
+      method: 'POST',
+      body: JSON.stringify(input)
+    });
+  },
+  getMemoryCard(memoryId: string) {
+    return runnerRequest<MemoryCard>(`/api/ai-delivery/memory/cards/${encodeURIComponent(memoryId)}`);
+  },
+  listMemoryCardRevisions(memoryId: string) {
+    return runnerRequest<MemoryCardRevision[]>(`/api/ai-delivery/memory/cards/${encodeURIComponent(memoryId)}/revisions`);
+  },
+  listMemoryCandidates(filter: MemoryCandidateFilter = {}) {
+    return runnerRequest<MemoryPage<MemoryCandidate>>(`/api/ai-delivery/memory/candidates${queryString(filter as Record<string, unknown>)}`);
+  },
+  extractMemoryCandidates(input: { requirementId: string; runId?: string }) {
+    return runnerRequest<MemoryCandidate[]>('/api/ai-delivery/memory/candidates/extract', {
+      method: 'POST',
+      body: JSON.stringify(input)
+    });
+  },
+  confirmMemoryCandidate(candidateId: string, input: MemoryCandidateConfirmInput = {}) {
+    return runnerRequest<MemoryCard>(`/api/ai-delivery/memory/candidates/${encodeURIComponent(candidateId)}/confirm`, {
+      method: 'POST',
+      body: JSON.stringify(input)
+    });
+  },
+  updateMemoryCandidate(candidateId: string, input: MemoryCandidateUpdateInput) {
+    return runnerRequest<MemoryCandidate>(`/api/ai-delivery/memory/candidates/${encodeURIComponent(candidateId)}`, {
+      method: 'POST',
+      body: JSON.stringify(input)
+    });
+  },
+  ignoreMemoryCandidate(candidateId: string, input: { reason?: string } = {}) {
+    return runnerRequest<MemoryCandidate>(`/api/ai-delivery/memory/candidates/${encodeURIComponent(candidateId)}/ignore`, {
+      method: 'POST',
+      body: JSON.stringify(input)
+    });
+  },
+  updateMemoryCandidateStatus(candidateId: string, input: { status: MemoryCandidate['status']; reason?: string }) {
+    return runnerRequest<MemoryCandidate>(`/api/ai-delivery/memory/candidates/${encodeURIComponent(candidateId)}/status`, {
+      method: 'POST',
+      body: JSON.stringify(input)
+    });
+  },
+  listMemoryRecalls(filter: MemoryRecallFilter = {}) {
+    return runnerRequest<MemoryPage<MemoryRecallRecord>>(`/api/ai-delivery/memory/recalls${queryString(filter as Record<string, unknown>)}`);
+  },
+  getMemorySearchConfig() {
+    return runnerRequest<MemorySearchConfig>('/api/ai-delivery/memory/search-config');
+  },
+  updateMemorySearchConfig(input: Partial<MemorySearchConfig>) {
+    return runnerRequest<MemorySearchConfig>('/api/ai-delivery/memory/search-config', {
+      method: 'POST',
+      body: JSON.stringify(input)
+    });
+  },
+  rebuildMemoryEmbeddings(input: { config?: Partial<MemorySearchConfig> } = {}) {
+    return runnerRequest('/api/ai-delivery/memory/embeddings/rebuild', {
+      method: 'POST',
+      body: JSON.stringify(input)
+    });
+  },
+  recallRequirementMemory(requirementId: string, input: { actionType?: ActionInput['actionType']; runId?: string; stage?: RequirementWorkflow['currentStage'] } = {}) {
+    return runnerRequest<{ recallPath?: string; records: MemoryRecallRecord[] }>(
+      `/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/memory/recall`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input)
+      }
+    );
+  },
+  previewRequirementMemoryRecall(requirementId: string, input: {
+    actionType?: ActionInput['actionType'];
+    stage?: RequirementWorkflow['currentStage'];
+    sourceFilePaths?: string[];
+    clarification?: string;
+    runIntent?: string;
+  }) {
+    return runnerRequest<MemoryRecallPreviewResult>(
+      `/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/memory/recall-preview`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input)
+      }
+    );
+  },
+  confirmRequirementMemoryRecall(requirementId: string, input: MemoryRecallConfirmInput) {
+    return runnerRequest<{ recallPath?: string; records: MemoryRecallRecord[]; previewId?: string }>(
+      `/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/memory/recall-confirm`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input)
+      }
+    );
+  },
+  getRequirementRetrospective(requirementId: string) {
+    return runnerRequest<RetrospectiveSummary>(`/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/retrospective`);
+  },
   listProjectHistory() {
     return request<WorkflowProject[]>('/api/ai-delivery/project-history');
   },
@@ -769,7 +920,7 @@ export const apiClient = {
         branchName: input.branchName,
         projects: input.projects || []
       })
-    });
+    }).then(normalizeRequirementWorkflow);
   },
   getRequirement(requirementId: string) {
     const centerFallback = () =>
@@ -780,8 +931,9 @@ export const apiClient = {
       `/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}?projectId=${encodeURIComponent(requireRemoteProjectId())}`
     )
       .then((item) => {
-        saveWorkflowItemCache(item);
-        return item;
+        const normalized = normalizeRequirementWorkflow(item);
+        saveWorkflowItemCache(normalized);
+        return normalized;
       })
       .catch(() =>
         centerFallback()
@@ -846,7 +998,10 @@ export const apiClient = {
     return runnerRequest<{ run: RunRecord; workflow: RequirementWorkflow }>('/api/ai-delivery/requirements/' + encodeURIComponent(requirementId) + '/actions', {
       method: 'POST',
       body: JSON.stringify(input)
-    });
+    }).then((result) => ({
+      ...result,
+      workflow: normalizeRequirementWorkflow(result.workflow)
+    }));
   },
   previewActionCommand(requirementId: string, input: ActionInput) {
     return runnerRequest<{ commandText: string }>('/api/ai-delivery/requirements/' + encodeURIComponent(requirementId) + '/actions/command', {
@@ -1041,7 +1196,7 @@ export const apiClient = {
         actor: input.actor,
         artifactPath: input.artifactPath
       })
-    });
+    }).then(normalizeRequirementWorkflow);
   },
   getRunTokenUsages(requirementId: string, runId: string | number) {
     if (isCenterRunId(runId)) {
@@ -1129,7 +1284,7 @@ export const apiClient = {
     return runnerRequest<RequirementWorkflow>(`/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/prd-files`, {
       method: 'POST',
       body: formData
-    });
+    }).then(normalizeRequirementWorkflow);
   },
   deletePrdFile(requirementId: string, fileId: string) {
     return runnerRequest<RequirementWorkflow>(
@@ -1137,7 +1292,7 @@ export const apiClient = {
       {
         method: 'DELETE'
       }
-    );
+    ).then(normalizeRequirementWorkflow);
   },
   uploadTechDesignFiles(requirementId: string, files: File[]) {
     const formData = new FormData();
@@ -1147,7 +1302,7 @@ export const apiClient = {
     return runnerRequest<RequirementWorkflow>(`/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/tech-design-files`, {
       method: 'POST',
       body: formData
-    });
+    }).then(normalizeRequirementWorkflow);
   },
   deleteTechDesignFile(requirementId: string, fileId: string) {
     return runnerRequest<RequirementWorkflow>(
@@ -1155,13 +1310,13 @@ export const apiClient = {
       {
         method: 'DELETE'
       }
-    );
+    ).then(normalizeRequirementWorkflow);
   },
   deleteTechDesignQuestion(requirementId: string, input: DeleteTechDesignQuestionInput) {
     return runnerRequest<RequirementWorkflow>(`/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/tech-design-questions`, {
       method: 'DELETE',
       body: JSON.stringify(input)
-    });
+    }).then(normalizeRequirementWorkflow);
   },
   getSettings() {
     return request<{ projectPaths: string[] }>('/api/ai-delivery/settings');

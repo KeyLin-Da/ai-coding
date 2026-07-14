@@ -298,6 +298,68 @@ sequenceDiagram
     expect(svgStyle).toContain('max-width: none');
   });
 
+  it('时序图支持单图局部缩放且不影响其他图和整篇预览', async () => {
+    vi.mocked(apiClient.readArtifact).mockResolvedValueOnce({
+      artifact: { hash: 'hash' },
+      content: `# 技术方案
+
+\`\`\`mermaid
+sequenceDiagram
+    A->>B: 第一张请求
+\`\`\`
+
+\`\`\`mermaid
+graph TD
+    A[开始] --> B[结束]
+\`\`\`
+
+\`\`\`mermaid
+sequenceDiagram
+    C->>D: 第二张请求
+\`\`\`
+`
+    });
+    const wrapper = mount(ArtifactPreviewDialog);
+
+    await (wrapper.vm as any).open({
+      id: 'prd-analysis',
+      stage: 'PRD',
+      label: 'PRD 分析文档',
+      path: 'docs/172014/prd/analysis.md',
+      kind: 'markdown',
+      exists: true
+    });
+    await nextTick();
+    await flushPromises();
+    await nextTick();
+
+    const sequenceDiagrams = wrapper.findAll('.mermaid-sequence-diagram');
+    expect(sequenceDiagrams).toHaveLength(2);
+    expect(wrapper.findAll('[data-sequence-zoom-toolbar="true"]')).toHaveLength(2);
+    expect(wrapper.find('.mermaid-diagram[data-mermaid-type="default"] [data-sequence-zoom-toolbar="true"]').exists()).toBe(false);
+    expect(sequenceDiagrams[0].find('[data-sequence-zoom-percent="true"]').text()).toBe('100%');
+    expect(sequenceDiagrams[1].find('[data-sequence-zoom-percent="true"]').text()).toBe('100%');
+
+    await sequenceDiagrams[0].find('[data-sequence-zoom-action="in"]').trigger('click');
+    await nextTick();
+
+    expect(sequenceDiagrams[0].find('[data-sequence-zoom-percent="true"]').text()).toBe('110%');
+    expect(sequenceDiagrams[1].find('[data-sequence-zoom-percent="true"]').text()).toBe('100%');
+    expect(wrapper.find('.zoom-percent').text()).toBe('100%');
+    const firstSvgStyle = sequenceDiagrams[0].find('svg').attributes('style');
+    const secondSvgStyle = sequenceDiagrams[1].find('svg').attributes('style');
+    expect(firstSvgStyle).toContain('width: 2530px');
+    expect(firstSvgStyle).toContain('min-width: 2530px');
+    expect(firstSvgStyle).toContain('max-width: none');
+    expect(secondSvgStyle).toContain('max-width: 100%');
+
+    await sequenceDiagrams[0].find('[data-sequence-zoom-action="reset"]').trigger('click');
+    await nextTick();
+
+    expect(sequenceDiagrams[0].find('[data-sequence-zoom-percent="true"]').text()).toBe('100%');
+    expect(sequenceDiagrams[0].find('svg').attributes('style')).toContain('max-width: 100%');
+  });
+
   it('下载 Markdown 使用需求编号和时间戳命名，并导出当前正文', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 5, 16, 8, 9, 10));

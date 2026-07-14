@@ -8,6 +8,7 @@
           <strong>{{ workflow.requirementId }}</strong>
         </div>
         <div class="requirement-hero-actions">
+          <el-button :icon="Collection" @click="$router.push({ name: 'project-memory-candidates', query: { requirementId: workflow.requirementId } })">经验记忆</el-button>
           <el-button :icon="Refresh" @click="runRefresh">刷新产物</el-button>
           <el-button :icon="Back" @click="$router.push('/')">返回列表</el-button>
         </div>
@@ -80,7 +81,15 @@
                 <el-option label="交互终端" value="INTERACTIVE_TERMINAL" />
                 <el-option label="手动复制" value="MANUAL_COPY" />
               </el-select>
-              <el-button v-if="activeStage !== 'IMPLEMENTATION'" :icon="DocumentChecked" @click="openStageReview">审核</el-button>
+              <el-button
+                v-if="activeStage !== 'IMPLEMENTATION'"
+                :icon="DocumentChecked"
+                :disabled="activeStage === 'RETROSPECTIVE' && !canReviewRetrospectiveStage"
+                :title="retrospectiveReviewTitle"
+                @click="openStageReview"
+              >
+                {{ activeStage === 'RETROSPECTIVE' ? '审核复盘' : '审核' }}
+              </el-button>
               <el-button
                 v-else
                 :icon="DocumentChecked"
@@ -276,6 +285,52 @@
                   <el-button :icon="primaryActionIcon(DataAnalysis)" @click="runOpenSpecStatus">{{ actionButtonText('查看 OpenSpec 状态') }}</el-button>
                   <el-button :icon="DocumentChecked" @click="openImplementationStepReview">审核本步骤</el-button>
                 </div>
+                <section class="openspec-version-context-panel" aria-label="OpenSpec 工件版本上下文">
+                  <div class="openspec-version-grid">
+                    <label class="openspec-version-field">
+                      <span>基线版本</span>
+                      <div v-if="!openSpecBaseVersionManual" class="openspec-auto-base-version">
+                        <div>
+                          <strong>{{ openSpecBaseVersionText }}</strong>
+                        </div>
+                        <el-button class="openspec-edit-base-button" link :icon="EditPen" title="修改基线版本" @click="enableManualOpenSpecBaseVersion" />
+                      </div>
+                      <div v-else class="openspec-manual-base-version">
+                        <TechDesignVersionSelector
+                          v-model="openSpecBaseVersionId"
+                          :versions="openSpecTechDesignVersions"
+                          :loading="openSpecVersionLoading"
+                          :show-compare="false"
+                        />
+                        <el-button class="openspec-restore-base-button" size="small" @click="restoreAutoOpenSpecBaseVersion">恢复自动</el-button>
+                      </div>
+                    </label>
+                    <label class="openspec-version-field">
+                      <span>目标版本</span>
+                      <TechDesignVersionSelector
+                        v-model="openSpecTargetVersionId"
+                        :versions="openSpecTechDesignVersions"
+                        :loading="openSpecVersionLoading"
+                        :show-compare="false"
+                      />
+                    </label>
+                  </div>
+                  <div class="openspec-version-actions">
+                    <el-button class="openspec-version-compare-button" size="small" :disabled="openSpecReadableTechDesignVersions.length < 2" @click="openOpenSpecVersionDiff">对比版本</el-button>
+                  </div>
+                  <label class="openspec-version-field openspec-adjustment-field">
+                    <span>工件调整说明</span>
+                    <el-input
+                      v-model="openSpecArtifactAdjustment"
+                      class="openspec-adjustment-input"
+                      type="textarea"
+                      :rows="3"
+                      maxlength="2000"
+                      show-word-limit
+                      placeholder="输入本次增量调整说明"
+                    />
+                  </label>
+                </section>
                 <el-alert v-if="implementationStepStates.START_CHANGE.status !== 'APPROVED'" type="warning" show-icon title="请先完成并审核开始变更步骤" />
                 <el-alert v-else-if="!techDesignApproved" type="warning" show-icon title="需要先通过技术方案审核" />
                 <OpenSpecDocuments
@@ -354,7 +409,7 @@
               />
             </div>
 
-            <div v-else class="stage-actions">
+            <div v-else-if="activeStage === 'CODE_REVIEW'" class="stage-actions">
               <div class="action-line">
                 <el-input v-model="branchName" placeholder="分支名，例如 feature/opp-172014" />
                 <el-radio-group v-model="codeReviewMode" size="small">
@@ -375,6 +430,140 @@
                 :project-id="currentProjectId"
                 @saved="reload"
               />
+            </div>
+
+            <div v-else-if="activeStage === 'RETROSPECTIVE'" class="stage-actions retrospective-workbench">
+              <div class="action-line">
+                <el-input v-model="retrospectiveFocus" placeholder="复盘关注点（可选），例如：记忆引用是否有效、哪些澄清值得沉淀" />
+                <el-button type="primary" :disabled="!codeReviewApproved" :icon="primaryActionIcon(Operation)" @click="runRetrospective">
+                  {{ actionButtonText('生成交付复盘') }}
+                </el-button>
+                <el-button :icon="Refresh" :loading="retrospectiveLoading" @click="loadRetrospective">刷新复盘</el-button>
+              </div>
+              <el-alert v-if="!codeReviewApproved" type="warning" show-icon title="需要先通过代码评审后再生成交付复盘" />
+              <el-alert v-if="workflow.retrospective?.invalidatedAt" type="warning" show-icon :title="`复盘已失效：${workflow.retrospective.invalidatedReason || '上游产物发生变更'}`" />
+              <el-alert v-if="retrospectiveSummary?.parseError" type="warning" show-icon :title="retrospectiveSummary.parseError" />
+              <section class="implementation-summary-strip retrospective-summary-strip" aria-label="交付复盘摘要">
+                <div class="summary-main">
+                  <div class="summary-heading">
+                    <strong>交付复盘</strong>
+                    <el-tag :type="canReviewRetrospectiveStage ? 'success' : 'warning'" size="small" effect="light">
+                      {{ canReviewRetrospectiveStage ? '可审核' : '待处理' }}
+                    </el-tag>
+                  </div>
+                  <p class="summary-path">{{ retrospectiveEditorPath || '尚未生成复盘报告' }}</p>
+                </div>
+                <div class="summary-metrics retrospective-metrics">
+                  <span class="metric-card done">
+                    <small>沟通证据</small>
+                    <strong>{{ retrospectiveSummary?.evidenceCount || 0 }}</strong>
+                  </span>
+                  <span class="metric-card total">
+                    <small>候选经验</small>
+                    <strong>{{ retrospectiveSummary?.candidateCount || 0 }}</strong>
+                  </span>
+                  <span class="metric-card pending">
+                    <small>待确认</small>
+                    <strong>{{ retrospectiveSummary?.pendingCandidateCount || 0 }}</strong>
+                  </span>
+                  <span class="metric-card issue">
+                    <small>未关闭风险</small>
+                    <strong>{{ retrospectiveSummary?.unresolvedRiskCount || 0 }}</strong>
+                  </span>
+                </div>
+              </section>
+
+              <el-tabs v-model="retrospectiveActiveTab" class="retrospective-tabs">
+                <el-tab-pane label="复盘报告" name="summary">
+                  <MarkdownEditor
+                    title="交付复盘报告"
+                    :artifact-path="retrospectiveEditorPath"
+                    :project-id="currentProjectId"
+                    @saved="reloadRetrospectiveArtifacts"
+                  />
+                </el-tab-pane>
+                <el-tab-pane label="沟通脉络" name="timeline">
+                  <div v-if="retrospectiveEvidenceItems.length" class="retrospective-timeline">
+                    <article v-for="item in retrospectiveEvidenceItems" :key="item.id" class="retrospective-timeline-item">
+                      <span class="timeline-dot" />
+                      <div class="timeline-card">
+                        <div class="timeline-card-heading">
+                          <strong>{{ evidenceSourceText(item.sourceType) }}</strong>
+                          <el-tag v-if="item.actor" size="small" effect="plain">{{ item.actor }}</el-tag>
+                          <small v-if="item.createdAt" class="muted">{{ item.createdAt }}</small>
+                        </div>
+                        <p>{{ item.quote || '未提供摘要' }}</p>
+                        <small class="muted">{{ item.path || item.artifactPath || '-' }}{{ item.runId ? ` · ${item.runId}` : '' }}</small>
+                      </div>
+                    </article>
+                  </div>
+                  <el-empty v-else description="暂无结构化沟通证据" />
+                  <div v-if="retrospectiveArtifactItems.length" class="retrospective-artifact-list">
+                    <strong>复盘产物</strong>
+                    <div v-for="artifact in retrospectiveArtifactItems" :key="artifact.path" class="report-entry">
+                      <span class="report-path">{{ artifact.path }}</span>
+                      <el-button :icon="View" @click="previewArtifact(artifact)">查看</el-button>
+                    </div>
+                  </div>
+                </el-tab-pane>
+                <el-tab-pane label="候选经验" name="candidates">
+                  <div class="candidate-review-toolbar">
+                    <el-radio-group v-model="retrospectiveCandidateStatusFilter" size="small">
+                      <el-radio-button
+                        v-for="option in retrospectiveCandidateStatusOptions"
+                        :key="option.value"
+                        :label="option.value"
+                      >
+                        {{ option.label }} {{ retrospectiveCandidateStats[option.value] }}
+                      </el-radio-button>
+                    </el-radio-group>
+                    <p class="muted">AI 只生成候选草稿；请人工修改、忽略噪音、标记仅本需求或确认沉淀。</p>
+                  </div>
+                  <MemoryCandidateTable
+                    :items="filteredRetrospectiveCandidates"
+                    :loading="retrospectiveLoading"
+                    show-source
+                    @confirm="confirmRetrospectiveCandidate"
+                    @edit="editRetrospectiveCandidate"
+                    @pending="markRetrospectiveCandidatePending"
+                    @local="markRetrospectiveCandidateLocal"
+                    @ignore="ignoreRetrospectiveCandidate"
+                  />
+                  <el-empty v-if="!retrospectiveCandidates.length && !retrospectiveLoading" description="暂无候选经验">
+                    <template #description>
+                      <div class="candidate-empty">
+                        <strong>暂无候选经验</strong>
+                        <span>如果复盘结论为“无可复用经验”，可继续审核；如果预期应有候选，请检查 memory-candidates.json 是否为空或是否导入成功。</span>
+                      </div>
+                    </template>
+                  </el-empty>
+                  <el-empty
+                    v-else-if="!filteredRetrospectiveCandidates.length && !retrospectiveLoading"
+                    description="当前筛选下暂无候选经验"
+                  />
+                </el-tab-pane>
+                <el-tab-pane label="引用反馈" name="recall">
+                  <el-table v-if="retrospectiveRecallFeedback.length" :data="retrospectiveRecallFeedback" style="width: 100%">
+                    <el-table-column prop="memoryId" label="记忆 ID" min-width="220" />
+                    <el-table-column prop="status" label="效果" width="130">
+                      <template #default="{ row }">
+                        <el-tag effect="plain">{{ recallFeedbackStatusText(row.status) }}</el-tag>
+                      </template>
+                    </el-table-column>
+                    <el-table-column prop="reason" label="复盘说明" min-width="260" />
+                  </el-table>
+                  <el-empty v-else description="暂无记忆引用反馈" />
+                </el-tab-pane>
+                <el-tab-pane label="未关闭风险" name="risks">
+                  <el-alert
+                    v-if="retrospectiveSummary?.unresolvedRiskCount"
+                    type="warning"
+                    show-icon
+                    title="存在未关闭风险：请补齐处理结论，或在审核时选择“带风险通过”并填写风险接受说明。"
+                  />
+                  <el-alert v-else type="success" show-icon title="当前没有未关闭风险" />
+                </el-tab-pane>
+              </el-tabs>
             </div>
           </div>
         </section>
@@ -427,14 +616,25 @@
     <RunLogDrawer ref="runLogDrawer" :events="store.runEvents" :usage="selectedRunTokenUsage" />
     <TokenUsageDetailDialog ref="tokenUsageDetailDialog" :requirement-pk="workflow.id" />
     <ArtifactPreviewDialog ref="artifactPreviewDialog" />
+    <MemoryRecallPreviewDialog
+      v-model="memoryRecallDialogVisible"
+      :requirement-id="workflow.requirementId"
+      action-type="DESIGN_GENERATE"
+      stage="TECH_DESIGN"
+      :source-file-paths="pendingDesignSourceFiles"
+      :clarification="pendingDesignClarification"
+      run-intent="生成技术方案"
+      @confirm="handleMemoryRecallConfirm"
+    />
   </div>
   <el-empty v-else description="需求加载中" />
+  <ArtifactVersionDiffDialog ref="openSpecVersionDiffDialog" />
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { Back, ChatLineSquare, CopyDocument, DataAnalysis, Delete, DocumentChecked, Operation, Refresh, Tickets, Upload, View } from '@element-plus/icons-vue';
+import { Back, ChatLineSquare, Collection, CopyDocument, DataAnalysis, Delete, DocumentChecked, EditPen, Operation, Refresh, Tickets, Upload, View } from '@element-plus/icons-vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import type {
   ActionInput,
@@ -448,6 +648,7 @@ import type {
   RequirementType,
   RunRecord,
   RunTokenUsageRun,
+  TechDesignVersion,
   TokenUsageSummary,
   WorkflowStage,
   WorkflowStatus
@@ -474,9 +675,13 @@ import RunLogDrawer from '@/components/RunLogDrawer.vue';
 import TokenUsageDetailDialog from '@/components/TokenUsageDetailDialog.vue';
 import ArtifactSidebar from '@/components/ArtifactSidebar.vue';
 import ArtifactPreviewDialog from '@/components/ArtifactPreviewDialog.vue';
+import ArtifactVersionDiffDialog from '@/components/ArtifactVersionDiffDialog.vue';
 import ArtifactGitSyncDialog from '@/components/ArtifactGitSyncDialog.vue';
 import DesignQuestionDialog from '@/components/DesignQuestionDialog.vue';
+import MemoryRecallPreviewDialog from '@/components/MemoryRecallPreviewDialog.vue';
+import MemoryCandidateTable from '@/components/MemoryCandidateTable.vue';
 import GitChangeInspector from '@/components/GitChangeInspector.vue';
+import TechDesignVersionSelector from '@/components/TechDesignVersionSelector.vue';
 import { useWorkflowStore } from '@/stores/workflow';
 import { useSettingsStore } from '@/stores/settings';
 import { useProjectStore } from '@/stores/project';
@@ -489,6 +694,16 @@ import {
   type TechDesignQuestionListItem,
   type TechDesignQuestionRecord
 } from '@/utils/tech-design-questions';
+import type {
+  MemoryCandidate,
+  MemoryCandidateStatus,
+  MemoryRecallActionInput,
+  MemoryRecallFeedback,
+  MemoryRecallFeedbackFile,
+  RetrospectiveEvidenceFile,
+  RetrospectiveEvidenceItem,
+  RetrospectiveSummary
+} from '@shared/memory';
 
 const route = useRoute();
 const store = useWorkflowStore();
@@ -501,6 +716,7 @@ const designQuestionDialog = ref<InstanceType<typeof DesignQuestionDialog>>();
 const runLogDrawer = ref<InstanceType<typeof RunLogDrawer>>();
 const tokenUsageDetailDialog = ref<InstanceType<typeof TokenUsageDetailDialog>>();
 const artifactPreviewDialog = ref<InstanceType<typeof ArtifactPreviewDialog>>();
+const openSpecVersionDiffDialog = ref<InstanceType<typeof ArtifactVersionDiffDialog>>();
 const prdFileInput = ref<HTMLInputElement>();
 const techDesignFileInput = ref<HTMLInputElement>();
 const selectedArtifactPath = ref('');
@@ -520,6 +736,14 @@ const openSpecSummary = ref<OpenSpecSummary>();
 const selectedOpenSpecDocPath = ref('');
 let openSpecSummaryRequestKey = '';
 let openSpecSummaryInFlight: Promise<void> | undefined;
+const openSpecTechDesignVersions = ref<TechDesignVersion[]>([]);
+const openSpecVersionLoading = ref(false);
+const openSpecBaseVersionId = ref('');
+const openSpecTargetVersionId = ref('current');
+const openSpecBaseVersionManual = ref(false);
+const openSpecArtifactAdjustment = ref('');
+let openSpecVersionRequestKey = '';
+let openSpecVersionInFlight: Promise<void> | undefined;
 let workspaceStatesRequestKey = '';
 let workspaceStatesInFlight: Promise<void> | undefined;
 const openSpecPreviewVersion = ref(0);
@@ -530,6 +754,16 @@ const actionRunning = ref(false);
 const requirementTokenUsage = ref<RequirementTokenUsageSummary>(emptyRequirementTokenUsage());
 const currentRunTokenUsage = ref<RunTokenUsageRun>();
 const selectedRunTokenUsage = ref<RunTokenUsageRun>();
+const memoryRecallDialogVisible = ref(false);
+const pendingDesignAction = ref<ActionInput>();
+const retrospectiveActiveTab = ref('summary');
+const retrospectiveLoading = ref(false);
+const retrospectiveSummary = ref<RetrospectiveSummary>();
+const retrospectiveCandidates = ref<MemoryCandidate[]>([]);
+const retrospectiveEvidenceItems = ref<RetrospectiveEvidenceItem[]>([]);
+const retrospectiveRecallFeedback = ref<MemoryRecallFeedback[]>([]);
+const retrospectiveFocus = ref('');
+const retrospectiveCandidateStatusFilter = ref<'ALL' | MemoryCandidateStatus>('ALL');
 
 const workflow = computed(() => store.current);
 const currentProjectId = computed(() => projectStore.current?.id || '');
@@ -563,6 +797,7 @@ const prdSourceFiles = computed(() => workflow.value?.prdSourceFiles || []);
 const techDesignSourceFiles = computed(() => workflow.value?.techDesignSourceFiles || []);
 const prdApproved = computed(() => workflow.value?.stages.PRD.status === 'APPROVED');
 const techDesignApproved = computed(() => workflow.value?.stages.TECH_DESIGN.status === 'APPROVED');
+const codeReviewApproved = computed(() => workflow.value?.stages.CODE_REVIEW.status === 'APPROVED');
 const workspaceBlockers = computed(() => {
   const currentUserId = getApiRuntimeConfig().userId;
   return workspaceStates.value.filter((state) => {
@@ -581,6 +816,10 @@ const workspaceBlockerText = computed(() => {
   return `${names} 正在编辑当前需求，本地未同步文件 ${total} 个。请等待对方公开同步或清理后再操作。`;
 });
 const openSpecDocuments = computed(() => [...(openSpecSummary.value?.artifacts || []), ...(openSpecSummary.value?.specs || [])]);
+const openSpecReadableTechDesignVersions = computed(() => openSpecTechDesignVersions.value.filter((version) => version.readable));
+const selectedOpenSpecTargetVersion = computed(() => openSpecTechDesignVersions.value.find((version) => version.id === openSpecTargetVersionId.value));
+const selectedOpenSpecBaseVersion = computed(() => openSpecTechDesignVersions.value.find((version) => version.id === openSpecBaseVersionId.value));
+const openSpecBaseVersionText = computed(() => versionDisplayText(selectedOpenSpecBaseVersion.value) || '暂无可用基线版本');
 const implementationStepItems = computed(() =>
   implementationSteps.map((step) => ({
     ...implementationStepStates.value[step],
@@ -603,6 +842,16 @@ const canRunOpenSpecApply = computed(() => implementationStepStates.value.ARTIFA
 const canRunDesign = computed(() => (requiresPrdApproval.value ? Boolean(prdApproved.value && prdDesignSourcePath.value) : true));
 const canInspectChanges = computed(() => implementationStepStates.value.APPLY.status === 'APPROVED');
 const canReviewImplementationStage = computed(() => areAllImplementationStepsApproved(workflow.value?.implementationSteps));
+const canReviewRetrospectiveStage = computed(() => Boolean(retrospectiveSummary.value?.readyForReview));
+const retrospectiveReviewTitle = computed(() => {
+  if (activeStage.value !== 'RETROSPECTIVE') {
+    return '提交审核';
+  }
+  if (canReviewRetrospectiveStage.value) {
+    return '复盘报告、候选经验和风险状态已满足审核条件';
+  }
+  return '需要先生成复盘报告，并处理完待确认候选经验和未关闭风险';
+});
 const openIssueCount = computed(() => workflow.value?.issues.filter((item) => item.status === 'OPEN').length || 0);
 const implementationOpenSpecPath = computed(() => openSpecSummary.value?.rootPath || stageArtifactPath('IMPLEMENTATION') || '未关联');
 const implementationArchiveStatus = computed(() => (openSpecSummary.value?.archived ? '已归档' : '进行中'));
@@ -666,6 +915,48 @@ const technicalDesignEditorPath = computed(() => {
   }
   const artifactPath = officialTechnicalDesignArtifactPath();
   return artifactPath || defaultTechnicalDesignDocumentPath(workflow.value.requirementId);
+});
+const retrospectiveEditorPath = computed(() => {
+  if (!workflow.value) {
+    return '';
+  }
+  return retrospectiveSummary.value?.summaryPath || workflow.value.stages.RETROSPECTIVE.artifactPath || `docs/${workflow.value.requirementId}/retrospective/summary.md`;
+});
+const retrospectiveArtifactItems = computed(() => {
+  if (!workflow.value) {
+    return [];
+  }
+  return workflow.value.artifacts
+    .filter((artifact) => artifact.stage === 'RETROSPECTIVE' && artifact.exists && artifact.kind !== 'directory')
+    .sort((left, right) => left.path.localeCompare(right.path));
+});
+const retrospectiveCandidateStatusOptions: Array<{ label: string; value: 'ALL' | MemoryCandidateStatus }> = [
+  { label: '全部', value: 'ALL' },
+  { label: '待确认', value: 'PENDING_CONFIRM' },
+  { label: '待验证', value: 'PENDING_VERIFY' },
+  { label: '仅本需求', value: 'LOCAL_ONLY' },
+  { label: '已沉淀', value: 'CONFIRMED' },
+  { label: '已忽略', value: 'IGNORED' }
+];
+const retrospectiveCandidateStats = computed(() => {
+  const stats: Record<'ALL' | MemoryCandidateStatus, number> = {
+    ALL: retrospectiveCandidates.value.length,
+    PENDING_CONFIRM: 0,
+    PENDING_VERIFY: 0,
+    LOCAL_ONLY: 0,
+    IGNORED: 0,
+    CONFIRMED: 0
+  };
+  for (const candidate of retrospectiveCandidates.value) {
+    stats[candidate.status] += 1;
+  }
+  return stats;
+});
+const filteredRetrospectiveCandidates = computed(() => {
+  if (retrospectiveCandidateStatusFilter.value === 'ALL') {
+    return retrospectiveCandidates.value;
+  }
+  return retrospectiveCandidates.value.filter((item) => item.status === retrospectiveCandidateStatusFilter.value);
 });
 const openSpecTechnicalDesignDocumentPath = computed(() => {
   if (!workflow.value) {
@@ -749,11 +1040,22 @@ const stageHint = computed(() => {
     PRD: '产品生成并二次编辑 PRD，审核通过后进入技术方案。',
     TECH_DESIGN: '架构师生成技术方案，审核通过后解锁实施。',
     IMPLEMENTATION: `实施验证分步骤推进：${implementationStepLabels[activeImplementationStep.value]}。`,
-    CODE_REVIEW: '按分支生成评审报告，阻断问题可打回实施阶段。'
+    CODE_REVIEW: '按分支生成评审报告，阻断问题可打回实施阶段。',
+    RETROSPECTIVE: '汇总交付证据，复盘沟通与记忆引用效果，确认是否沉淀项目经验。'
   };
   return hints[activeStage.value];
 });
 const manualCopyMode = computed(() => selectedExecutionMode.value === 'MANUAL_COPY');
+const pendingDesignSourceFiles = computed(() => {
+  const sourceFiles = pendingDesignAction.value?.params?.sourceFiles;
+  return Array.isArray(sourceFiles)
+    ? sourceFiles.map((item) => String(item).trim()).filter(Boolean)
+    : techDesignGenerationSourcePaths.value;
+});
+const pendingDesignClarification = computed(() => {
+  const clarification = pendingDesignAction.value?.params?.clarification;
+  return typeof clarification === 'string' ? clarification : designClarification.value.trim();
+});
 
 function stageArtifactPath(stage: WorkflowStage) {
   if (selectedArtifactPath.value) {
@@ -892,6 +1194,180 @@ async function loadOpenSpecSummary() {
     }
   });
   await openSpecSummaryInFlight;
+}
+
+function versionDisplayText(version?: TechDesignVersion) {
+  if (!version) {
+    return '';
+  }
+  const parts = [version.label];
+  if (version.versionNo && !version.label.includes(`v${version.versionNo}`)) {
+    parts.push(`v${version.versionNo}`);
+  }
+  if (version.commitSha) {
+    parts.push(version.commitSha.slice(0, 8));
+  }
+  return parts.filter(Boolean).join(' · ');
+}
+
+function latestOpenSpecTargetVersionId() {
+  const runs = [...(workflow.value?.runs || [])]
+    .filter((run) => run.actionType === 'OPENSPEC_FF' && !['FAILED', 'CANCELLED'].includes(run.status))
+    .sort((left, right) => Date.parse(right.finishedAt || right.startedAt) - Date.parse(left.finishedAt || left.startedAt));
+  return runs.map((run) => run.openSpecArtifactInputSnapshot?.targetTechDesignVersionId || '').find(Boolean) || '';
+}
+
+function firstReadableOpenSpecVersion(predicate: (version: TechDesignVersion) => boolean) {
+  return openSpecReadableTechDesignVersions.value.find(predicate)?.id || '';
+}
+
+function autoOpenSpecBaseVersionId() {
+  const targetVersionId = openSpecTargetVersionId.value;
+  const latestTargetVersionId = latestOpenSpecTargetVersionId();
+  return (
+    firstReadableOpenSpecVersion((version) => version.id === latestTargetVersionId && version.id !== targetVersionId) ||
+    firstReadableOpenSpecVersion((version) => version.source === 'DRAFT_SNAPSHOT' && version.id !== targetVersionId) ||
+    firstReadableOpenSpecVersion((version) => version.source === 'PUBLISHED' && version.id !== targetVersionId) ||
+    firstReadableOpenSpecVersion((version) => version.id !== targetVersionId)
+  );
+}
+
+function applyAutoOpenSpecBaseVersion() {
+  openSpecBaseVersionId.value = autoOpenSpecBaseVersionId();
+}
+
+function selectDefaultOpenSpecVersions() {
+  const readable = openSpecReadableTechDesignVersions.value;
+  if (!readable.length) {
+    openSpecBaseVersionId.value = '';
+    openSpecTargetVersionId.value = '';
+    return;
+  }
+
+  if (!readable.some((version) => version.id === openSpecTargetVersionId.value)) {
+    openSpecTargetVersionId.value = firstReadableOpenSpecVersion((version) => version.id === 'current') || readable[0].id;
+  }
+
+  if (!openSpecBaseVersionManual.value) {
+    applyAutoOpenSpecBaseVersion();
+    return;
+  }
+  if (!readable.some((version) => version.id === openSpecBaseVersionId.value)) {
+    openSpecBaseVersionManual.value = false;
+    applyAutoOpenSpecBaseVersion();
+  }
+}
+
+function enableManualOpenSpecBaseVersion() {
+  openSpecBaseVersionManual.value = true;
+}
+
+function restoreAutoOpenSpecBaseVersion() {
+  openSpecBaseVersionManual.value = false;
+  applyAutoOpenSpecBaseVersion();
+}
+
+async function loadOpenSpecTechDesignVersions(options: { selectDefaults?: boolean } = {}) {
+  const selectDefaults = options.selectDefaults !== false;
+  if (!workflow.value) {
+    openSpecTechDesignVersions.value = [];
+    openSpecBaseVersionId.value = '';
+    openSpecTargetVersionId.value = '';
+    return;
+  }
+  const requirementId = workflow.value.requirementId;
+  if (openSpecVersionInFlight && openSpecVersionRequestKey === requirementId) {
+    await openSpecVersionInFlight;
+    return;
+  }
+  openSpecVersionRequestKey = requirementId;
+  openSpecVersionLoading.value = true;
+  openSpecVersionInFlight = (async () => {
+    const result = await apiClient.listTechDesignVersions(requirementId);
+    openSpecTechDesignVersions.value = result.versions || [];
+    if (selectDefaults) {
+      selectDefaultOpenSpecVersions();
+    }
+  })()
+    .catch((error: any) => {
+      openSpecTechDesignVersions.value = [];
+      openSpecBaseVersionId.value = '';
+      openSpecTargetVersionId.value = '';
+      ElMessage.error(error.message || '技术方案版本加载失败');
+    })
+    .finally(() => {
+      if (openSpecVersionRequestKey === requirementId) {
+        openSpecVersionInFlight = undefined;
+        openSpecVersionLoading.value = false;
+      }
+    });
+  await openSpecVersionInFlight;
+}
+
+function openOpenSpecVersionDiff() {
+  if (!workflow.value) {
+    return;
+  }
+  if (openSpecReadableTechDesignVersions.value.length < 2) {
+    ElMessage.warning('至少需要两个可读技术方案版本才能对比');
+    return;
+  }
+  openSpecVersionDiffDialog.value?.open(workflow.value.requirementId, openSpecTechDesignVersions.value, openSpecTargetVersionId.value || 'current');
+}
+
+async function loadRetrospective() {
+  if (!workflow.value) {
+    retrospectiveSummary.value = undefined;
+    retrospectiveCandidates.value = [];
+    retrospectiveEvidenceItems.value = [];
+    retrospectiveRecallFeedback.value = [];
+    return;
+  }
+  retrospectiveLoading.value = true;
+  try {
+    const requirementId = workflow.value.requirementId;
+    const summary = await apiClient.getRequirementRetrospective(requirementId);
+    retrospectiveSummary.value = summary;
+    const candidates = await apiClient.listMemoryCandidates({
+      projectId: currentProjectId.value || undefined,
+      requirementId,
+      pageSize: 200
+    });
+    retrospectiveCandidates.value = candidates.items.filter((item) => item.sourceType === 'RETROSPECTIVE');
+    retrospectiveEvidenceItems.value = [];
+    if (summary.evidencePath) {
+      try {
+        const artifact = await apiClient.readArtifact(summary.evidencePath, currentProjectId.value);
+        const parsed = JSON.parse(artifact.content) as RetrospectiveEvidenceFile;
+        retrospectiveEvidenceItems.value = Array.isArray(parsed.items) ? parsed.items : [];
+      } catch {
+        retrospectiveEvidenceItems.value = [];
+      }
+    }
+    retrospectiveRecallFeedback.value = [];
+    if (summary.recallFeedbackPath) {
+      try {
+        const artifact = await apiClient.readArtifact(summary.recallFeedbackPath, currentProjectId.value);
+        const parsed = JSON.parse(artifact.content) as MemoryRecallFeedbackFile;
+        retrospectiveRecallFeedback.value = Array.isArray(parsed.items) ? parsed.items : [];
+      } catch {
+        retrospectiveRecallFeedback.value = [];
+      }
+    }
+  } catch (error: any) {
+    retrospectiveSummary.value = undefined;
+    retrospectiveCandidates.value = [];
+    retrospectiveEvidenceItems.value = [];
+    retrospectiveRecallFeedback.value = [];
+    ElMessage.error(error.message || '读取交付复盘失败');
+  } finally {
+    retrospectiveLoading.value = false;
+  }
+}
+
+async function reloadRetrospectiveArtifacts() {
+  await reload();
+  await loadRetrospective();
 }
 
 function previewArtifact(artifact: ArtifactRef) {
@@ -1241,8 +1717,13 @@ async function runOrCopyAction(action: ActionInput, afterRun?: () => Promise<voi
       return;
     }
     const result = await store.runAction(action);
-    if (result?.run?.id) {
-      await openRunLog(result.run.id);
+    const run = result?.run;
+    if (run?.id) {
+      if (isTerminalOpenedRun(run)) {
+        ElMessage.success(terminalOpenedMessage(run));
+      } else {
+        await openRunLog(run.id);
+      }
     }
     await loadRequirementTokenUsage();
     await afterRun?.();
@@ -1251,6 +1732,16 @@ async function runOrCopyAction(action: ActionInput, afterRun?: () => Promise<voi
   } finally {
     actionRunning.value = false;
   }
+}
+
+function isTerminalOpenedRun(run: RunRecord): boolean {
+  return run.status === 'TERMINAL_OPENED';
+}
+
+function terminalOpenedMessage(run: RunRecord): string {
+  return run.executionMode === 'INTERACTIVE_TERMINAL'
+    ? '已打开本地交互终端，后续交互请在终端中完成'
+    : '已打开本地终端，后续执行请在终端中查看';
 }
 
 async function runDesign() {
@@ -1271,9 +1762,31 @@ async function runDesign() {
   if (requiresPrdApproval.value) {
     params.documentPath = documentPath;
   }
-  await runOrCopyAction({
+  const action: ActionInput = {
     actionType: 'DESIGN_GENERATE',
     params
+  };
+  if (manualCopyMode.value) {
+    await runOrCopyAction(action);
+    return;
+  }
+  pendingDesignAction.value = action;
+  memoryRecallDialogVisible.value = true;
+}
+
+async function handleMemoryRecallConfirm(memoryRecall: MemoryRecallActionInput) {
+  const action = pendingDesignAction.value;
+  pendingDesignAction.value = undefined;
+  if (!action) {
+    return;
+  }
+  await runOrCopyAction({
+    ...action,
+    memoryRecall,
+    params: {
+      ...(action.params || {}),
+      memoryRecall
+    }
   });
 }
 
@@ -1377,16 +1890,37 @@ async function runOpenSpecArtifacts() {
     ElMessage.warning('请先生成、保存或刷新 PRD 产物');
     return;
   }
+  await loadOpenSpecTechDesignVersions({ selectDefaults: !openSpecTechDesignVersions.value.length });
+  if (!selectedOpenSpecTargetVersion.value?.readable) {
+    ElMessage.warning('请选择可读取的技术方案目标版本');
+    return;
+  }
+  if (!selectedOpenSpecBaseVersion.value?.readable) {
+    ElMessage.warning('请选择可读取的技术方案基线版本');
+    return;
+  }
+  const artifactAdjustment = openSpecArtifactAdjustment.value.trim();
+  if (openSpecBaseVersionId.value === openSpecTargetVersionId.value && !artifactAdjustment) {
+    ElMessage.warning('基线和目标版本一致，请填写工件调整说明或选择不同版本');
+    return;
+  }
   const params: Record<string, unknown> = {
     ...agentActionParams(),
     changeName: changeName.value,
     documentPath,
-    sourceFiles: techDesignSourceFiles.value.map((file) => file.path)
+    sourceFiles: techDesignSourceFiles.value.map((file) => file.path),
+    baseTechDesignVersionId: openSpecBaseVersionId.value,
+    targetTechDesignVersionId: openSpecTargetVersionId.value,
+    artifactAdjustment
   };
   if (requiresPrdApproval.value && prdDocumentPath) {
     params.prdDocumentPath = prdDocumentPath;
   }
-  await runOrCopyAction({ actionType: 'OPENSPEC_FF', params }, loadOpenSpecSummary);
+  await runOrCopyAction({ actionType: 'OPENSPEC_FF', params }, async () => {
+    openSpecArtifactAdjustment.value = '';
+    await loadOpenSpecSummary();
+    await loadOpenSpecTechDesignVersions();
+  });
 }
 
 async function runOpenSpecApply() {
@@ -1449,6 +1983,111 @@ async function runCodeReview() {
       }});
 }
 
+async function runRetrospective() {
+  if (!codeReviewApproved.value) {
+    ElMessage.warning('请先通过代码评审');
+    return;
+  }
+  await runOrCopyAction({
+    actionType: 'RETROSPECTIVE_GENERATE',
+    params: {
+      ...agentActionParams(),
+      branchName: branchName.value,
+      clarification: retrospectiveFocus.value.trim()
+    }
+  }, reloadRetrospectiveArtifacts);
+}
+
+async function confirmRetrospectiveCandidate(row: MemoryCandidate) {
+  try {
+    await apiClient.confirmMemoryCandidate(row.id);
+    ElMessage.success('经验已沉淀');
+    await loadRetrospective();
+  } catch (error: any) {
+    ElMessage.error(error.message || '确认失败');
+  }
+}
+
+async function editRetrospectiveCandidate(row: MemoryCandidate) {
+  try {
+    const result = await ElMessageBox.prompt('编辑候选经验描述。保存后仍停留在候选池，只有点击“确认”才会沉淀为正式项目经验。', '编辑候选经验', {
+      inputValue: row.statement,
+      inputType: 'textarea'
+    });
+    const statement = result.value.trim();
+    if (!statement) {
+      ElMessage.warning('经验描述不能为空');
+      return;
+    }
+    await apiClient.updateMemoryCandidate(row.id, {
+      statement,
+      tags: row.tags
+    });
+    ElMessage.success('候选经验已保存');
+    await loadRetrospective();
+  } catch (error: any) {
+    if (error === 'cancel' || error === 'close') {
+      return;
+    }
+    ElMessage.error(error.message || '保存失败');
+  }
+}
+
+async function markRetrospectiveCandidateLocal(row: MemoryCandidate) {
+  try {
+    await apiClient.updateMemoryCandidateStatus(row.id, { status: 'LOCAL_ONLY' });
+    ElMessage.success('已标记为仅本需求有效');
+    await loadRetrospective();
+  } catch (error: any) {
+    ElMessage.error(error.message || '操作失败');
+  }
+}
+
+async function markRetrospectiveCandidatePending(row: MemoryCandidate) {
+  try {
+    await apiClient.updateMemoryCandidateStatus(row.id, { status: 'PENDING_VERIFY' });
+    ElMessage.success('已标记为待验证');
+    await loadRetrospective();
+  } catch (error: any) {
+    ElMessage.error(error.message || '操作失败');
+  }
+}
+
+async function ignoreRetrospectiveCandidate(row: MemoryCandidate) {
+  try {
+    await apiClient.ignoreMemoryCandidate(row.id);
+    ElMessage.success('已忽略');
+    await loadRetrospective();
+  } catch (error: any) {
+    ElMessage.error(error.message || '操作失败');
+  }
+}
+
+function recallFeedbackStatusText(status: string) {
+  const map: Record<string, string> = {
+    EFFECTIVE: '有效',
+    PARTIAL: '部分有效',
+    UNUSED: '未使用',
+    OUTDATED: '已过时',
+    MISLEADING: '有误导'
+  };
+  return map[status] || status;
+}
+
+function evidenceSourceText(sourceType: string) {
+  const map: Record<string, string> = {
+    ANNOTATION: '批注',
+    ANNOTATION_REPLY: '批注回复',
+    QUESTION: '技术方案答疑',
+    CLARIFICATION: '澄清',
+    REVIEW: '评审',
+    RECALL: '记忆引用',
+    RETROSPECTIVE: '复盘',
+    MANUAL: '人工记录'
+  };
+  return map[sourceType] || sourceType;
+}
+
 async function runOpenSpecArchive() {
   await runOrCopyAction({ actionType: 'OPENSPEC_ARCHIVE', params: { ...agentActionParams(), changeName: changeName.value } }, loadOpenSpecSummary);
 }
@@ -1505,6 +2144,13 @@ async function openStageReview() {
     ElMessage.warning('四个实施验证子步骤全部通过后才可审核实施验证');
     return;
   }
+  if (activeStage.value === 'RETROSPECTIVE') {
+    await loadRetrospective();
+    if (!canReviewRetrospectiveStage.value) {
+      ElMessage.warning('请先生成复盘报告，并处理完待确认候选经验和未关闭风险');
+      return;
+    }
+  }
   if (!(await ensureDeliveryReady('提交审核', { allowDirty: true }))) {
     return;
   }
@@ -1559,6 +2205,10 @@ async function submitReview(input: {
   try {
     await store.submitReview(input);
     ElMessage.success('审核记录已保存');
+    await reload({ preferCurrent: true });
+    if (input.stage === 'RETROSPECTIVE') {
+      await loadRetrospective();
+    }
   } catch (error: any) {
     ElMessage.error(error.message || '审核提交失败');
   }
@@ -1616,15 +2266,39 @@ watch(
 
     if (activeStage.value === 'IMPLEMENTATION') {
       activeImplementationStep.value = findFirstPendingImplementationStep(value.implementationSteps);
+      if (activeImplementationStep.value === 'ARTIFACT_REVIEW') {
+        void loadOpenSpecTechDesignVersions();
+      }
+    }
+    if (activeStage.value === 'RETROSPECTIVE') {
+      void loadRetrospective();
     }
     void loadWorkspaceStates();
   },
   { immediate: true }
 );
 
+watch(activeStage, (stage) => {
+  if (stage === 'RETROSPECTIVE') {
+    void loadRetrospective();
+  }
+  if (stage === 'IMPLEMENTATION' && activeImplementationStep.value === 'ARTIFACT_REVIEW') {
+    void loadOpenSpecTechDesignVersions();
+  }
+});
+
 watch(activeImplementationStep, (step) => {
+  if (step === 'ARTIFACT_REVIEW') {
+    void loadOpenSpecTechDesignVersions();
+  }
   if (step === 'CHANGE_INSPECTION') {
     void loadGitChanges();
+  }
+});
+
+watch(openSpecTargetVersionId, () => {
+  if (!openSpecBaseVersionManual.value) {
+    applyAutoOpenSpecBaseVersion();
   }
 });
 
@@ -1827,6 +2501,85 @@ onUnmounted(() => {
 
 .action-line .el-input {
   max-width: 360px;
+}
+
+.openspec-version-context-panel {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #e3e8f2;
+  border-radius: 8px;
+  background: #fbfdff;
+}
+
+.openspec-version-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.openspec-version-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.openspec-auto-base-version,
+.openspec-manual-base-version {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.openspec-auto-base-version {
+  justify-content: space-between;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid #dbe3ef;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.openspec-auto-base-version > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.openspec-auto-base-version strong {
+  overflow: hidden;
+  color: #172033;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.openspec-auto-base-version small {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.openspec-version-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.openspec-version-field :deep(.tech-design-version-selector) {
+  align-items: stretch;
+}
+
+.openspec-version-field :deep(.version-select) {
+  //width: min(100%, 280px);
+}
+
+.openspec-adjustment-field :deep(.el-textarea__inner) {
+  line-height: 1.6;
 }
 
 .design-input-panel {
@@ -2163,6 +2916,97 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
+.retrospective-workbench {
+  min-width: 0;
+}
+
+.retrospective-workbench .action-line .el-input {
+  max-width: 520px;
+}
+
+.retrospective-summary-strip {
+  background: linear-gradient(180deg, #ffffff 0%, #fbf8ff 100%);
+}
+
+.retrospective-metrics {
+  grid-template-columns: repeat(4, minmax(78px, 1fr));
+}
+
+.retrospective-tabs {
+  min-width: 0;
+}
+
+.retrospective-artifact-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.candidate-review-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 0 0 12px;
+}
+
+.candidate-empty {
+  display: grid;
+  gap: 6px;
+  max-width: 460px;
+  color: #718096;
+  line-height: 1.6;
+}
+
+.candidate-empty strong {
+  color: #334155;
+}
+
+.retrospective-timeline {
+  display: grid;
+  gap: 10px;
+}
+
+.retrospective-timeline-item {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.timeline-dot {
+  width: 10px;
+  height: 10px;
+  margin-top: 14px;
+  border-radius: 50%;
+  background: #a855f7;
+  box-shadow: 0 0 0 4px #f3e8ff;
+}
+
+.timeline-card {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid #eadcf8;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.timeline-card-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.timeline-card p {
+  margin: 0;
+  color: #334155;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
 .stage-toolbar-actions {
   display: flex;
   align-items: center;
@@ -2253,6 +3097,18 @@ onUnmounted(() => {
 
   .action-line .el-input {
     max-width: none;
+  }
+
+  .openspec-version-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .openspec-version-field :deep(.tech-design-version-selector) {
+    flex-direction: column;
+  }
+
+  .openspec-version-field :deep(.version-select) {
+    width: 100%;
   }
 
   .design-input-heading,

@@ -164,6 +164,20 @@ export async function scanRequirementArtifacts(
     const relative = path.relative(workspaceRoot, file);
     artifacts.push(await fileArtifact(workspaceRoot, `openspec-spec-${artifacts.length}`, 'IMPLEMENTATION', `OpenSpec ${path.basename(path.dirname(file))}`, relative, 'markdown'));
   }
+  const openSpecArtifactInputFiles = await listFiles(path.join(workspaceRoot, 'docs', id, 'implementation', 'artifact-review', 'inputs'), 2);
+  for (const file of openSpecArtifactInputFiles.filter((item) => /\.md$/i.test(item))) {
+    const relative = path.relative(workspaceRoot, file);
+    artifacts.push(
+      await fileArtifact(
+        workspaceRoot,
+        `openspec-artifact-input-${artifacts.length}`,
+        'IMPLEMENTATION',
+        `OpenSpec 工件输入 ${path.basename(file, path.extname(file))}`,
+        relative,
+        'markdown'
+      )
+    );
+  }
 
   const junitFiles = await listFiles(path.join(workspaceRoot, 'docs', id, 'junit'), 3);
   for (const file of junitFiles.filter((item) => /\.(md|html)$/i.test(item))) {
@@ -214,6 +228,39 @@ export async function scanRequirementArtifacts(
   for (const entry of matchedReviewDirs) {
     const summaryPath = `docs/code_review/${entry.name}/summary.md`;
     artifacts.push(await fileArtifact(workspaceRoot, `code-review-${entry.name}`, 'CODE_REVIEW', `代码评审 ${entry.name}`, summaryPath, 'markdown'));
+  }
+
+  const retrospectiveArtifacts = [
+    {
+      id: 'retrospective-summary',
+      label: '交付复盘报告',
+      path: `docs/${id}/retrospective/summary.md`,
+      kind: 'markdown' as const
+    },
+    {
+      id: 'retrospective-evidence',
+      label: '交付复盘证据清单',
+      path: `docs/${id}/retrospective/evidence.json`,
+      kind: 'json' as const
+    },
+    {
+      id: 'retrospective-memory-candidates',
+      label: '交付复盘候选经验',
+      path: `docs/${id}/retrospective/memory-candidates.json`,
+      kind: 'json' as const
+    },
+    {
+      id: 'retrospective-recall-feedback',
+      label: '交付复盘引用反馈',
+      path: `docs/${id}/retrospective/recall-feedback.json`,
+      kind: 'json' as const
+    }
+  ];
+  for (const item of retrospectiveArtifacts) {
+    const artifact = await existingFileArtifact(workspaceRoot, item.id, 'RETROSPECTIVE', item.label, item.path, item.kind);
+    if (artifact) {
+      artifacts.push(artifact);
+    }
   }
 
   return artifacts;

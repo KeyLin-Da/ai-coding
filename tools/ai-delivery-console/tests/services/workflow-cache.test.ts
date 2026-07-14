@@ -3,7 +3,7 @@ import type { RequirementWorkflow } from '../../shared/workflow';
 import { createEmptyStages } from '../../shared/workflow';
 import { apiClient } from '../../src/api/client';
 import { setApiRuntimeConfig } from '../../src/api/runtime';
-import { saveWorkflowCache } from '../../src/services/workflow-cache';
+import { loadWorkflowItemCache, saveWorkflowCache } from '../../src/services/workflow-cache';
 
 function workflow(): RequirementWorkflow {
   const now = new Date().toISOString();
@@ -51,5 +51,19 @@ describe('workflow-cache', () => {
 
     expect(result).toHaveLength(1);
     expect(result[0].title).toBe('缓存需求');
+  });
+
+  it('读取旧缓存时自动补齐新增阶段，避免阶段时间线白屏', () => {
+    const cached = workflow();
+    const legacyStages = { ...cached.stages };
+    delete (legacyStages as Partial<typeof legacyStages>).RETROSPECTIVE;
+    window.localStorage.setItem('ai-delivery.workflow-cache.item.172014', JSON.stringify({
+      ...cached,
+      stages: legacyStages
+    }));
+
+    const result = loadWorkflowItemCache('172014');
+
+    expect(result?.stages.RETROSPECTIVE.status).toBe('NOT_STARTED');
   });
 });

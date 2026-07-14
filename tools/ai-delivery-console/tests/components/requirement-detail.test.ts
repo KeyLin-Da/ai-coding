@@ -1,7 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentProvider, ArtifactRef, OpenSpecSummary, RequirementWorkflow, RunRecord } from '../../shared/workflow';
+import type { AgentProvider, ArtifactRef, OpenSpecSummary, RequirementWorkflow, RunRecord, TechDesignVersion } from '../../shared/workflow';
 import { createEmptyImplementationSteps, createEmptyStages } from '../../shared/workflow';
 import RequirementDetail from '../../src/views/RequirementDetail.vue';
 import { apiClient } from '@/api/client';
@@ -30,6 +30,14 @@ vi.mock('@/api/client', () => ({
     getRequirementTokenUsageSummary: vi.fn(),
     openRunEventStream: vi.fn(),
     previewActionCommand: vi.fn(),
+    previewRequirementMemoryRecall: vi.fn(),
+    confirmRequirementMemoryRecall: vi.fn(),
+    getRequirementRetrospective: vi.fn(),
+    listMemoryCandidates: vi.fn(),
+    confirmMemoryCandidate: vi.fn(),
+    updateMemoryCandidate: vi.fn(),
+    updateMemoryCandidateStatus: vi.fn(),
+    ignoreMemoryCandidate: vi.fn(),
     readArtifact: vi.fn(),
     deleteTechDesignQuestion: vi.fn(),
     uploadTechDesignFiles: vi.fn(),
@@ -42,7 +50,9 @@ vi.mock('@/api/client', () => ({
     refreshProjectRepositoryStatus: vi.fn(),
     assertRequirementWritable: vi.fn(),
     listRequirementWorkspaceStates: vi.fn(),
-    submitReview: vi.fn()
+    submitReview: vi.fn(),
+    listTechDesignVersions: vi.fn(),
+    diffTechDesignVersions: vi.fn()
   }
 }));
 
@@ -56,7 +66,8 @@ vi.mock('element-plus', async () => {
       error: vi.fn()
     },
     ElMessageBox: {
-      confirm: vi.fn()
+      confirm: vi.fn(),
+      prompt: vi.fn()
     }
   };
 });
@@ -113,6 +124,30 @@ function artifact(stage: ArtifactRef['stage'], path: string, overrides: Partial<
   };
 }
 
+function techDesignVersions(overrides: Partial<TechDesignVersion>[] = []): TechDesignVersion[] {
+  const base: TechDesignVersion[] = [
+    {
+      id: 'snapshot:base',
+      source: 'DRAFT_SNAPSHOT',
+      label: '评审版本',
+      artifactPath: 'docs/172014/technical-design/.versions/base.md',
+      readable: true,
+      contentHash: 'hash-base',
+      createdAt: '2026-07-13T10:00:00.000Z'
+    },
+    {
+      id: 'current',
+      source: 'CURRENT_DRAFT',
+      label: '当前草稿',
+      artifactPath: 'docs/172014/technical-design/design_review.md',
+      readable: true,
+      contentHash: 'hash-current',
+      createdAt: '2026-07-14T10:00:00.000Z'
+    }
+  ];
+  return base.map((version, index) => ({ ...version, ...(overrides[index] || {}) }));
+}
+
 function workflow(artifacts: ArtifactRef[], startChangeApproved = true): RequirementWorkflow {
   const now = new Date().toISOString();
   const stages = createEmptyStages();
@@ -159,6 +194,21 @@ function techDesignWorkflow(artifacts: ArtifactRef[]): RequirementWorkflow {
   return item;
 }
 
+function retrospectiveWorkflow(): RequirementWorkflow {
+  const item = workflow([
+    artifact('RETROSPECTIVE', 'docs/172014/retrospective/summary.md'),
+    artifact('RETROSPECTIVE', 'docs/172014/retrospective/evidence.json', { kind: 'json' }),
+    artifact('RETROSPECTIVE', 'docs/172014/retrospective/memory-candidates.json', { kind: 'json' }),
+    artifact('RETROSPECTIVE', 'docs/172014/retrospective/recall-feedback.json', { kind: 'json' })
+  ]);
+  item.currentStage = 'RETROSPECTIVE';
+  item.stages.IMPLEMENTATION.status = 'APPROVED';
+  item.stages.CODE_REVIEW.status = 'APPROVED';
+  item.stages.RETROSPECTIVE.status = 'DRAFT';
+  item.stages.RETROSPECTIVE.artifactPath = 'docs/172014/retrospective/summary.md';
+  return item;
+}
+
 function componentStubs() {
   return {
     StageTimeline: { template: '<div />' },
@@ -178,6 +228,37 @@ function componentStubs() {
     RunLogDrawer: { template: '<div />' },
     ArtifactSidebar: { template: '<div />' },
     ArtifactPreviewDialog: { template: '<div />' },
+    ArtifactVersionDiffDialog: {
+      template: '<div />',
+      methods: {
+        open: vi.fn()
+      }
+    },
+    TechDesignVersionSelector: {
+      props: ['modelValue', 'versions', 'loading', 'showCompare'],
+      emits: ['update:modelValue', 'compare'],
+      template:
+        '<div class="tech-design-version-selector-stub"><select class="tech-design-version-select" :value="modelValue" @change="$emit(\'update:modelValue\', $event.target.value)"><option v-for="version in versions" :key="version.id" :value="version.id">{{ version.label }}</option></select><button v-if="showCompare !== false" class="tech-design-version-compare" @click="$emit(\'compare\')">对比版本</button></div>'
+    },
+    MemoryRecallPreviewDialog: {
+      props: ['modelValue'],
+      emits: ['update:modelValue', 'confirm'],
+      watch: {
+        modelValue(value: boolean) {
+          if (value) {
+            this.$emit('update:modelValue', false);
+            this.$emit('confirm', { enabled: false });
+          }
+        }
+      },
+      template: '<div />'
+    },
+    MemoryCandidateTable: {
+      props: ['items'],
+      emits: ['confirm', 'edit', 'pending', 'local', 'ignore'],
+      template:
+        '<div class="memory-candidate-table"><div v-for="item in items" :key="item.id" class="memory-candidate-row"><span>{{ item.statement }}</span><button class="confirm-candidate" @click="$emit(\'confirm\', item)">确认</button><button class="edit-candidate" @click="$emit(\'edit\', item)">编辑</button></div></div>'
+    },
     GitChangeInspector: {
       props: ['summary', 'requirementId'],
       emits: ['updated'],
@@ -226,7 +307,22 @@ function componentStubs() {
       emits: ['update:modelValue'],
       template: '<select :value="modelValue" @change="$emit(\'update:modelValue\', $event.target.value)"><slot /></select>'
     },
-    ElTag: { template: '<span><slot /></span>' }
+    ElTag: { template: '<span><slot /></span>' },
+    ElTable: {
+      props: ['data'],
+      template: '<div class="el-table-stub"><slot /></div>'
+    },
+    ElTableColumn: {
+      props: ['label', 'prop'],
+      template: '<div class="el-table-column-stub">{{ label }}</div>'
+    },
+    ElPagination: { template: '<div />' },
+    ElTabs: {
+      props: ['modelValue'],
+      emits: ['update:modelValue'],
+      template: '<div><slot /></div>'
+    },
+    ElTabPane: { template: '<section><slot /></section>' }
   };
 }
 
@@ -291,6 +387,20 @@ async function mountDetail(current: RequirementWorkflow, openSpecSummary: OpenSp
     stageSummaries: [],
     agentSummaries: []
   });
+  vi.mocked(apiClient.getRequirementRetrospective).mockResolvedValue({
+    evidenceCount: 0,
+    candidateCount: 0,
+    pendingCandidateCount: 0,
+    recallFeedbackCount: 0,
+    unresolvedRiskCount: 0,
+    readyForReview: false
+  });
+  vi.mocked(apiClient.listMemoryCandidates).mockResolvedValue({
+    items: [],
+    total: 0,
+    page: 1,
+    pageSize: 200
+  });
   const run: RunRecord = {
     id: 'run-auto-log',
     requirementId: current.requirementId,
@@ -315,7 +425,6 @@ async function mountDetail(current: RequirementWorkflow, openSpecSummary: OpenSp
     stage: 'IMPLEMENTATION',
     decision: 'APPROVED'
   });
-
   const wrapper = mount(RequirementDetail, {
     global: {
       plugins: [pinia],
@@ -437,6 +546,7 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
       clientSessionId: '20'
     });
     vi.mocked(ElMessageBox.confirm).mockResolvedValue(undefined as never);
+    vi.mocked(ElMessageBox.prompt).mockResolvedValue({ value: '编辑后的候选经验' } as never);
     vi.mocked(apiClient.readArtifact).mockResolvedValue({
       artifact: {},
       content: ''
@@ -467,6 +577,13 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
       clientSessionId: 20,
       localRepoPath: '/tmp/ai-delivery/project',
       syncStatus: 'READY'
+    });
+    vi.mocked(apiClient.listTechDesignVersions).mockResolvedValue({ versions: techDesignVersions() });
+    vi.mocked(apiClient.diffTechDesignVersions).mockResolvedValue({
+      left: techDesignVersions()[0],
+      right: techDesignVersions()[1],
+      diff: '',
+      truncated: false
     });
     vi.mocked(apiClient.openRunEventStream).mockImplementation((requirementId: string, runId: string) => new MockEventSource(`runner:${requirementId}:${runId}`) as unknown as EventSource);
     vi.stubGlobal('EventSource', MockEventSource);
@@ -1196,7 +1313,9 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
       expect.objectContaining({
         actionType: 'OPENSPEC_FF',
         params: expect.objectContaining({
-          documentPath: 'docs/172014/technical-design/design_review.md'
+          documentPath: 'docs/172014/technical-design/design_review.md',
+          baseTechDesignVersionId: 'snapshot:base',
+          targetTechDesignVersionId: 'current'
         })
       })
     );
@@ -1222,6 +1341,178 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     expect(ElMessage.warning).toHaveBeenCalledWith('请先生成、保存或刷新技术方案产物');
     expect(apiClient.runAction).not.toHaveBeenCalled();
     expect(apiClient.previewActionCommand).not.toHaveBeenCalled();
+  });
+
+  it('生成 OpenSpec 工件时提交技术方案版本和调整说明', async () => {
+    const current = workflow([
+      artifact('PRD', 'docs/172014/prd/analysis.md'),
+      artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md')
+    ]);
+    const wrapper = await mountDetail(current);
+
+    await activateImplementationStep(wrapper, '工件生成与评审');
+    await wrapper.find('.openspec-adjustment-input').setValue('只按新增差异增量更新 tasks');
+    await openSpecArtifactButton(wrapper).trigger('click');
+    await flushPromises();
+
+    expect(apiClient.runAction).toHaveBeenCalledWith(
+      '172014',
+      expect.objectContaining({
+        actionType: 'OPENSPEC_FF',
+        params: expect.objectContaining({
+          prdDocumentPath: 'docs/172014/prd/analysis.md',
+          documentPath: 'docs/172014/technical-design/design_review.md',
+          baseTechDesignVersionId: 'snapshot:base',
+          targetTechDesignVersionId: 'current',
+          artifactAdjustment: '只按新增差异增量更新 tasks'
+        })
+      })
+    );
+  });
+
+  it('默认基线只展示自动版本，点击修改后才允许选择', async () => {
+    const current = workflow([
+      artifact('PRD', 'docs/172014/prd/analysis.md'),
+      artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md')
+    ]);
+    const wrapper = await mountDetail(current);
+
+    await activateImplementationStep(wrapper, '工件生成与评审');
+    await flushPromises();
+
+    expect(wrapper.findAll('.tech-design-version-select')).toHaveLength(1);
+    expect(wrapper.findAll('.tech-design-version-compare')).toHaveLength(0);
+    expect(wrapper.findAll('.openspec-version-compare-button')).toHaveLength(1);
+    expect(wrapper.text()).toContain('自动基线');
+
+    await wrapper.find('.openspec-edit-base-button').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.findAll('.tech-design-version-select')).toHaveLength(2);
+    expect(wrapper.text()).toContain('恢复自动');
+  });
+
+  it('默认使用最近一次未失败 OpenSpec 工件目标版本作为基线', async () => {
+    const current = workflow([
+      artifact('PRD', 'docs/172014/prd/analysis.md'),
+      artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md')
+    ]);
+    current.runs = [
+      {
+        id: 'run-openspec-ff',
+        requirementId: '172014',
+        actionType: 'OPENSPEC_FF',
+        stage: 'IMPLEMENTATION',
+        implementationStep: 'ARTIFACT_REVIEW',
+        status: 'TERMINAL_OPENED',
+        startedAt: '2026-07-13T10:00:00.000Z',
+        finishedAt: '2026-07-13T10:05:00.000Z',
+        params: {},
+        openSpecArtifactInputSnapshot: {
+          baseTechDesignVersionId: 'snapshot:older',
+          targetTechDesignVersionId: 'snapshot:previous',
+          contextPath: 'docs/172014/implementation/artifact-review/inputs/previous.md',
+          capturedAt: '2026-07-13T10:00:00.000Z'
+        }
+      }
+    ];
+    vi.mocked(apiClient.listTechDesignVersions).mockResolvedValue({
+      versions: techDesignVersions([
+        {
+          id: 'snapshot:previous',
+          label: '上次工件版本',
+          artifactPath: 'docs/172014/technical-design/.versions/previous.md'
+        },
+        {}
+      ])
+    });
+    const wrapper = await mountDetail(current);
+
+    await activateImplementationStep(wrapper, '工件生成与评审');
+    await openSpecArtifactButton(wrapper).trigger('click');
+    await flushPromises();
+
+    expect(apiClient.runAction).toHaveBeenCalledWith(
+      '172014',
+      expect.objectContaining({
+        actionType: 'OPENSPEC_FF',
+        params: expect.objectContaining({
+          baseTechDesignVersionId: 'snapshot:previous',
+          targetTechDesignVersionId: 'current'
+        })
+      })
+    );
+  });
+
+  it('基线和目标版本一致但有调整说明时仍允许生成 OpenSpec 工件', async () => {
+    const current = workflow([
+      artifact('PRD', 'docs/172014/prd/analysis.md'),
+      artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md')
+    ]);
+    const wrapper = await mountDetail(current);
+
+    await activateImplementationStep(wrapper, '工件生成与评审');
+    await wrapper.find('.openspec-edit-base-button').trigger('click');
+    await flushPromises();
+    await wrapper.findAll('.tech-design-version-select')[0].setValue('current');
+    await wrapper.find('.openspec-adjustment-input').setValue('仅按人工说明更新 proposal');
+    await openSpecArtifactButton(wrapper).trigger('click');
+    await flushPromises();
+
+    expect(apiClient.runAction).toHaveBeenCalledWith(
+      '172014',
+      expect.objectContaining({
+        actionType: 'OPENSPEC_FF',
+        params: expect.objectContaining({
+          baseTechDesignVersionId: 'current',
+          targetTechDesignVersionId: 'current',
+          artifactAdjustment: '仅按人工说明更新 proposal'
+        })
+      })
+    );
+  });
+
+  it('基线和目标版本一致且无调整说明时阻止 OpenSpec 工件生成', async () => {
+    const current = workflow([
+      artifact('PRD', 'docs/172014/prd/analysis.md'),
+      artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md')
+    ]);
+    const wrapper = await mountDetail(current);
+
+    await activateImplementationStep(wrapper, '工件生成与评审');
+    await wrapper.find('.openspec-edit-base-button').trigger('click');
+    await flushPromises();
+    await wrapper.findAll('.tech-design-version-select')[0].setValue('current');
+    await openSpecArtifactButton(wrapper).trigger('click');
+    await flushPromises();
+
+    expect(ElMessage.warning).toHaveBeenCalledWith('基线和目标版本一致，请填写工件调整说明或选择不同版本');
+    expect(apiClient.runAction).not.toHaveBeenCalled();
+  });
+
+  it('目标技术方案版本不可读时阻止 OpenSpec 工件生成', async () => {
+    vi.mocked(apiClient.listTechDesignVersions).mockResolvedValue({
+      versions: techDesignVersions([
+        {},
+        {
+          readable: false,
+          unreadableReason: '文件不存在'
+        }
+      ])
+    });
+    const current = workflow([
+      artifact('PRD', 'docs/172014/prd/analysis.md'),
+      artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md')
+    ]);
+    const wrapper = await mountDetail(current);
+
+    await activateImplementationStep(wrapper, '工件生成与评审');
+    await wrapper.findAll('.tech-design-version-select')[0].setValue('current');
+    await openSpecArtifactButton(wrapper).trigger('click');
+    await flushPromises();
+
+    expect(ElMessage.warning).toHaveBeenCalledWith('请选择可读取的技术方案目标版本');
+    expect(apiClient.runAction).not.toHaveBeenCalled();
   });
 
   it('仅有技术方案补充材料时不把补充材料作为 OpenSpec 技术方案文档', async () => {
@@ -1263,7 +1554,9 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
         actionType: 'OPENSPEC_FF',
         params: expect.objectContaining({
           prdDocumentPath: 'docs/172014/prd/analysis.md',
-          documentPath: 'docs/172014/technical-design/design_review.md'
+          documentPath: 'docs/172014/technical-design/design_review.md',
+          baseTechDesignVersionId: 'snapshot:base',
+          targetTechDesignVersionId: 'current'
         })
       })
     );
@@ -1288,6 +1581,31 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
       })
     );
     expect(apiClient.getRunEvents).toHaveBeenCalledWith('172014', 'run-auto-log');
+  });
+
+  it('交互终端启动成功后不自动打开运行日志面板', async () => {
+    const current = workflow([], false);
+    const run: RunRecord = {
+      id: 'run-interactive-opened',
+      requirementId: current.requirementId,
+      actionType: 'OPENSPEC_NEW_CHANGE',
+      stage: 'IMPLEMENTATION',
+      implementationStep: 'START_CHANGE',
+      status: 'TERMINAL_OPENED',
+      startedAt: new Date().toISOString(),
+      params: { executionMode: 'INTERACTIVE_TERMINAL' },
+      executionMode: 'INTERACTIVE_TERMINAL'
+    };
+    vi.mocked(apiClient.runAction).mockResolvedValueOnce({ run, workflow: current });
+    const wrapper = await mountDetail(current);
+
+    await wrapper.findAll('select')[1].setValue('INTERACTIVE_TERMINAL');
+    await openSpecStartButton(wrapper).trigger('click');
+    await flushPromises();
+
+    expect(ElMessage.success).toHaveBeenCalledWith('已打开本地交互终端，后续交互请在终端中完成');
+    expect(apiClient.getRunEvents).not.toHaveBeenCalledWith('172014', 'run-interactive-opened');
+    expect(eventSourceUrls).not.toContain('runner:172014:run-interactive-opened');
   });
 
   it('手动复制开始变更命令且不创建运行记录', async () => {
@@ -1486,6 +1804,263 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     expect(apiClient.getGitChanges).toHaveBeenCalledWith('172014');
     expect(apiClient.runAction).not.toHaveBeenCalled();
     expect(ElMessage.warning).toHaveBeenCalledWith('暂存区没有已暂存文件，请先 git add 后再执行暂存区预审');
+  });
+
+  it('交付复盘工作台展示报告、沟通脉络、候选经验和引用反馈', async () => {
+    vi.mocked(apiClient.getRequirementRetrospective).mockResolvedValue({
+      summaryPath: 'docs/172014/retrospective/summary.md',
+      evidencePath: 'docs/172014/retrospective/evidence.json',
+      candidatePath: 'docs/172014/retrospective/memory-candidates.json',
+      recallFeedbackPath: 'docs/172014/retrospective/recall-feedback.json',
+      evidenceCount: 1,
+      candidateCount: 1,
+      pendingCandidateCount: 1,
+      recallFeedbackCount: 1,
+      unresolvedRiskCount: 0,
+      readyForReview: false
+    });
+    vi.mocked(apiClient.listMemoryCandidates).mockResolvedValue({
+      items: [
+        {
+          id: 'cand-1',
+          projectId: '10',
+          requirementId: '172014',
+          sourceKey: 'retrospective:172014:cand-1',
+          sourceType: 'RETROSPECTIVE',
+          sourceRunId: 'run-retro',
+          sourceText: '复盘确认该约束可沉淀',
+          statement: 'opp-learn 涉及 nacos 配置读取时优先复用公共接口',
+          type: 'TECH_EXPERIENCE',
+          status: 'PENDING_CONFIRM',
+          confidence: 0.86,
+          tags: ['nacos'],
+          appliesTo: { modules: ['opp-learn'], stages: ['TECH_DESIGN'] },
+          evidence: [
+            {
+              sourceType: 'RETROSPECTIVE',
+              requirementId: '172014',
+              path: 'docs/172014/retrospective/summary.md',
+              quote: '复盘确认该约束可沉淀'
+            }
+          ],
+          createdAt: '2026-07-10T10:00:00.000Z',
+          updatedAt: '2026-07-10T10:00:00.000Z'
+        }
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 200
+    });
+    vi.mocked(apiClient.readArtifact).mockImplementation(async (filePath: string) => ({
+      artifact: {},
+      content: filePath.endsWith('evidence.json')
+        ? JSON.stringify({
+            version: 1,
+            requirementId: '172014',
+            items: [
+              {
+                id: 'evidence-1',
+                sourceType: 'CLARIFICATION',
+                requirementId: '172014',
+                path: 'docs/172014/technical-design/questions/20260710-question.md',
+                quote: '生成方案时需要参考 opp-learn 的 nacos 配置读取约束',
+                actor: '架构师',
+                createdAt: '2026-07-10T10:00:00.000Z'
+              }
+            ]
+          })
+        : JSON.stringify({
+            version: 1,
+            requirementId: '172014',
+            items: [
+              {
+                memoryId: 'memory-1',
+                status: 'PARTIAL',
+                reason: '部分内容被技术方案吸收'
+              }
+            ]
+          })
+    }));
+
+    const wrapper = await mountDetail(retrospectiveWorkflow());
+    vi.mocked(apiClient.getRequirementRetrospective).mockResolvedValue({
+      summaryPath: 'docs/172014/retrospective/summary.md',
+      evidencePath: 'docs/172014/retrospective/evidence.json',
+      candidatePath: 'docs/172014/retrospective/memory-candidates.json',
+      recallFeedbackPath: 'docs/172014/retrospective/recall-feedback.json',
+      evidenceCount: 1,
+      candidateCount: 1,
+      pendingCandidateCount: 1,
+      recallFeedbackCount: 1,
+      unresolvedRiskCount: 0,
+      readyForReview: false
+    });
+    vi.mocked(apiClient.listMemoryCandidates).mockResolvedValue({
+      items: [
+        {
+          id: 'cand-1',
+          projectId: '10',
+          requirementId: '172014',
+          sourceKey: 'retrospective:172014:cand-1',
+          sourceType: 'RETROSPECTIVE',
+          sourceRunId: 'run-retro',
+          sourceText: '复盘确认该约束可沉淀',
+          statement: 'opp-learn 涉及 nacos 配置读取时优先复用公共接口',
+          type: 'TECH_EXPERIENCE',
+          status: 'PENDING_CONFIRM',
+          confidence: 0.86,
+          tags: ['nacos'],
+          appliesTo: { modules: ['opp-learn'], stages: ['TECH_DESIGN'] },
+          evidence: [
+            {
+              sourceType: 'RETROSPECTIVE',
+              requirementId: '172014',
+              path: 'docs/172014/retrospective/summary.md',
+              quote: '复盘确认该约束可沉淀'
+            }
+          ],
+          createdAt: '2026-07-10T10:00:00.000Z',
+          updatedAt: '2026-07-10T10:00:00.000Z'
+        }
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 200
+    });
+    vi.mocked(apiClient.readArtifact).mockImplementation(async (filePath: string) => ({
+      artifact: {},
+      content: filePath.endsWith('evidence.json')
+        ? JSON.stringify({
+            version: 1,
+            requirementId: '172014',
+            items: [
+              {
+                id: 'evidence-1',
+                sourceType: 'CLARIFICATION',
+                requirementId: '172014',
+                path: 'docs/172014/technical-design/questions/20260710-question.md',
+                quote: '生成方案时需要参考 opp-learn 的 nacos 配置读取约束',
+                actor: '架构师',
+                createdAt: '2026-07-10T10:00:00.000Z'
+              }
+            ]
+          })
+        : JSON.stringify({
+            version: 1,
+            requirementId: '172014',
+            items: [
+              {
+                memoryId: 'memory-1',
+                status: 'PARTIAL',
+                reason: '部分内容被技术方案吸收'
+              }
+            ]
+          })
+    }));
+    const refreshButton = wrapper.findAll('button').find((item) => item.text().includes('刷新复盘'));
+    if (!refreshButton) {
+      throw new Error('未找到刷新复盘按钮');
+    }
+    await refreshButton.trigger('click');
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('交付复盘报告');
+    expect(wrapper.text()).toContain('生成方案时需要参考 opp-learn');
+    expect(wrapper.text()).toContain('opp-learn 涉及 nacos 配置读取时优先复用公共接口');
+    expect(wrapper.text()).toContain('复盘说明');
+    expect(wrapper.text()).toContain('当前没有未关闭风险');
+  });
+
+  it('编辑复盘候选经验只保存草稿不直接沉淀', async () => {
+    const candidate = {
+      id: 'cand-1',
+      projectId: '10',
+      requirementId: '172014',
+      sourceKey: 'retrospective:172014:cand-1',
+      sourceType: 'RETROSPECTIVE' as const,
+      sourceRunId: 'run-retro',
+      sourceText: '复盘确认该约束可沉淀',
+      statement: '原始候选经验',
+      type: 'TECH_EXPERIENCE' as const,
+      status: 'PENDING_CONFIRM' as const,
+      confidence: 0.86,
+      tags: ['nacos'],
+      appliesTo: { modules: ['opp-learn'], stages: ['TECH_DESIGN' as const] },
+      evidence: [
+        {
+          sourceType: 'RETROSPECTIVE' as const,
+          requirementId: '172014',
+          path: 'docs/172014/retrospective/summary.md',
+          quote: '复盘确认该约束可沉淀'
+        }
+      ],
+      createdAt: '2026-07-10T10:00:00.000Z',
+      updatedAt: '2026-07-10T10:00:00.000Z'
+    };
+    vi.mocked(apiClient.updateMemoryCandidate).mockResolvedValue({
+      ...candidate,
+      statement: '编辑后的候选经验'
+    });
+    vi.mocked(ElMessageBox.prompt).mockResolvedValue({ value: '编辑后的候选经验' } as never);
+
+    const wrapper = await mountDetail(retrospectiveWorkflow());
+    vi.mocked(apiClient.getRequirementRetrospective).mockResolvedValue({
+      summaryPath: 'docs/172014/retrospective/summary.md',
+      evidenceCount: 0,
+      candidateCount: 1,
+      pendingCandidateCount: 1,
+      recallFeedbackCount: 0,
+      unresolvedRiskCount: 0,
+      readyForReview: false
+    });
+    vi.mocked(apiClient.listMemoryCandidates).mockResolvedValue({
+      items: [candidate],
+      total: 1,
+      page: 1,
+      pageSize: 200
+    });
+    const refreshButton = wrapper.findAll('button').find((item) => item.text().includes('刷新复盘'));
+    if (!refreshButton) {
+      throw new Error('未找到刷新复盘按钮');
+    }
+    await refreshButton.trigger('click');
+    await flushPromises();
+
+    const editButton = wrapper.find('.edit-candidate');
+    expect(editButton.exists()).toBe(true);
+    await editButton.trigger('click');
+    await flushPromises();
+
+    expect(apiClient.updateMemoryCandidate).toHaveBeenCalledWith('cand-1', {
+      statement: '编辑后的候选经验',
+      tags: ['nacos']
+    });
+    expect(apiClient.confirmMemoryCandidate).not.toHaveBeenCalled();
+    expect(ElMessage.success).toHaveBeenCalledWith('候选经验已保存');
+  });
+
+  it('交付复盘按钮触发 RETROSPECTIVE_GENERATE 动作', async () => {
+    const current = retrospectiveWorkflow();
+    const wrapper = await mountDetail(current);
+    const button = wrapper.findAll('button').find((item) => item.text().includes('生成交付复盘'));
+    if (!button) {
+      throw new Error('未找到生成交付复盘按钮');
+    }
+
+    await button.trigger('click');
+    await flushPromises();
+
+    expect(apiClient.runAction).toHaveBeenCalledWith(
+      '172014',
+      expect.objectContaining({
+        actionType: 'RETROSPECTIVE_GENERATE',
+        params: expect.objectContaining({
+          agentId: 'codex',
+          executionMode: 'BACKGROUND',
+          branchName: 'feature/opp-172014'
+        })
+      })
+    );
   });
 
   it('查看变更组件回传 Git 摘要后同步详情页状态', async () => {

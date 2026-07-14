@@ -243,7 +243,7 @@ const requirementTypeOptions = computed(() =>
     label: requirementTypeLabels[value]
   }))
 );
-const stageOrder: RequirementWorkflow['currentStage'][] = ['PRD', 'TECH_DESIGN', 'IMPLEMENTATION', 'CODE_REVIEW', 'DONE'];
+const stageOrder: RequirementWorkflow['currentStage'][] = ['PRD', 'TECH_DESIGN', 'IMPLEMENTATION', 'CODE_REVIEW', 'RETROSPECTIVE', 'DONE'];
 const stageFilterOptions = computed(() => {
   const stages = new Set(store.requirements.map((workflow) => workflow.currentStage));
   return stageOrder
@@ -762,6 +762,12 @@ onMounted(async () => {
   --stage-tag-bg: #fff1f2;
   --stage-tag-border: #fecdd3;
   --stage-tag-color: #be123c;
+}
+
+.stage-tag--RETROSPECTIVE {
+  --stage-tag-bg: #fdf4ff;
+  --stage-tag-border: #f5d0fe;
+  --stage-tag-color: #a21caf;
 }
 
 .stage-tag--DONE {

@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { RequirementInput, RequirementType, RequirementWorkflow, WorkflowStage } from '../../shared/workflow';
-import { createEmptyImplementationSteps, createEmptyStages, defaultBranchName, ensureImplementationSteps } from '../../shared/workflow';
+import { createEmptyImplementationSteps, createEmptyStages, defaultBranchName, ensureImplementationSteps, ensureWorkflowStages } from '../../shared/workflow';
 import { deriveCurrentStage } from '../../shared/stage-rules';
 import { normalizeRequirementId } from './workspace';
 import { saveProjectHistory } from './project-history';
@@ -37,6 +37,8 @@ function withWorkflowDefaults(workflow: RequirementWorkflow): RequirementWorkflo
     projects: workflow.projects || [],
     prdSourceFiles: workflow.prdSourceFiles || [],
     techDesignSourceFiles: workflow.techDesignSourceFiles || [],
+    stages: ensureWorkflowStages(workflow),
+    retrospective: workflow.retrospective || {},
     implementationSteps: ensureImplementationSteps(workflow.implementationSteps)
   };
 }
@@ -81,8 +83,13 @@ export class WorkflowRepository {
     await fs.mkdir(workflowDir, { recursive: true });
     const updated = {
       ...workflow,
+      stages: ensureWorkflowStages(workflow),
+      retrospective: workflow.retrospective || {},
       implementationSteps: ensureImplementationSteps(workflow.implementationSteps),
-      currentStage: deriveCurrentStage(workflow),
+      currentStage: deriveCurrentStage({
+        ...workflow,
+        stages: ensureWorkflowStages(workflow)
+      }),
       updatedAt: new Date().toISOString()
     };
     const target = this.getStatePath(workflow.requirementId);
