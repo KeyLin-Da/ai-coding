@@ -271,6 +271,23 @@ function openSpecInputParam(workflow: RequirementWorkflow, params: Record<string
   ]).join(',');
 }
 
+function hasCompleteOpenSpecArtifacts(workflow: RequirementWorkflow): boolean {
+  const artifacts = workflow.artifacts || [];
+  const changeArtifact = artifacts.find((artifact) => artifact.id === 'openspec-change');
+  const changePath = (changeArtifact?.path || '').replace(/\\/g, '/');
+  if (changeArtifact?.label.includes('已归档') || changePath.includes('/archive/')) {
+    return false;
+  }
+  const existingArtifactIds = new Set(artifacts.filter((artifact) => artifact.exists).map((artifact) => artifact.id));
+  const hasRequiredArtifacts = ['openspec-proposal', 'openspec-design', 'openspec-tasks'].every((id) => existingArtifactIds.has(id));
+  const hasSpec = artifacts.some((artifact) => artifact.exists && artifact.id.startsWith('openspec-spec-'));
+  return hasRequiredArtifacts && hasSpec;
+}
+
+function openSpecArtifactSkillName(workflow: RequirementWorkflow): 'openspec-ff-change' | 'coding-openspec-amend' {
+  return hasCompleteOpenSpecArtifacts(workflow) ? 'coding-openspec-amend' : 'openspec-ff-change';
+}
+
 function projectParam(workflow: RequirementWorkflow): string {
   return (workflow.projects || []).map((project) => project.name || project.path).filter(Boolean).join(',');
 }
@@ -331,7 +348,7 @@ function buildSkillCommand(workflow: RequirementWorkflow, action: ActionInput): 
         .filter(Boolean)
         .join(' ');
     case 'OPENSPEC_FF':
-      return `/openspec-ff-change ${changeName} d=${openSpecInputParam(workflow, params)}`;
+      return `/${openSpecArtifactSkillName(workflow)} ${changeName} d=${openSpecInputParam(workflow, params)}`;
     case 'OPENSPEC_APPLY':
       return `/openspec-apply-change ${changeName}`;
     case 'OPENSPEC_VERIFY':
@@ -761,6 +778,8 @@ export async function executeAction(
 
 export const internalForTests = {
   buildSkillCommand,
+  hasCompleteOpenSpecArtifacts,
+  openSpecArtifactSkillName,
   existingTechDesignQuestionPaths,
   isTechnicalDesignQuestionPath,
   isAgentAction,

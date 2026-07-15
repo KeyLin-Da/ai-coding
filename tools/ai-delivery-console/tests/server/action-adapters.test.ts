@@ -4,7 +4,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { describe, expect, it, vi } from 'vitest';
-import type { AgentProvider, RequirementWorkflow, RunRecord } from '../../shared/workflow';
+import type { AgentProvider, ArtifactRef, RequirementWorkflow, RunRecord } from '../../shared/workflow';
 import { createEmptyStages } from '../../shared/workflow';
 import {
   assertPrdClarificationReady,
@@ -49,6 +49,29 @@ function workflow(): RequirementWorkflow {
     reviews: [],
     issues: []
   };
+}
+
+function openSpecArtifact(id: string, pathValue: string, overrides: Partial<ArtifactRef> = {}): ArtifactRef {
+  return {
+    id,
+    stage: 'IMPLEMENTATION',
+    label: id,
+    path: pathValue,
+    kind: pathValue.endsWith('.md') ? 'markdown' : 'directory',
+    exists: true,
+    ...overrides
+  };
+}
+
+function completeOpenSpecArtifacts(overrides: Partial<ArtifactRef>[] = []): ArtifactRef[] {
+  const base = [
+    openSpecArtifact('openspec-change', 'openspec/changes/req-172014'),
+    openSpecArtifact('openspec-proposal', 'openspec/changes/req-172014/proposal.md'),
+    openSpecArtifact('openspec-design', 'openspec/changes/req-172014/design.md'),
+    openSpecArtifact('openspec-tasks', 'openspec/changes/req-172014/tasks.md'),
+    openSpecArtifact('openspec-spec-1', 'openspec/changes/req-172014/specs/main/spec.md')
+  ];
+  return base.map((artifact, index) => ({ ...artifact, ...(overrides[index] || {}) }));
 }
 
 function runRecord(id: string): RunRecord {
@@ -633,6 +656,49 @@ describe('action-adapters', () => {
 
     expect(command).toBe(
       '/openspec-ff-change req-172014 d=docs/172014/prd/analysis.md,docs/172014/technical-design/design_review.md,docs/172014/implementation/artifact-review/inputs/context.md,docs/172014/prd/files'
+    );
+  });
+
+  it('已有完整 OpenSpec 工件时使用增量修订技能更新工件', () => {
+    const item = {
+      ...workflow(),
+      artifacts: completeOpenSpecArtifacts()
+    };
+
+    expect(internalForTests.hasCompleteOpenSpecArtifacts(item)).toBe(true);
+    expect(internalForTests.openSpecArtifactSkillName(item)).toBe('coding-openspec-amend');
+    expect(internalForTests.buildSkillCommand(item, { actionType: 'OPENSPEC_FF', params: {} })).toBe(
+      '/coding-openspec-amend req-172014 d=docs/172014/prd/analysis.md,docs/172014/technical-design/design_review.md,docs/172014/prd/files'
+    );
+  });
+
+  it('归档 OpenSpec 工件不判定为可增量修订', () => {
+    const item = {
+      ...workflow(),
+      artifacts: completeOpenSpecArtifacts([
+        {
+          label: 'OpenSpec Change（已归档）',
+          path: 'openspec/changes/archive/2026-07-14-req-172014'
+        }
+      ])
+    };
+
+    expect(internalForTests.hasCompleteOpenSpecArtifacts(item)).toBe(false);
+    expect(internalForTests.openSpecArtifactSkillName(item)).toBe('openspec-ff-change');
+  });
+
+  it('执行 OpenSpec 工件动作已有完整工件时 commandText 使用增量修订技能', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-openspec-amend-command-'));
+    const run = await executeAction(root, { ...workflow(), artifacts: completeOpenSpecArtifacts() }, {
+      actionType: 'OPENSPEC_FF',
+      params: {
+        agentId: 'missing-agent'
+      }
+    });
+
+    expect(run.status).toBe('WAITING_FOR_AGENT');
+    expect(run.commandText).toBe(
+      '/coding-openspec-amend req-172014 d=docs/172014/prd/analysis.md,docs/172014/technical-design/design_review.md,docs/172014/prd/files'
     );
   });
 

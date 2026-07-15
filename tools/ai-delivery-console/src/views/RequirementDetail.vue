@@ -280,7 +280,7 @@
                 <div class="action-line">
                   <el-input v-model="changeName" placeholder="OpenSpec change name，例如 req-172014" />
                   <el-button type="primary" :disabled="!canRunOpenSpecArtifacts" :icon="primaryActionIcon(Operation)" @click="runOpenSpecArtifacts">
-                    {{ actionButtonText('生成 OpenSpec 工件') }}
+                    {{ actionButtonText(openSpecArtifactActionText) }}
                   </el-button>
                   <el-button :icon="primaryActionIcon(DataAnalysis)" @click="runOpenSpecStatus">{{ actionButtonText('查看 OpenSpec 状态') }}</el-button>
                   <el-button :icon="DocumentChecked" @click="openImplementationStepReview">审核本步骤</el-button>
@@ -292,6 +292,7 @@
                       <div v-if="!openSpecBaseVersionManual" class="openspec-auto-base-version">
                         <div>
                           <strong>{{ openSpecBaseVersionText }}</strong>
+                          <small>自动基线</small>
                         </div>
                         <el-button class="openspec-edit-base-button" link :icon="EditPen" title="修改基线版本" @click="enableManualOpenSpecBaseVersion" />
                       </div>
@@ -836,6 +837,15 @@ const openSpecTaskPercentage = computed(() => {
 const openSpecPendingTaskCount = computed(() => Math.max(0, (openSpecSummary.value?.tasks.total || 0) - (openSpecSummary.value?.tasks.completed || 0)));
 const canArchiveOpenSpec = computed(() => Boolean(workflow.value?.stages.CODE_REVIEW.status === 'APPROVED' && !openSpecSummary.value?.archived));
 const openSpecChangeExists = computed(() => Boolean(openSpecSummary.value?.exists));
+const openSpecArtifactsComplete = computed(() => {
+  const summary = openSpecSummary.value;
+  if (!summary?.exists || summary.archived) {
+    return false;
+  }
+  const existingArtifactTypes = new Set(summary.artifacts.filter((artifact) => artifact.exists).map((artifact) => artifact.type));
+  return existingArtifactTypes.has('proposal') && existingArtifactTypes.has('design') && existingArtifactTypes.has('tasks') && summary.specs.some((spec) => spec.exists);
+});
+const openSpecArtifactActionText = computed(() => (openSpecArtifactsComplete.value ? '更新 OpenSpec 工件' : '生成 OpenSpec 工件'));
 const canRunOpenSpecNewChange = computed(() => Boolean(techDesignApproved.value && !openSpecChangeExists.value));
 const canRunOpenSpecArtifacts = computed(() => Boolean(implementationStepStates.value.START_CHANGE.status === 'APPROVED' && techDesignApproved.value));
 const canRunOpenSpecApply = computed(() => implementationStepStates.value.ARTIFACT_REVIEW.status === 'APPROVED');

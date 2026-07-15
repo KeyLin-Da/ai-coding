@@ -96,6 +96,22 @@ const emptyOpenSpecSummary: OpenSpecSummary = {
   }
 };
 
+function completeOpenSpecSummary(): OpenSpecSummary {
+  return {
+    ...emptyOpenSpecSummary,
+    rootPath: 'openspec/changes/req-172014',
+    exists: true,
+    artifacts: [
+      { id: 'proposal', type: 'proposal', label: 'OpenSpec Proposal', path: 'openspec/changes/req-172014/proposal.md', exists: true },
+      { id: 'design', type: 'design', label: 'OpenSpec Design', path: 'openspec/changes/req-172014/design.md', exists: true },
+      { id: 'tasks', type: 'tasks', label: 'OpenSpec Tasks', path: 'openspec/changes/req-172014/tasks.md', exists: true }
+    ],
+    specs: [
+      { id: 'spec-main', type: 'spec', label: 'OpenSpec Spec', path: 'openspec/changes/req-172014/specs/main/spec.md', exists: true }
+    ]
+  };
+}
+
 let eventSourceUrls: string[] = [];
 let reviewDialogOpen: ReturnType<typeof vi.fn>;
 
@@ -441,9 +457,9 @@ async function mountDetail(current: RequirementWorkflow, openSpecSummary: OpenSp
 }
 
 function openSpecArtifactButton(wrapper: ReturnType<typeof mount>) {
-  const button = wrapper.findAll('button').find((item) => item.text().includes('生成 OpenSpec 工件'));
+  const button = wrapper.findAll('button').find((item) => /生成 OpenSpec 工件|更新 OpenSpec 工件/.test(item.text()));
   if (!button) {
-    throw new Error('未找到生成 OpenSpec 工件按钮');
+    throw new Error('未找到生成/更新 OpenSpec 工件按钮');
   }
   return button;
 }
@@ -1298,6 +1314,34 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     expect(ElMessage.warning).toHaveBeenCalledWith('请先生成、保存或刷新 PRD 产物');
     expect(apiClient.runAction).not.toHaveBeenCalled();
     expect(apiClient.previewActionCommand).not.toHaveBeenCalled();
+  });
+
+  it('首次生成时复用单一按钮并显示生成 OpenSpec 工件', async () => {
+    const current = workflow([
+      artifact('PRD', 'docs/172014/prd/analysis.md'),
+      artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md')
+    ]);
+    const wrapper = await mountDetail(current);
+
+    await activateImplementationStep(wrapper, '工件生成与评审');
+
+    const buttons = wrapper.findAll('button').filter((item) => /生成 OpenSpec 工件|更新 OpenSpec 工件/.test(item.text()));
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].text()).toContain('生成 OpenSpec 工件');
+  });
+
+  it('已有完整 OpenSpec 工件时复用单一按钮并显示更新 OpenSpec 工件', async () => {
+    const current = workflow([
+      artifact('PRD', 'docs/172014/prd/analysis.md'),
+      artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md')
+    ]);
+    const wrapper = await mountDetail(current, completeOpenSpecSummary());
+
+    await activateImplementationStep(wrapper, '工件生成与评审');
+
+    const buttons = wrapper.findAll('button').filter((item) => /生成 OpenSpec 工件|更新 OpenSpec 工件/.test(item.text()));
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].text()).toContain('更新 OpenSpec 工件');
   });
 
   it('缺陷生成 OpenSpec 工件时不要求也不传 PRD 文档路径', async () => {

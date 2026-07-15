@@ -644,7 +644,7 @@ export const actionTypeLabels: Record<ActionType, string> = {
   OPENSPEC_STATUS: 'OpenSpec 状态检查',
   OPENSPEC_NEW_CHANGE: '创建 OpenSpec 变更',
   OPENSPEC_INSTRUCTIONS: '读取 OpenSpec 指令',
-  OPENSPEC_FF: 'OpenSpec 快速生成',
+  OPENSPEC_FF: 'OpenSpec 工件生成/更新',
   OPENSPEC_APPLY: '应用 OpenSpec 变更',
   OPENSPEC_VERIFY: '验证 OpenSpec 变更',
   OPENSPEC_ARCHIVE: '归档 OpenSpec 变更',
