@@ -263,6 +263,76 @@ class WorkflowServiceTest {
     }
 
     @Test
+    void reviewCodeReviewApprovalAdvancesToRetrospective() {
+        PermissionService permissionService = org.mockito.Mockito.mock(PermissionService.class);
+        when(permissionService.assertProjectMember(1L, 10L)).thenReturn(project());
+        ReviewService service = new ReviewService(permissionService, requirementMapper, workflowStageMapper, reviewMapper, domainEventService);
+        RequirementEntity requirement = requirement();
+        requirement.setCurrentStage("CODE_REVIEW");
+        WorkflowStageEntity codeReviewStage = stage("CODE_REVIEW", "READY_FOR_REVIEW");
+        WorkflowStageEntity retrospectiveStage = stage("RETROSPECTIVE", "NOT_STARTED");
+        when(requirementMapper.selectById(100L)).thenReturn(requirement);
+        when(workflowStageMapper.selectOne(any())).thenReturn(codeReviewStage, retrospectiveStage);
+
+        StageReviewRequest request = new StageReviewRequest();
+        request.setRequirementPk(100L);
+        request.setStage("CODE_REVIEW");
+        request.setDecision("APPROVED");
+        service.review(1L, request);
+
+        assertThat(codeReviewStage.getStatus()).isEqualTo("APPROVED");
+        assertThat(retrospectiveStage.getStatus()).isEqualTo("DRAFT");
+        assertThat(requirement.getCurrentStage()).isEqualTo("RETROSPECTIVE");
+        assertThat(requirement.getStatus()).isEqualTo("IN_PROGRESS");
+    }
+
+    @Test
+    void reviewRetrospectiveApprovalCompletesWorkflow() {
+        PermissionService permissionService = org.mockito.Mockito.mock(PermissionService.class);
+        when(permissionService.assertProjectMember(1L, 10L)).thenReturn(project());
+        ReviewService service = new ReviewService(permissionService, requirementMapper, workflowStageMapper, reviewMapper, domainEventService);
+        RequirementEntity requirement = requirement();
+        requirement.setCurrentStage("RETROSPECTIVE");
+        WorkflowStageEntity retrospectiveStage = stage("RETROSPECTIVE", "READY_FOR_REVIEW");
+        when(requirementMapper.selectById(100L)).thenReturn(requirement);
+        when(workflowStageMapper.selectOne(any())).thenReturn(retrospectiveStage);
+
+        StageReviewRequest request = new StageReviewRequest();
+        request.setRequirementPk(100L);
+        request.setStage("RETROSPECTIVE");
+        request.setDecision("APPROVED");
+        service.review(1L, request);
+
+        assertThat(retrospectiveStage.getStatus()).isEqualTo("APPROVED");
+        assertThat(requirement.getCurrentStage()).isEqualTo("DONE");
+        assertThat(requirement.getStatus()).isEqualTo("DONE");
+    }
+
+    @Test
+    void reviewCreatesMissingRetrospectiveStageForLegacyRequirement() {
+        PermissionService permissionService = org.mockito.Mockito.mock(PermissionService.class);
+        when(permissionService.assertProjectMember(1L, 10L)).thenReturn(project());
+        ReviewService service = new ReviewService(permissionService, requirementMapper, workflowStageMapper, reviewMapper, domainEventService);
+        RequirementEntity requirement = requirement();
+        requirement.setCurrentStage("RETROSPECTIVE");
+        when(requirementMapper.selectById(100L)).thenReturn(requirement);
+        when(workflowStageMapper.selectOne(any())).thenReturn(null);
+
+        StageReviewRequest request = new StageReviewRequest();
+        request.setRequirementPk(100L);
+        request.setStage("RETROSPECTIVE");
+        request.setDecision("APPROVED");
+        service.review(1L, request);
+
+        ArgumentCaptor<WorkflowStageEntity> captor = ArgumentCaptor.forClass(WorkflowStageEntity.class);
+        verify(workflowStageMapper).insert(captor.capture());
+        assertThat(captor.getValue().getStage()).isEqualTo("RETROSPECTIVE");
+        assertThat(captor.getValue().getRequirementPk()).isEqualTo(100L);
+        assertThat(requirement.getCurrentStage()).isEqualTo("DONE");
+        assertThat(requirement.getStatus()).isEqualTo("DONE");
+    }
+
+    @Test
     void requirementServiceReturnsCenterReviews() {
         PermissionService permissionService = org.mockito.Mockito.mock(PermissionService.class);
         when(permissionService.assertProjectMember(1L, 10L)).thenReturn(project());

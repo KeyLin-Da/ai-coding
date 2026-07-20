@@ -37,8 +37,14 @@ function withWorkflowDefaults(workflow: RequirementWorkflow): RequirementWorkflo
     projects: workflow.projects || [],
     prdSourceFiles: workflow.prdSourceFiles || [],
     techDesignSourceFiles: workflow.techDesignSourceFiles || [],
+    prdSupplementBlocks: workflow.prdSupplementBlocks || [],
+    prdClarificationBlocks: workflow.prdClarificationBlocks || [],
+    techDesignSupplementBlocks: workflow.techDesignSupplementBlocks || [],
+    openSpecSupplementBlocks: workflow.openSpecSupplementBlocks || [],
+    openSpecVisualContextPaths: workflow.openSpecVisualContextPaths || [],
     stages: ensureWorkflowStages(workflow),
     retrospective: workflow.retrospective || {},
+    aiCodeCompleteness: workflow.aiCodeCompleteness,
     implementationSteps: ensureImplementationSteps(workflow.implementationSteps)
   };
 }
@@ -112,12 +118,30 @@ export class WorkflowRepository {
       const prdClarification = hasInputField(input, 'prdClarification')
         ? normalizePrdClarification(input.prdClarification)
         : existing.prdClarification;
+      const prdSupplementBlocks = hasInputField(input, 'prdSupplementBlocks')
+        ? input.prdSupplementBlocks || []
+        : existing.prdSupplementBlocks || [];
+      const prdClarificationBlocks = hasInputField(input, 'prdClarificationBlocks')
+        ? input.prdClarificationBlocks || []
+        : existing.prdClarificationBlocks || [];
       const techDesignDocument = hasInputField(input, 'techDesignDocument')
         ? input.techDesignDocument
         : existing.techDesignDocument;
       const techDesignClarification = hasInputField(input, 'techDesignClarification')
         ? input.techDesignClarification
         : existing.techDesignClarification;
+      const techDesignSupplementBlocks = hasInputField(input, 'techDesignSupplementBlocks')
+        ? input.techDesignSupplementBlocks || []
+        : existing.techDesignSupplementBlocks || [];
+      const openSpecArtifactAdjustment = hasInputField(input, 'openSpecArtifactAdjustment')
+        ? input.openSpecArtifactAdjustment
+        : existing.openSpecArtifactAdjustment;
+      const openSpecSupplementBlocks = hasInputField(input, 'openSpecSupplementBlocks')
+        ? input.openSpecSupplementBlocks || []
+        : existing.openSpecSupplementBlocks || [];
+      const openSpecVisualContextPaths = hasInputField(input, 'openSpecVisualContextPaths')
+        ? input.openSpecVisualContextPaths || []
+        : existing.openSpecVisualContextPaths || [];
       const techDesignConsumedQuestionPaths = hasInputField(input, 'techDesignConsumedQuestionPaths')
         ? input.techDesignConsumedQuestionPaths || []
         : existing.techDesignConsumedQuestionPaths || [];
@@ -136,10 +160,16 @@ export class WorkflowRepository {
         branchName,
         projects,
         prdClarification,
+        prdSupplementBlocks,
+        prdClarificationBlocks,
         techDesignDocument,
         techDesignClarification,
+        techDesignSupplementBlocks,
         techDesignConsumedQuestionPaths,
         techDesignSourceFiles,
+        openSpecArtifactAdjustment,
+        openSpecSupplementBlocks,
+        openSpecVisualContextPaths,
         sources: input.sources?.length ? input.sources : existing.sources
       });
     }
@@ -155,11 +185,17 @@ export class WorkflowRepository {
       branchName: input.branchName || defaultBranchName(requirementId, requirementType),
       projects,
       prdClarification: normalizePrdClarification(input.prdClarification),
+      prdSupplementBlocks: input.prdSupplementBlocks || [],
+      prdClarificationBlocks: input.prdClarificationBlocks || [],
       techDesignDocument: input.techDesignDocument,
       techDesignClarification: input.techDesignClarification,
+      techDesignSupplementBlocks: input.techDesignSupplementBlocks || [],
       techDesignConsumedQuestionPaths: input.techDesignConsumedQuestionPaths || [],
       prdSourceFiles: [],
       techDesignSourceFiles: input.techDesignSourceFiles || [],
+      openSpecArtifactAdjustment: input.openSpecArtifactAdjustment,
+      openSpecSupplementBlocks: input.openSpecSupplementBlocks || [],
+      openSpecVisualContextPaths: input.openSpecVisualContextPaths || [],
       sources: input.sources || [],
       currentStage: requirementType === 'DEFECT' ? 'TECH_DESIGN' : 'PRD',
       status: 'DRAFT',

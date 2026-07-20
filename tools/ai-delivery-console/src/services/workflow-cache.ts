@@ -30,6 +30,13 @@ export function loadWorkflowItemCache(requirementId: string): RequirementWorkflo
 export function normalizeWorkflowCacheItem(workflow: RequirementWorkflow): RequirementWorkflow {
   return {
     ...workflow,
+    prdSourceFiles: workflow.prdSourceFiles || [],
+    techDesignSourceFiles: workflow.techDesignSourceFiles || [],
+    prdSupplementBlocks: workflow.prdSupplementBlocks || [],
+    prdClarificationBlocks: workflow.prdClarificationBlocks || [],
+    techDesignSupplementBlocks: workflow.techDesignSupplementBlocks || [],
+    openSpecSupplementBlocks: workflow.openSpecSupplementBlocks || [],
+    openSpecVisualContextPaths: workflow.openSpecVisualContextPaths || [],
     stages: ensureWorkflowStages(workflow),
     retrospective: workflow.retrospective || {}
   };

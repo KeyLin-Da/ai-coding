@@ -8,6 +8,7 @@
 .codex/
 └── skills/           # 自定义技能
     ├── coding-database-query/   # 数据库查询工具
+    ├── coding-defect-design/    # 缺陷修复方案设计专家
     ├── coding-design/           # 技术方案设计专家
     ├── coding-junit/            # 单元测试生成专家
     ├── coding-prd-analyzer/     # PRD 分析器
@@ -27,6 +28,14 @@ tools/
 
 **输入参数：** `d=需求描述`（必填）、`r=需求编号`（必填）、`c=评审意见`（可选）  
 **输出位置：** `docs/{需求编号}/technical-design/design_review.md`
+
+---
+
+#### 🛠️ coding-defect-design - 缺陷修复方案设计专家
+面向 DEFECT 缺陷单的根因定位、影响范围评估、修复方案、验证回归和回滚预案输出。缺陷工作流跳过 PRD，直接生成技术方案。
+
+**输入参数：** `d=缺陷描述或材料路径`（必填）、`r=缺陷编号`（必填）、`p=涉及工程模块`（可选）、`c=评审意见或补充说明`（可选）  
+**输出位置：** `docs/{缺陷编号}/technical-design/design_review.md`
 
 ---
 
@@ -77,6 +86,7 @@ tools/
 **支持的技能：**
 - `coding-prd-analyzer` - PRD 分析与澄清
 - `coding-design` - 技术方案设计
+- `coding-defect-design` - 缺陷修复方案设计
 - `coding-junit` - 单元测试生成与执行
 - `coding-review` - 代码评审
 

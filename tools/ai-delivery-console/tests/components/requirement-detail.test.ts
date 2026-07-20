@@ -1,7 +1,15 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentProvider, ArtifactRef, OpenSpecSummary, RequirementWorkflow, RunRecord, TechDesignVersion } from '../../shared/workflow';
+import type {
+  AgentProvider,
+  ArtifactRef,
+  OpenSpecSummary,
+  OpenSpecVisualContextCandidate,
+  RequirementWorkflow,
+  RunRecord,
+  TechDesignVersion
+} from '../../shared/workflow';
 import { createEmptyImplementationSteps, createEmptyStages } from '../../shared/workflow';
 import RequirementDetail from '../../src/views/RequirementDetail.vue';
 import { apiClient } from '@/api/client';
@@ -23,6 +31,7 @@ vi.mock('@/api/client', () => ({
     listRequirements: vi.fn(),
     getRequirement: vi.fn(),
     getOpenSpecSummary: vi.fn(),
+    listOpenSpecVisualContextCandidates: vi.fn(),
     runAction: vi.fn(),
     getGitChanges: vi.fn(),
     getRunEvents: vi.fn(),
@@ -44,6 +53,7 @@ vi.mock('@/api/client', () => ({
     uploadPrdFiles: vi.fn(),
     deleteTechDesignFile: vi.fn(),
     deletePrdFile: vi.fn(),
+    updateSupplementInputs: vi.fn(),
     getDeliveryWorkspace: vi.fn(),
     listGitCredentials: vi.fn(),
     getProjectRepositoryStatus: vi.fn(),
@@ -51,6 +61,7 @@ vi.mock('@/api/client', () => ({
     assertRequirementWritable: vi.fn(),
     listRequirementWorkspaceStates: vi.fn(),
     submitReview: vi.fn(),
+    captureAiCodeCompletenessAiCommit: vi.fn(),
     listTechDesignVersions: vi.fn(),
     diffTechDesignVersions: vi.fn()
   }
@@ -114,6 +125,7 @@ function completeOpenSpecSummary(): OpenSpecSummary {
 
 let eventSourceUrls: string[] = [];
 let reviewDialogOpen: ReturnType<typeof vi.fn>;
+let artifactEditDialogOpen: ReturnType<typeof vi.fn>;
 
 class MockEventSource {
   onmessage: ((event: MessageEvent) => void) | null = null;
@@ -162,6 +174,18 @@ function techDesignVersions(overrides: Partial<TechDesignVersion>[] = []): TechD
     }
   ];
   return base.map((version, index) => ({ ...version, ...(overrides[index] || {}) }));
+}
+
+function visualContextCandidate(path = 'docs/172014/prd/files/menu.png'): OpenSpecVisualContextCandidate {
+  return {
+    id: `PRD_FILES:${path}`,
+    name: path.split('/').pop() || 'menu.png',
+    path,
+    source: 'PRD_FILES',
+    size: 128,
+    mimeType: 'image/png',
+    uploadedAt: '2026-07-17T00:00:00.000Z'
+  };
 }
 
 function workflow(artifacts: ArtifactRef[], startChangeApproved = true): RequirementWorkflow {
@@ -232,6 +256,14 @@ function componentStubs() {
       props: ['title', 'artifactPath'],
       template: '<div class="markdown-editor">{{ title }} {{ artifactPath }}</div>'
     },
+    ArtifactEditDialog: {
+      template: '<div />',
+      methods: {
+        open(input: any) {
+          artifactEditDialogOpen(input);
+        }
+      }
+    },
     OpenSpecDocuments: { template: '<div />' },
     ReviewDialog: {
       template: '<div />',
@@ -289,7 +321,11 @@ function componentStubs() {
       props: ['disabled'],
       template: '<button :disabled="disabled"><slot /></button>'
     },
-    ElCheckbox: { template: '<input type="checkbox" />' },
+    ElCheckbox: {
+      props: ['modelValue'],
+      emits: ['change'],
+      template: '<input type="checkbox" :checked="modelValue" @change="$emit(\'change\', $event.target.checked)" />'
+    },
     ElDescriptions: { template: '<div><slot /></div>' },
     ElDescriptionsItem: { template: '<div><slot /></div>' },
     ElDialog: {
@@ -303,11 +339,15 @@ function componentStubs() {
       emits: ['update:modelValue'],
       template: '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />'
     },
+    ElIcon: {
+      template: '<span><slot /></span>'
+    },
     ElOption: {
       props: ['label', 'value'],
       template: '<option :value="value">{{ label }}<slot /></option>'
     },
     ElProgress: { template: '<div />' },
+    ElSkeleton: { template: '<div class="skeleton-stub" />' },
     ElRadioGroup: {
       props: ['modelValue'],
       emits: ['update:modelValue'],
@@ -342,7 +382,11 @@ function componentStubs() {
   };
 }
 
-async function mountDetail(current: RequirementWorkflow, openSpecSummary: OpenSpecSummary = emptyOpenSpecSummary) {
+async function mountDetail(
+  current: RequirementWorkflow,
+  openSpecSummary: OpenSpecSummary = emptyOpenSpecSummary,
+  visualContextCandidates: OpenSpecVisualContextCandidate[] = []
+) {
   const pinia = createPinia();
   setActivePinia(pinia);
   useProjectStore(pinia).current = {
@@ -356,6 +400,7 @@ async function mountDetail(current: RequirementWorkflow, openSpecSummary: OpenSp
   vi.mocked(apiClient.listAgents).mockResolvedValue(agents);
   vi.mocked(apiClient.listRequirements).mockResolvedValue([current]);
   vi.mocked(apiClient.getOpenSpecSummary).mockResolvedValue(openSpecSummary);
+  vi.mocked(apiClient.listOpenSpecVisualContextCandidates).mockResolvedValue({ candidates: visualContextCandidates });
   vi.mocked(apiClient.getGitChanges).mockResolvedValue({
     updatedAt: new Date().toISOString(),
     files: [],
@@ -433,6 +478,7 @@ async function mountDetail(current: RequirementWorkflow, openSpecSummary: OpenSp
   vi.mocked(apiClient.uploadPrdFiles).mockResolvedValue(current);
   vi.mocked(apiClient.deleteTechDesignFile).mockResolvedValue(current);
   vi.mocked(apiClient.deletePrdFile).mockResolvedValue(current);
+  vi.mocked(apiClient.updateSupplementInputs).mockResolvedValue(current);
   vi.mocked(apiClient.assertRequirementWritable).mockResolvedValue([]);
   vi.mocked(apiClient.listRequirementWorkspaceStates).mockResolvedValue([]);
   vi.mocked(apiClient.submitReview).mockResolvedValue({
@@ -441,6 +487,7 @@ async function mountDetail(current: RequirementWorkflow, openSpecSummary: OpenSp
     stage: 'IMPLEMENTATION',
     decision: 'APPROVED'
   });
+  vi.mocked(apiClient.captureAiCodeCompletenessAiCommit).mockResolvedValue(current);
   const wrapper = mount(RequirementDetail, {
     global: {
       plugins: [pinia],
@@ -536,6 +583,42 @@ function prdClarificationButton(wrapper: ReturnType<typeof mount>) {
   return button;
 }
 
+function supplementInputButton(wrapper: ReturnType<typeof mount>) {
+  const button = wrapper.findAll('button').find((item) => /添加补充输入|编辑补充输入/.test(item.text()));
+  if (!button) {
+    throw new Error('未找到补充输入入口');
+  }
+  return button;
+}
+
+function supplementSaveButton(wrapper: ReturnType<typeof mount>) {
+  const button = wrapper.findAll('button').find((item) => item.text().includes('保存补充输入'));
+  if (!button) {
+    throw new Error('未找到保存补充输入按钮');
+  }
+  return button;
+}
+
+async function openSupplementInput(wrapper: ReturnType<typeof mount>) {
+  await supplementInputButton(wrapper).trigger('click');
+  await flushPromises();
+}
+
+function pastePayload(text: string) {
+  return {
+    preventDefault: vi.fn(),
+    clipboardData: {
+      items: [],
+      getData: (type: string) => (type === 'text/plain' ? text : '')
+    }
+  };
+}
+
+async function pasteSupplementText(wrapper: ReturnType<typeof mount>, text: string) {
+  await wrapper.find('.supplement-composer').trigger('paste', pastePayload(text));
+  await flushPromises();
+}
+
 function prdWorkflow(artifacts: ArtifactRef[], status: RequirementWorkflow['stages']['PRD']['status'] = 'DRAFT'): RequirementWorkflow {
   const current = workflow(artifacts);
   current.currentStage = 'PRD';
@@ -553,6 +636,7 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     reviewDialogOpen = vi.fn();
+    artifactEditDialogOpen = vi.fn();
     eventSourceUrls = [];
     setApiRuntimeConfig({
       centerBaseUrl: 'http://127.0.0.1:8728',
@@ -613,7 +697,7 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
 
   it('缺陷详情默认进入技术方案且不展示 PRD 阻断信息', async () => {
     const current = defectWorkflow([]);
-    const wrapper = await mountDetail(current);
+    const wrapper = await mountDetail(current, completeOpenSpecSummary());
 
     expect(wrapper.text()).toContain('技术方案');
     expect(wrapper.text()).not.toContain('需要先通过 PRD 审核');
@@ -646,7 +730,7 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     }
     steps.ARTIFACT_REVIEW.status = 'APPROVED';
     steps.APPLY.status = 'DRAFT';
-    const wrapper = await mountDetail(current);
+    const wrapper = await mountDetail(current, completeOpenSpecSummary());
     vi.mocked(apiClient.getRequirementTokenUsageSummary).mockResolvedValue({
       requirementPk: 100,
       summary: {
@@ -701,17 +785,26 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     expect(wrapper.text()).toContain('请先生成 PRD 文档后再澄清');
   });
 
-  it('已有 PRD 时通过弹窗提交 PRD 澄清且不携带 sources', async () => {
+  it('已有 PRD 时通过弹窗提交 PRD 澄清并携带来源文件', async () => {
     const current = prdWorkflow([artifact('PRD', 'docs/172014/prd/analysis.md')]);
+    current.prdSourceFiles = [
+      {
+        id: 'source-1',
+        name: 'prd-screenshot.png',
+        path: 'docs/172014/prd/files/prd-screenshot.png',
+        size: 1024,
+        mimeType: 'image/png',
+        uploadedAt: new Date().toISOString()
+      }
+    ];
     const wrapper = await mountDetail(current);
 
     await prdClarificationButton(wrapper).trigger('click');
     await flushPromises();
     expect(wrapper.text()).toContain('docs/172014/prd/analysis.md');
 
-    await wrapper.find('.prd-clarification-input').setValue('补充异常场景');
-    const submitButton = wrapper.findAll('button').find((item) => item.text().includes('提交澄清'));
-    await submitButton?.trigger('click');
+    await pasteSupplementText(wrapper, '补充异常场景');
+    await supplementSaveButton(wrapper).trigger('click');
     await flushPromises();
 
     expect(ElMessageBox.confirm).not.toHaveBeenCalled();
@@ -719,11 +812,23 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
       actionType: 'PRD_CLARIFY',
       params: {
         agentId: 'codex',
-        executionMode: 'BACKGROUND',
-        description: '补充异常场景'
+        executionMode: 'INTERACTIVE_TERMINAL',
+        description: expect.stringContaining('补充异常场景'),
+        sources: ['docs/172014/prd/files/prd-screenshot.png'],
+        supplementBlocks: expect.arrayContaining([
+          expect.objectContaining({ type: 'IMAGE', path: 'docs/172014/prd/files/prd-screenshot.png' }),
+          expect.objectContaining({ type: 'PARAGRAPH', text: '补充异常场景' })
+        ])
       }
     });
-    expect(vi.mocked(apiClient.runAction).mock.calls[0][1].params).not.toHaveProperty('sources');
+    expect(apiClient.updateSupplementInputs).toHaveBeenCalledWith(
+      '172014',
+      expect.objectContaining({
+        prdClarificationBlocks: expect.arrayContaining([
+          expect.objectContaining({ type: 'PARAGRAPH', text: '补充异常场景' })
+        ])
+      })
+    );
   });
 
   it('已审核 PRD 提交澄清前需要确认重新审核', async () => {
@@ -732,9 +837,8 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
 
     await prdClarificationButton(wrapper).trigger('click');
     await flushPromises();
-    await wrapper.find('.prd-clarification-input').setValue('补充范围边界');
-    const submitButton = wrapper.findAll('button').find((item) => item.text().includes('提交澄清'));
-    await submitButton?.trigger('click');
+    await pasteSupplementText(wrapper, '补充范围边界');
+    await supplementSaveButton(wrapper).trigger('click');
     await flushPromises();
 
     expect(ElMessageBox.confirm).toHaveBeenCalledWith(expect.stringContaining('回到待审核状态'), '确认澄清 PRD', expect.any(Object));
@@ -746,19 +850,22 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     );
   });
 
-  it('技术方案输入区集中展示补充材料、补充说明和生成动作', async () => {
+  it('技术方案输入区集中展示补充输入摘要和生成动作', async () => {
     const current = defectWorkflow([]);
     const wrapper = await mountDetail(current);
 
     const inputPanel = wrapper.find('.design-input-panel');
 
     expect(inputPanel.exists()).toBe(true);
-    expect(inputPanel.text()).toContain('补充材料');
-    expect(inputPanel.text()).toContain('补充说明');
+    expect(inputPanel.text()).toContain('增量上下文');
+    expect(inputPanel.text()).toContain('补充输入');
+    expect(inputPanel.text()).toContain('可补充文本、截图、设计稿或文件');
     expect(inputPanel.text()).toContain('技术方案答疑');
     expect(inputPanel.text()).toContain('生成技术方案');
+    expect(inputPanel.find('.design-question-card').exists()).toBe(true);
+    expect(inputPanel.find('.design-supplement-card').exists()).toBe(true);
     expect(inputPanel.find('.design-run-footer').exists()).toBe(true);
-    expect(inputPanel.find('.design-clarification').attributes('rows')).toBe('4');
+    expect(inputPanel.find('.design-clarification').exists()).toBe(false);
   });
 
   it('上传技术方案补充材料不刷新项目仓库状态', async () => {
@@ -778,10 +885,12 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
       ]
     });
     const wrapper = await mountDetail(current);
+    vi.mocked(apiClient.listRequirements).mockClear();
     vi.mocked(apiClient.listGitCredentials).mockClear();
     vi.mocked(apiClient.refreshProjectRepositoryStatus).mockClear();
     vi.mocked(apiClient.assertRequirementWritable).mockClear();
 
+    await openSupplementInput(wrapper);
     const input = wrapper.find<HTMLInputElement>('input.hidden-file-input');
     Object.defineProperty(input.element, 'files', {
       value: [new File(['# design'], '补充说明.md', { type: 'text/markdown' })],
@@ -792,17 +901,67 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
 
     expect(apiClient.uploadTechDesignFiles).toHaveBeenCalledWith('172014', expect.any(Array));
     expect(apiClient.assertRequirementWritable).toHaveBeenCalledWith(172014, '20');
+    expect(apiClient.listRequirements).not.toHaveBeenCalled();
     expect(apiClient.listGitCredentials).not.toHaveBeenCalled();
     expect(apiClient.refreshProjectRepositoryStatus).not.toHaveBeenCalled();
   });
 
-  it('缺陷生成技术方案时不传 PRD documentPath', async () => {
+  it('保存技术方案补充输入不重新加载需求列表', async () => {
+    const current = defectWorkflow([]);
+    const updated = {
+      ...current,
+      techDesignClarification: '补充缓存边界'
+    };
+    vi.mocked(apiClient.updateSupplementInputs).mockResolvedValue(updated);
+    const wrapper = await mountDetail(current);
+    vi.mocked(apiClient.listRequirements).mockClear();
+
+    await openSupplementInput(wrapper);
+    await pasteSupplementText(wrapper, '补充缓存边界');
+    await supplementSaveButton(wrapper).trigger('click');
+    await flushPromises();
+
+    expect(apiClient.updateSupplementInputs).toHaveBeenCalledWith(
+      '172014',
+      expect.objectContaining({
+        techDesignClarification: '补充缓存边界'
+      })
+    );
+    expect(apiClient.listRequirements).not.toHaveBeenCalled();
+  });
+
+  it('缺陷生成技术方案时携带补充说明且不传 PRD documentPath', async () => {
     const current = defectWorkflow([]);
     const wrapper = await mountDetail(current);
 
+    await openSupplementInput(wrapper);
+    await pasteSupplementText(wrapper, '补充缓存边界');
+    await supplementSaveButton(wrapper).trigger('click');
+    await flushPromises();
     await designButton(wrapper).trigger('click');
     await flushPromises();
 
+    expect(apiClient.runAction).toHaveBeenCalledWith(
+      '172014',
+      expect.objectContaining({
+        actionType: 'DESIGN_GENERATE',
+        params: expect.objectContaining({
+          clarification: '补充缓存边界',
+          supplementBlocks: expect.arrayContaining([
+            expect.objectContaining({ type: 'PARAGRAPH', text: '补充缓存边界' })
+          ])
+        })
+      })
+    );
+    expect(apiClient.updateSupplementInputs).toHaveBeenCalledWith(
+      '172014',
+      expect.objectContaining({
+        techDesignClarification: '补充缓存边界',
+        techDesignSupplementBlocks: expect.arrayContaining([
+          expect.objectContaining({ type: 'PARAGRAPH', text: '补充缓存边界' })
+        ])
+      })
+    );
     expect(apiClient.runAction).toHaveBeenCalledWith(
       '172014',
       expect.objectContaining({
@@ -813,6 +972,31 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
       })
     );
     expect(ElMessage.warning).not.toHaveBeenCalledWith('请先通过 PRD 审核');
+  });
+
+  it('技术方案补充弹框展示已成功消费的历史快照', async () => {
+    const current = defectWorkflow([]);
+    current.runs = [
+      {
+        id: 'run-design-history',
+        requirementId: '172014',
+        actionType: 'DESIGN_GENERATE',
+        stage: 'TECH_DESIGN',
+        status: 'SUCCEEDED',
+        startedAt: '2026-07-17T09:00:00.000Z',
+        finishedAt: '2026-07-17T09:02:00.000Z',
+        params: {
+          supplementInputPath: 'docs/172014/workflow/supplements/20260717090000-design_generate-run-design-history.md'
+        }
+      }
+    ];
+    const wrapper = await mountDetail(current);
+
+    await openSupplementInput(wrapper);
+
+    expect(wrapper.text()).toContain('历史输入');
+    expect(wrapper.text()).toContain('技术方案生成');
+    expect(wrapper.text()).toContain('20260717090000-design_generate-run-design-history.md');
   });
 
   it('当前用户项目仓 DIRTY 时仍允许继续执行自己的工作流动作', async () => {
@@ -837,7 +1021,7 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     expect(ElMessage.warning).not.toHaveBeenCalledWith('项目产物仓存在未同步变更，请先公开同步或清理后再继续流程动作');
   });
 
-  it('技术方案编辑器在仅有补充材料时指向正式设计文档默认路径', async () => {
+  it('技术方案产物卡片在仅有补充材料时指向正式设计文档默认路径', async () => {
     const current = defectWorkflow([
       artifact('TECH_DESIGN', 'docs/172014/technical-design/file/screenshot.png', {
         id: 'technical-design-source-1',
@@ -846,13 +1030,24 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     ]);
     const wrapper = await mountDetail(current);
 
-    const editor = wrapper.findAll('.markdown-editor').find((item) => item.text().includes('技术方案'));
+    const card = wrapper.find('.artifact-edit-card');
+    const editButton = card.findAll('button').find((item) => item.text().includes('编辑'));
+    if (!editButton) {
+      throw new Error('未找到技术方案编辑按钮');
+    }
 
-    expect(editor?.text()).toContain('docs/172014/technical-design/design_review.md');
-    expect(editor?.text()).not.toContain('docs/172014/technical-design/file/screenshot.png');
+    expect(card.text()).toContain('docs/172014/technical-design/design_review.md');
+    expect(card.text()).not.toContain('docs/172014/technical-design/file/screenshot.png');
+    await editButton.trigger('click');
+    expect(artifactEditDialogOpen).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: '技术方案',
+        artifactPath: 'docs/172014/technical-design/design_review.md'
+      })
+    );
   });
 
-  it('技术方案编辑器在正式文档存在时渲染正式文档', async () => {
+  it('技术方案产物卡片在正式文档存在时展示正式文档', async () => {
     const current = defectWorkflow([
       artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md', {
         id: 'technical-design'
@@ -860,12 +1055,12 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     ]);
     const wrapper = await mountDetail(current);
 
-    const editor = wrapper.findAll('.markdown-editor').find((item) => item.text().includes('技术方案'));
+    const card = wrapper.find('.artifact-edit-card');
 
-    expect(editor?.text()).toContain('docs/172014/technical-design/design_review.md');
+    expect(card.text()).toContain('docs/172014/technical-design/design_review.md');
   });
 
-  it('技术方案正式文档和补充材料共存时编辑器仍渲染正式文档且材料列表可见', async () => {
+  it('技术方案正式文档和补充材料共存时产物卡片仍展示正式文档且摘要可见', async () => {
     const current = defectWorkflow([
       artifact('TECH_DESIGN', 'docs/172014/technical-design/file/screenshot.png', {
         id: 'technical-design-source-1',
@@ -886,11 +1081,11 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     ];
     const wrapper = await mountDetail(current);
 
-    const editor = wrapper.findAll('.markdown-editor').find((item) => item.text().includes('技术方案'));
+    const card = wrapper.find('.artifact-edit-card');
 
-    expect(editor?.text()).toContain('docs/172014/technical-design/design_review.md');
-    expect(editor?.text()).not.toContain('docs/172014/technical-design/file/screenshot.png');
-    expect(wrapper.text()).toContain('screenshot.png');
+    expect(card.text()).toContain('docs/172014/technical-design/design_review.md');
+    expect(card.text()).not.toContain('docs/172014/technical-design/file/screenshot.png');
+    expect(wrapper.text()).toContain('图片 1 张');
   });
 
   it('普通需求发起技术方案答疑时传入 PRD 和正式方案，并由后端生成输出路径', async () => {
@@ -1357,12 +1552,13 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
       expect.objectContaining({
         actionType: 'OPENSPEC_FF',
         params: expect.objectContaining({
-          documentPath: 'docs/172014/technical-design/design_review.md',
-          baseTechDesignVersionId: 'snapshot:base',
-          targetTechDesignVersionId: 'current'
+          documentPath: 'docs/172014/technical-design/design_review.md'
         })
       })
     );
+    const params = vi.mocked(apiClient.runAction).mock.calls[0][1].params || {};
+    expect(params).not.toHaveProperty('baseTechDesignVersionId');
+    expect(params).not.toHaveProperty('targetTechDesignVersionId');
     expect(apiClient.runAction).toHaveBeenCalledWith(
       '172014',
       expect.objectContaining({
@@ -1387,15 +1583,28 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     expect(apiClient.previewActionCommand).not.toHaveBeenCalled();
   });
 
-  it('生成 OpenSpec 工件时提交技术方案版本和调整说明', async () => {
+  it('更新 OpenSpec 工件时提交技术方案版本和调整说明', async () => {
     const current = workflow([
       artifact('PRD', 'docs/172014/prd/analysis.md'),
       artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md')
     ]);
-    const wrapper = await mountDetail(current);
+    current.techDesignSourceFiles = [
+      {
+        id: 'file-1',
+        name: 'supplement.md',
+        path: 'docs/172014/technical-design/file/supplement.md',
+        size: 128,
+        mimeType: 'text/markdown',
+        uploadedAt: new Date().toISOString()
+      }
+    ];
+    const wrapper = await mountDetail(current, completeOpenSpecSummary());
 
     await activateImplementationStep(wrapper, '工件生成与评审');
-    await wrapper.find('.openspec-adjustment-input').setValue('只按新增差异增量更新 tasks');
+    await openSupplementInput(wrapper);
+    await pasteSupplementText(wrapper, '只按新增差异增量更新 tasks');
+    await supplementSaveButton(wrapper).trigger('click');
+    await flushPromises();
     await openSpecArtifactButton(wrapper).trigger('click');
     await flushPromises();
 
@@ -1406,9 +1615,94 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
         params: expect.objectContaining({
           prdDocumentPath: 'docs/172014/prd/analysis.md',
           documentPath: 'docs/172014/technical-design/design_review.md',
+          sourceFiles: [],
           baseTechDesignVersionId: 'snapshot:base',
           targetTechDesignVersionId: 'current',
-          artifactAdjustment: '只按新增差异增量更新 tasks'
+          artifactAdjustment: expect.stringContaining('只按新增差异增量更新 tasks'),
+          supplementBlocks: expect.arrayContaining([
+            expect.objectContaining({ type: 'PARAGRAPH', text: '只按新增差异增量更新 tasks' })
+          ])
+        })
+      })
+    );
+    expect(apiClient.updateSupplementInputs).toHaveBeenCalledWith(
+      '172014',
+      expect.objectContaining({
+        openSpecArtifactAdjustment: expect.stringContaining('只按新增差异增量更新 tasks'),
+        openSpecSupplementBlocks: expect.arrayContaining([
+          expect.objectContaining({ type: 'PARAGRAPH', text: '只按新增差异增量更新 tasks' })
+        ])
+      })
+    );
+  });
+
+  it('未选择视觉上下文时不通过工件补充输入默认携带技术方案图片', async () => {
+    const current = workflow([
+      artifact('PRD', 'docs/172014/prd/analysis.md'),
+      artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md')
+    ]);
+    current.techDesignSourceFiles = [
+      {
+        id: 'image-1',
+        name: 'ui.png',
+        path: 'docs/172014/technical-design/file/ui.png',
+        size: 256,
+        mimeType: 'image/png',
+        uploadedAt: new Date().toISOString()
+      }
+    ];
+    const wrapper = await mountDetail(current);
+
+    await activateImplementationStep(wrapper, '工件生成与评审');
+    await openSpecArtifactButton(wrapper).trigger('click');
+    await flushPromises();
+
+    expect(apiClient.runAction).toHaveBeenCalledWith(
+      '172014',
+      expect.objectContaining({
+        actionType: 'OPENSPEC_FF',
+        params: expect.objectContaining({
+          sourceFiles: [],
+          visualContextFiles: []
+        })
+      })
+    );
+    expect(JSON.stringify(vi.mocked(apiClient.runAction).mock.calls.at(-1)?.[1])).not.toContain('docs/172014/technical-design/file/ui.png');
+  });
+
+  it('OpenSpec 工件补充输入显式保存的文件仍会进入 sourceFiles', async () => {
+    const current = workflow([
+      artifact('PRD', 'docs/172014/prd/analysis.md'),
+      artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md')
+    ]);
+    current.openSpecSupplementBlocks = [
+      {
+        id: 'openspec-file-1',
+        type: 'FILE',
+        fileId: 'file-1',
+        name: 'manual.md',
+        path: 'docs/172014/technical-design/file/manual.md',
+        size: 128,
+        mimeType: 'text/markdown',
+        contextRole: 'ATTACHMENT',
+        status: 'READY'
+      }
+    ];
+    const wrapper = await mountDetail(current);
+
+    await activateImplementationStep(wrapper, '工件生成与评审');
+    await openSpecArtifactButton(wrapper).trigger('click');
+    await flushPromises();
+
+    expect(apiClient.runAction).toHaveBeenCalledWith(
+      '172014',
+      expect.objectContaining({
+        actionType: 'OPENSPEC_FF',
+        params: expect.objectContaining({
+          sourceFiles: ['docs/172014/technical-design/file/manual.md'],
+          supplementBlocks: expect.arrayContaining([
+            expect.objectContaining({ type: 'FILE', path: 'docs/172014/technical-design/file/manual.md' })
+          ])
         })
       })
     );
@@ -1419,7 +1713,7 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
       artifact('PRD', 'docs/172014/prd/analysis.md'),
       artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md')
     ]);
-    const wrapper = await mountDetail(current);
+    const wrapper = await mountDetail(current, completeOpenSpecSummary());
 
     await activateImplementationStep(wrapper, '工件生成与评审');
     await flushPromises();
@@ -1434,6 +1728,13 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
 
     expect(wrapper.findAll('.tech-design-version-select')).toHaveLength(2);
     expect(wrapper.text()).toContain('恢复自动');
+
+    await wrapper.find('.openspec-restore-base-button').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.findAll('.tech-design-version-select')).toHaveLength(1);
+    expect(wrapper.text()).toContain('自动基线');
+    expect(wrapper.text()).not.toContain('恢复自动');
   });
 
   it('默认使用最近一次未失败 OpenSpec 工件目标版本作为基线', async () => {
@@ -1470,7 +1771,7 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
         {}
       ])
     });
-    const wrapper = await mountDetail(current);
+    const wrapper = await mountDetail(current, completeOpenSpecSummary());
 
     await activateImplementationStep(wrapper, '工件生成与评审');
     await openSpecArtifactButton(wrapper).trigger('click');
@@ -1488,18 +1789,21 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     );
   });
 
-  it('基线和目标版本一致但有调整说明时仍允许生成 OpenSpec 工件', async () => {
+  it('基线和目标版本一致但有调整说明时仍允许更新 OpenSpec 工件', async () => {
     const current = workflow([
       artifact('PRD', 'docs/172014/prd/analysis.md'),
       artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md')
     ]);
-    const wrapper = await mountDetail(current);
+    const wrapper = await mountDetail(current, completeOpenSpecSummary());
 
     await activateImplementationStep(wrapper, '工件生成与评审');
     await wrapper.find('.openspec-edit-base-button').trigger('click');
     await flushPromises();
     await wrapper.findAll('.tech-design-version-select')[0].setValue('current');
-    await wrapper.find('.openspec-adjustment-input').setValue('仅按人工说明更新 proposal');
+    await openSupplementInput(wrapper);
+    await pasteSupplementText(wrapper, '仅按人工说明更新 proposal');
+    await supplementSaveButton(wrapper).trigger('click');
+    await flushPromises();
     await openSpecArtifactButton(wrapper).trigger('click');
     await flushPromises();
 
@@ -1510,13 +1814,116 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
         params: expect.objectContaining({
           baseTechDesignVersionId: 'current',
           targetTechDesignVersionId: 'current',
-          artifactAdjustment: '仅按人工说明更新 proposal'
+          artifactAdjustment: '仅按人工说明更新 proposal',
+          supplementBlocks: expect.arrayContaining([
+            expect.objectContaining({ type: 'PARAGRAPH', text: '仅按人工说明更新 proposal' })
+          ])
         })
       })
     );
   });
 
-  it('基线和目标版本一致且无调整说明时阻止 OpenSpec 工件生成', async () => {
+  it('视觉上下文选择会保存并进入 OpenSpec 工件生成参数', async () => {
+    const image = visualContextCandidate();
+    const current = workflow([
+      artifact('PRD', 'docs/172014/prd/analysis.md'),
+      artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md')
+    ]);
+    const updated = {
+      ...current,
+      openSpecVisualContextPaths: [image.path]
+    };
+    const wrapper = await mountDetail(current, completeOpenSpecSummary(), [image]);
+    vi.mocked(apiClient.updateSupplementInputs).mockResolvedValue(updated);
+
+    await activateImplementationStep(wrapper, '工件生成与评审');
+    await wrapper.find('.openspec-edit-base-button').trigger('click');
+    await flushPromises();
+    await wrapper.findAll('.tech-design-version-select')[0].setValue('current');
+    await wrapper.find('.visual-context-open-button').trigger('click');
+    await wrapper.find('.visual-context-select input').setValue(true);
+    expect(apiClient.updateSupplementInputs).not.toHaveBeenCalled();
+    await wrapper.find('.visual-context-confirm-button').trigger('click');
+    await flushPromises();
+    await openSpecArtifactButton(wrapper).trigger('click');
+    await flushPromises();
+
+    expect(apiClient.updateSupplementInputs).toHaveBeenCalledWith('172014', {
+      openSpecVisualContextPaths: [image.path]
+    });
+    expect(apiClient.runAction).toHaveBeenCalledWith(
+      '172014',
+      expect.objectContaining({
+        actionType: 'OPENSPEC_FF',
+        params: expect.objectContaining({
+          baseTechDesignVersionId: 'current',
+          targetTechDesignVersionId: 'current',
+          visualContextFiles: [image.path]
+        })
+      })
+    );
+  });
+
+  it('OpenSpec 工件生成成功后清空视觉上下文选择', async () => {
+    const image = visualContextCandidate();
+    const current = workflow([
+      artifact('PRD', 'docs/172014/prd/analysis.md'),
+      artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md')
+    ]);
+    current.openSpecVisualContextPaths = [image.path];
+    const wrapper = await mountDetail(current, emptyOpenSpecSummary, [image]);
+    vi.mocked(apiClient.runAction).mockResolvedValue({
+      run: {
+        id: 'run-ff-success',
+        requirementId: '172014',
+        actionType: 'OPENSPEC_FF',
+        stage: 'IMPLEMENTATION',
+        implementationStep: 'ARTIFACT_REVIEW',
+        status: 'SUCCEEDED',
+        startedAt: new Date().toISOString(),
+        params: {}
+      },
+      workflow: current
+    });
+
+    await activateImplementationStep(wrapper, '工件生成与评审');
+    expect(wrapper.text()).toContain('已选 1');
+    await openSpecArtifactButton(wrapper).trigger('click');
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('已选 0');
+  });
+
+  it('OpenSpec 工件生成失败时保留视觉上下文选择', async () => {
+    const image = visualContextCandidate();
+    const current = workflow([
+      artifact('PRD', 'docs/172014/prd/analysis.md'),
+      artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md')
+    ]);
+    current.openSpecVisualContextPaths = [image.path];
+    const wrapper = await mountDetail(current, emptyOpenSpecSummary, [image]);
+    vi.mocked(apiClient.runAction).mockResolvedValue({
+      run: {
+        id: 'run-ff-failed',
+        requirementId: '172014',
+        actionType: 'OPENSPEC_FF',
+        stage: 'IMPLEMENTATION',
+        implementationStep: 'ARTIFACT_REVIEW',
+        status: 'FAILED',
+        startedAt: new Date().toISOString(),
+        params: {}
+      },
+      workflow: current
+    });
+
+    await activateImplementationStep(wrapper, '工件生成与评审');
+    await openSpecArtifactButton(wrapper).trigger('click');
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('已选 1');
+  });
+
+  it('首次生成 OpenSpec 工件时基线和目标版本一致也不拦截', async () => {
     const current = workflow([
       artifact('PRD', 'docs/172014/prd/analysis.md'),
       artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md')
@@ -1530,7 +1937,37 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     await openSpecArtifactButton(wrapper).trigger('click');
     await flushPromises();
 
-    expect(ElMessage.warning).toHaveBeenCalledWith('基线和目标版本一致，请填写工件调整说明或选择不同版本');
+    expect(ElMessage.warning).not.toHaveBeenCalledWith('基线和目标版本一致，请填写工件调整说明、选择视觉上下文、上传补充材料或选择不同版本');
+    expect(apiClient.runAction).toHaveBeenCalledWith(
+      '172014',
+      expect.objectContaining({
+        actionType: 'OPENSPEC_FF',
+        params: expect.objectContaining({
+          prdDocumentPath: 'docs/172014/prd/analysis.md',
+          documentPath: 'docs/172014/technical-design/design_review.md'
+        })
+      })
+    );
+    const params = vi.mocked(apiClient.runAction).mock.calls[0][1].params || {};
+    expect(params).not.toHaveProperty('baseTechDesignVersionId');
+    expect(params).not.toHaveProperty('targetTechDesignVersionId');
+  });
+
+  it('已有完整 OpenSpec 工件时基线和目标版本一致且无调整说明会阻止更新', async () => {
+    const current = workflow([
+      artifact('PRD', 'docs/172014/prd/analysis.md'),
+      artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md')
+    ]);
+    const wrapper = await mountDetail(current, completeOpenSpecSummary());
+
+    await activateImplementationStep(wrapper, '工件生成与评审');
+    await wrapper.find('.openspec-edit-base-button').trigger('click');
+    await flushPromises();
+    await wrapper.findAll('.tech-design-version-select')[0].setValue('current');
+    await openSpecArtifactButton(wrapper).trigger('click');
+    await flushPromises();
+
+    expect(ElMessage.warning).toHaveBeenCalledWith('基线和目标版本一致，请填写工件调整说明、选择视觉上下文、上传补充材料或选择不同版本');
     expect(apiClient.runAction).not.toHaveBeenCalled();
   });
 
@@ -1548,7 +1985,7 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
       artifact('PRD', 'docs/172014/prd/analysis.md'),
       artifact('TECH_DESIGN', 'docs/172014/technical-design/design_review.md')
     ]);
-    const wrapper = await mountDetail(current);
+    const wrapper = await mountDetail(current, completeOpenSpecSummary());
 
     await activateImplementationStep(wrapper, '工件生成与评审');
     await wrapper.findAll('.tech-design-version-select')[0].setValue('current');
@@ -1598,12 +2035,13 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
         actionType: 'OPENSPEC_FF',
         params: expect.objectContaining({
           prdDocumentPath: 'docs/172014/prd/analysis.md',
-          documentPath: 'docs/172014/technical-design/design_review.md',
-          baseTechDesignVersionId: 'snapshot:base',
-          targetTechDesignVersionId: 'current'
+          documentPath: 'docs/172014/technical-design/design_review.md'
         })
       })
     );
+    const params = vi.mocked(apiClient.previewActionCommand).mock.calls[0][1].params || {};
+    expect(params).not.toHaveProperty('baseTechDesignVersionId');
+    expect(params).not.toHaveProperty('targetTechDesignVersionId');
     expect(apiClient.runAction).not.toHaveBeenCalled();
     expect(ElMessage.success).toHaveBeenCalledWith('命令已复制');
   });
@@ -1769,6 +2207,36 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
     await flushPromises();
 
     expect(reviewDialogOpen).toHaveBeenLastCalledWith('IMPLEMENTATION', undefined, 'CHANGE_INSPECTION', '172014', 100);
+  });
+
+  it('查看变更审核通过后触发远程 aiCommit 捕获', async () => {
+    const current = workflow([]);
+    current.id = 100;
+    current.currentStage = 'IMPLEMENTATION';
+    current.implementationSteps.START_CHANGE.status = 'APPROVED';
+    current.implementationSteps.ARTIFACT_REVIEW.status = 'APPROVED';
+    current.implementationSteps.APPLY.status = 'APPROVED';
+    current.implementationSteps.CHANGE_INSPECTION.status = 'DRAFT';
+    const wrapper = await mountDetail(current);
+
+    await (wrapper.vm as any).submitReview({
+      stage: 'IMPLEMENTATION',
+      implementationStep: 'CHANGE_INSPECTION',
+      decision: 'APPROVED',
+      comment: ''
+    });
+    await flushPromises();
+
+    expect(apiClient.submitReview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requirementId: '172014',
+        requirementPk: 100,
+        stage: 'IMPLEMENTATION',
+        implementationStep: 'CHANGE_INSPECTION',
+        decision: 'APPROVED'
+      })
+    );
+    expect(apiClient.captureAiCodeCompletenessAiCommit).toHaveBeenCalledWith('172014');
   });
 
   it('代码评审默认使用 commit 正式评审模式', async () => {
@@ -2100,7 +2568,7 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
         actionType: 'RETROSPECTIVE_GENERATE',
         params: expect.objectContaining({
           agentId: 'codex',
-          executionMode: 'BACKGROUND',
+          executionMode: 'INTERACTIVE_TERMINAL',
           branchName: 'feature/opp-172014'
         })
       })

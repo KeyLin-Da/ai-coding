@@ -113,6 +113,24 @@ class ArtifactGitSyncServiceTest {
         assertThat(reviewCaptor.getValue().getDecision()).isEqualTo("APPROVED");
     }
 
+    @Test
+    void completeCreatesRetrospectiveArtifactKindFromPath() {
+        when(requirementMapper.selectById(100L)).thenReturn(requirement());
+        when(artifactMapper.selectOne(any())).thenReturn(null);
+        when(artifactGitVersionMapper.selectList(any())).thenReturn(Collections.emptyList());
+        ArtifactGitSyncCompleteRequest request = request();
+        request.setStage("RETROSPECTIVE");
+        request.getFiles().get(0).setPath("docs/172014/retrospective/summary.md");
+
+        service.complete(1L, 100L, request);
+
+        ArgumentCaptor<ArtifactEntity> artifactCaptor = ArgumentCaptor.forClass(ArtifactEntity.class);
+        verify(artifactMapper).insert(artifactCaptor.capture());
+        assertThat(artifactCaptor.getValue().getStage()).isEqualTo("RETROSPECTIVE");
+        assertThat(artifactCaptor.getValue().getKind()).isEqualTo("RETROSPECTIVE");
+        assertThat(artifactCaptor.getValue().getLogicalPath()).isEqualTo("docs/172014/retrospective/summary.md");
+    }
+
     private ArtifactGitSyncCompleteRequest request() {
         ArtifactGitSyncFileRequest file = new ArtifactGitSyncFileRequest();
         file.setPath("docs/172014/prd/analysis.md");

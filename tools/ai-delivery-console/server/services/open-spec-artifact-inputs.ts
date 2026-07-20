@@ -18,11 +18,11 @@ function isOpenSpecFastForward(action: ActionInput): boolean {
 }
 
 function hasVersionContextParams(params: Record<string, unknown>): boolean {
-  return Boolean(
-    asString(params.baseTechDesignVersionId) ||
-      asString(params.targetTechDesignVersionId) ||
-      asString(params.artifactAdjustment)
-  );
+  return Boolean(asString(params.baseTechDesignVersionId) || asString(params.targetTechDesignVersionId));
+}
+
+function hasVisualContextParams(params: Record<string, unknown>): boolean {
+  return Array.isArray(params.visualContextFiles) && params.visualContextFiles.some((item) => typeof item === 'string' && item.trim());
 }
 
 function latestOpenSpecTargetVersion(workflow: RequirementWorkflow): string {
@@ -128,11 +128,12 @@ export async function prepareOpenSpecArtifactAction(
   const versions = await listTechDesignVersions(workspaceRoot, requirementId);
   const baseVersionId = asString(params.baseTechDesignVersionId, latestOpenSpecTargetVersion(workflow)) || fallbackBaseVersion(versions, targetVersionId);
   const adjustment = asString(params.artifactAdjustment);
+  const hasVisualContext = hasVisualContextParams(params);
   if (!baseVersionId) {
     throw new Error('缺少可用的技术方案基线版本');
   }
-  if (baseVersionId === targetVersionId && !adjustment) {
-    throw new Error('技术方案基线版本和目标版本一致，请填写工件调整说明或选择不同版本');
+  if (baseVersionId === targetVersionId && !adjustment && !hasVisualContext) {
+    throw new Error('技术方案基线版本和目标版本一致，请填写工件调整说明、选择视觉上下文或选择不同版本');
   }
 
   const [baseContent, targetContent, diffResult] = await Promise.all([
@@ -143,8 +144,8 @@ export async function prepareOpenSpecArtifactAction(
       rightVersionId: targetVersionId
     })
   ]);
-  if (baseContent.version.contentHash === targetContent.version.contentHash && !adjustment) {
-    throw new Error('技术方案基线和目标内容一致，请填写工件调整说明或选择不同版本');
+  if (baseContent.version.contentHash === targetContent.version.contentHash && !adjustment && !hasVisualContext) {
+    throw new Error('技术方案基线和目标内容一致，请填写工件调整说明、选择视觉上下文或选择不同版本');
   }
   const capturedAt = new Date().toISOString();
   const content = renderContextMarkdown({

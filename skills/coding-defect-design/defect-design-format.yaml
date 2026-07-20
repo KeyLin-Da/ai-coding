@@ -1,0 +1,62 @@
+---
+name: coding-defect-design-yaml-format
+description: 缺陷修复技术方案格式规范
+version: "1.0"
+
+required_sections:
+  - review_version #评审版本
+  - revision_history #修订记录
+  - defect_summary #缺陷概述
+  - evidence_chain #证据链
+  - root_cause_analysis #根因分析
+  - fix_plan #修复方案
+  - api_and_contract_changes #接口与契约变更
+  - data_config_cache_mq_changes #数据配置缓存MQ变更
+  - impact_analysis #影响分析
+  - risk_and_rollback #风险与回滚
+  - verification_plan #验证计划
+  - unit_test #单元测试
+  - pending_questions #待确认问题
+
+section_descriptions:
+  review_version:
+    - "文档标题下方必须包含 `评审版本: vX.Y`，首次生成使用 v1.0，刷新或二次评审按旧版本递增"
+    - "版本号用于控制台技术方案版本列表和版本对比展示，不得省略"
+  revision_history:
+    - "必须放在正文分析章节之前，包含表头：版本、日期、修订人、修订类型、修订内容、修订依据、影响章节"
+    - "首次生成写入 v1.0 记录；每次刷新或二次评审在表格顶部新增记录并保留历史记录"
+    - "如果旧方案缺少修订记录，需要补齐修订记录，并将旧内容作为旧基线说明"
+  defect_summary:
+    - "说明缺陷现象、影响范围、发生环境、发生频率、严重等级、关联版本/分支、用户/租户/门店等范围信息"
+    - "列出期望结果、实际结果、复现步骤和当前止血状态"
+  evidence_chain:
+    - "用表格记录证据：证据来源、关键信息、支持的判断、证据状态（已验证/推断/待确认）"
+    - "包含日志、TraceId、接口请求响应、截图、监控、数据库样本、代码位置、配置项等"
+  root_cause_analysis:
+    - "说明从入口到异常点的调用链路，建议使用 Mermaid sequenceDiagram 或 flowchart"
+    - "列出根因假设、验证方式、验证结果和最终根因,并贴上有问题代码"
+    - "如果根因未完全验证，必须标注剩余不确定性"
+  fix_plan:
+    - "列出推荐修复方案，包括修改文件/类/方法、关键逻辑、兼容策略、幂等处理、异常处理"
+    - "如有多个方案，说明对比、取舍和推荐原因"
+    - "明确是否需要历史数据订正、配置调整、缓存清理或补偿任务"
+  api_and_contract_changes:
+    - "涉及接口、Feign、DTO、枚举、错误码、前端路由或第三方契约变化时必须列出"
+    - "如果无契约变化，明确写明无接口契约变更"
+  data_config_cache_mq_changes:
+    - "说明 SQL、索引、Nacos 配置、Redis Key、MQ Topic/Tag、定时任务、分布式锁等变化"
+    - "数据修复只给方案和 SQL 草案，不直接执行"
+  impact_analysis:
+    - "评估受影响工程、接口、任务、数据表、缓存、消息、上下游系统和用户范围"
+    - "说明普通场景、边界场景、历史数据和灰度发布影响"
+  risk_and_rollback:
+    - "列出发布风险、数据风险、兼容风险、性能风险和监控指标"
+    - "提供止血、回滚、配置开关、缓存恢复、数据回滚或补偿方案"
+  verification_plan:
+    - "包含缺陷复现用例、修复验证用例、回归用例、异常分支、并发/幂等验证和线上观察点"
+    - "明确验证数据准备、预期结果和通过标准"
+  unit_test:
+    - "列出建议新增或调整的单元测试类、测试方法、Mock 对象、覆盖场景和预期断言"
+    - "缺陷必须至少覆盖一个复现失败场景和一个修复后成功场景"
+  pending_questions:
+    - "列出待确认问题：序号、问题描述、提出原因、影响范围、期望澄清方、未确认时的处理建议"

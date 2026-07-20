@@ -47,6 +47,7 @@ public class ImportService {
     private static final String STATUS_CONFLICTED = "CONFLICTED";
     private static final String STATUS_FAILED = "FAILED";
     private static final String STATUS_SKIPPED = "SKIPPED";
+    private static final String[] DEFAULT_STAGES = {"PRD", "TECH_DESIGN", "IMPLEMENTATION", "CODE_REVIEW", "RETROSPECTIVE"};
 
     private final PermissionService permissionService;
     private final ImportSessionMapper importSessionMapper;
@@ -331,7 +332,7 @@ public class ImportService {
     }
 
     private void ensureDefaultStages(RequirementEntity requirement) {
-        for (String stageName : new String[] {"PRD", "TECH_DESIGN", "IMPLEMENTATION", "CODE_REVIEW"}) {
+        for (String stageName : DEFAULT_STAGES) {
             WorkflowStageEntity stage = workflowStageMapper.selectOne(new LambdaQueryWrapper<WorkflowStageEntity>()
                 .eq(WorkflowStageEntity::getRequirementPk, requirement.getId())
                 .eq(WorkflowStageEntity::getStage, stageName)
@@ -340,11 +341,21 @@ public class ImportService {
                 stage = new WorkflowStageEntity();
                 stage.setRequirementPk(requirement.getId());
                 stage.setStage(stageName);
-                stage.setStatus(stageName.equals(requirement.getCurrentStage()) ? "DRAFT" : "NOT_STARTED");
+                stage.setStatus(defaultMissingStageStatus(requirement, stageName));
                 stage.setVersion(0L);
                 workflowStageMapper.insert(stage);
             }
         }
+    }
+
+    private String defaultMissingStageStatus(RequirementEntity requirement, String stageName) {
+        if ("PRD".equals(stageName) && "DEFECT".equals(requirement.getRequirementType())) {
+            return "SKIPPED";
+        }
+        if ("RETROSPECTIVE".equals(stageName) && ("DONE".equals(requirement.getCurrentStage()) || "DONE".equals(requirement.getStatus()))) {
+            return "SKIPPED";
+        }
+        return stageName.equals(requirement.getCurrentStage()) ? "DRAFT" : "NOT_STARTED";
     }
 
     private ImportRecordResultVO saveItem(

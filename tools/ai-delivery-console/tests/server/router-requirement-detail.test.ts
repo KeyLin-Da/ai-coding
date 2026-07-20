@@ -8,6 +8,8 @@ import {
   applyImplementationRun,
   applyPrdClarificationRun,
   captureTechDesignInputSnapshot,
+  consumeOpenSpecArtifactInputsAfterRun,
+  consumePrdAnalyzeInputsAfterRun,
   consumeTechDesignInputsAfterRun,
   createRouter,
   finalizeSuccessfulTechDesignMemoryFeedback,
@@ -156,6 +158,26 @@ function techDesignConsumptionWorkflow(): RequirementWorkflow {
       }
     ],
     techDesignClarification: '补充异常场景',
+    techDesignSupplementBlocks: [
+      { id: 'td-p', type: 'PARAGRAPH', text: '补充异常场景' },
+      {
+        id: 'td-file',
+        type: 'FILE',
+        fileId: 'file-1',
+        name: '补充材料.md',
+        path: 'docs/172014/technical-design/file/file-1.md',
+        size: 100
+      },
+      {
+        id: 'td-inline-image',
+        type: 'IMAGE',
+        fileId: 'inline-1',
+        name: 'pasted-20260717090000-1.png',
+        path: 'docs/172014/technical-design/file/pasted-20260717090000-1.png',
+        size: 200,
+        contextRole: 'INLINE'
+      }
+    ],
     runs: [],
     reviews: [],
     issues: []
@@ -178,6 +200,27 @@ function designGenerateRun(status: RunRecord['status']): RunRecord {
         'docs/172014/technical-design/questions/20260604-173000-question.md',
         'docs/172014/technical-design/questions/20260605-101500-question.md',
         'docs/172014/technical-design/file/file-1.md'
+      ],
+      supplementBlocks: [
+        { id: 'td-p', type: 'PARAGRAPH', text: '补充异常场景' },
+        {
+          id: 'td-file',
+          type: 'FILE',
+          fileId: 'file-1',
+          name: '补充材料.md',
+          path: 'docs/172014/technical-design/file/file-1.md',
+          size: 100,
+          contextRole: 'ATTACHMENT'
+        },
+        {
+          id: 'td-inline-image',
+          type: 'IMAGE',
+          fileId: 'inline-1',
+          name: 'pasted-20260717090000-1.png',
+          path: 'docs/172014/technical-design/file/pasted-20260717090000-1.png',
+          size: 200,
+          contextRole: 'INLINE'
+        }
       ]
     }
   };
@@ -267,6 +310,67 @@ describe('router requirement detail', () => {
       { name: 'opp-learn', path: oppLearnPath }
     ]);
     expect(saved?.projects).toEqual(body.data.projects);
+  });
+
+  it('保存图文补充输入 blocks 到本地 workflow', async () => {
+    const workspaceRoot = await tmpDir('ai-delivery-supplement-inputs-');
+    const repository = new WorkflowRepository(workspaceRoot);
+    await repository.upsert({
+      id: 100,
+      requirementId: '172014',
+      title: '定位菜单'
+    });
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/ai-delivery/requirements/100/workspace-states/assert-writable') {
+        return centerResponse([]);
+      }
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ success: false, message: 'not found' })
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchImpl);
+
+    const router = createRouter(workspaceRoot);
+    const result = response();
+    await router(
+      requestWithBody(
+        'POST',
+        '/api/ai-delivery/requirements/172014/supplement-inputs',
+        {
+          'content-type': 'application/json',
+          'x-user-id': '1',
+          'x-center-base-url': 'http://center.local'
+        },
+        Buffer.from(JSON.stringify({
+          prdClarification: '先说明\n\n![截图](docs/172014/prd/files/screen.png)',
+          prdSupplementBlocks: [
+            { id: 'p1', type: 'PARAGRAPH', text: '先说明' },
+            {
+              id: 'img1',
+              type: 'IMAGE',
+              fileId: 'file-1',
+              name: 'screen.png',
+              path: 'docs/172014/prd/files/screen.png',
+              size: 100,
+              mimeType: 'image/png'
+            }
+          ],
+          openSpecArtifactAdjustment: '调整工件',
+          openSpecSupplementBlocks: [{ id: 'os-p', type: 'PARAGRAPH', text: '调整工件' }]
+        }))
+      ),
+      result.response
+    );
+    const { status, body } = await result.done;
+    const saved = await repository.load('172014');
+
+    expect(status).toBe(200);
+    expect(body.data.prdSupplementBlocks).toHaveLength(2);
+    expect(saved?.prdSupplementBlocks?.[1]).toMatchObject({ type: 'IMAGE', path: 'docs/172014/prd/files/screen.png' });
+    expect(saved?.openSpecSupplementBlocks).toEqual([{ id: 'os-p', type: 'PARAGRAPH', text: '调整工件' }]);
   });
 
   it('中心存在需求但本地没有 runtime state 时仍允许进入详情读路径', async () => {
@@ -663,6 +767,27 @@ describe('router requirement detail', () => {
       createdAt: now,
       updatedAt: now,
       stages,
+      prdClarification: '补充异常场景',
+      prdClarificationBlocks: [
+        { id: 'prd-p', type: 'PARAGRAPH', text: '补充异常场景' },
+        {
+          id: 'prd-img',
+          type: 'IMAGE',
+          fileId: 'prd-file-1',
+          name: '异常截图.png',
+          path: 'docs/172014/prd/files/error.png',
+          size: 100
+        }
+      ],
+      prdSourceFiles: [
+        {
+          id: 'prd-file-1',
+          name: '异常截图.png',
+          path: 'docs/172014/prd/files/error.png',
+          size: 100,
+          uploadedAt: now
+        }
+      ],
       artifacts: [
         {
           id: 'prd-analysis',
@@ -693,7 +818,7 @@ describe('router requirement detail', () => {
       status: 'SUCCEEDED',
       startedAt: now,
       finishedAt: now,
-      params: { description: '补充异常场景' }
+      params: { description: '补充异常场景', sources: ['docs/172014/prd/files/error.png'] }
     };
 
     const updated = applyPrdClarificationRun(workflow, run);
@@ -702,8 +827,70 @@ describe('router requirement detail', () => {
     expect(updated.status).toBe('IN_PROGRESS');
     expect(updated.stages.PRD.status).toBe('READY_FOR_REVIEW');
     expect(updated.stages.PRD.runId).toBe('run-prd-clarify');
+    expect(updated.prdClarification).toBe('');
+    expect(updated.prdClarificationBlocks).toEqual([]);
+    expect(updated.prdSourceFiles).toEqual([]);
     expect(updated.stages.TECH_DESIGN.status).toBe('APPROVED');
     expect(updated.artifacts.map((artifact) => artifact.path)).toContain('docs/172014/technical-design/design_review.md');
+  });
+
+  it('PRD 初始生成成功后清空本次图文补充输入', () => {
+    const now = new Date().toISOString();
+    const workflow: RequirementWorkflow = {
+      requirementId: '172014',
+      title: '定位菜单',
+      sources: ['https://example.com/prd', 'docs/172014/prd/files/screen.png'],
+      currentStage: 'PRD',
+      status: 'IN_PROGRESS',
+      createdAt: now,
+      updatedAt: now,
+      stages: createEmptyStages(),
+      prdClarification: '补充说明',
+      prdSupplementBlocks: [
+        { id: 'p1', type: 'PARAGRAPH', text: '补充说明' },
+        {
+          id: 'img1',
+          type: 'IMAGE',
+          fileId: 'file-1',
+          name: 'screen.png',
+          path: 'docs/172014/prd/files/screen.png',
+          size: 100
+        }
+      ],
+      prdSourceFiles: [
+        {
+          id: 'file-1',
+          name: 'screen.png',
+          path: 'docs/172014/prd/files/screen.png',
+          size: 100,
+          uploadedAt: now
+        }
+      ],
+      artifacts: [],
+      runs: [],
+      reviews: [],
+      issues: []
+    };
+    const run: RunRecord = {
+      id: 'run-prd',
+      requirementId: '172014',
+      actionType: 'PRD_ANALYZE',
+      stage: 'PRD',
+      status: 'SUCCEEDED',
+      startedAt: now,
+      finishedAt: now,
+      params: {
+        description: '补充说明',
+        sources: ['docs/172014/prd/files/screen.png']
+      }
+    };
+
+    const updated = consumePrdAnalyzeInputsAfterRun(workflow, run);
+
+    expect(updated.prdClarification).toBe('');
+    expect(updated.prdSupplementBlocks).toEqual([]);
+    expect(updated.prdSourceFiles).toEqual([]);
+    expect(updated.sources).toEqual(['https://example.com/prd']);
   });
 
   it('OpenSpec 工件重新生成成功后回退工件评审和下游实施步骤', () => {
@@ -761,6 +948,120 @@ describe('router requirement detail', () => {
     expect(updated.implementationSteps?.CHANGE_INSPECTION?.comment).toContain('重新审核后继续实施');
   });
 
+  it('OpenSpec 工件生成成功后移除本次消费的技术方案补充材料', () => {
+    const now = new Date().toISOString();
+    const workflow: RequirementWorkflow = {
+      requirementId: '172014',
+      title: '定位菜单',
+      sources: [],
+      currentStage: 'IMPLEMENTATION',
+      status: 'IN_PROGRESS',
+      createdAt: now,
+      updatedAt: now,
+      stages: createEmptyStages(),
+      artifacts: [],
+      openSpecArtifactAdjustment: '按最新方案调整工件',
+      openSpecSupplementBlocks: [
+        { id: 'os-p', type: 'PARAGRAPH', text: '按最新方案调整工件' },
+        {
+          id: 'os-file',
+          type: 'FILE',
+          fileId: 'file-1',
+          name: '本次补充.md',
+          path: 'docs/172014/technical-design/file/current.md',
+          size: 100
+        }
+      ],
+      techDesignSourceFiles: [
+        {
+          id: 'file-1',
+          name: '本次补充.md',
+          path: 'docs/172014/technical-design/file/current.md',
+          size: 100,
+          uploadedAt: now
+        },
+        {
+          id: 'file-2',
+          name: '保留材料.md',
+          path: 'docs/172014/technical-design/file/keep.md',
+          size: 100,
+          uploadedAt: now
+        }
+      ],
+      runs: [],
+      reviews: [],
+      issues: []
+    };
+    const run: RunRecord = {
+      id: 'run-openspec-ff',
+      requirementId: '172014',
+      actionType: 'OPENSPEC_FF',
+      stage: 'IMPLEMENTATION',
+      implementationStep: 'ARTIFACT_REVIEW',
+      status: 'SUCCEEDED',
+      startedAt: now,
+      finishedAt: now,
+      params: {
+        sourceFiles: ['docs/172014/technical-design/file/current.md']
+      }
+    };
+
+    const updated = consumeOpenSpecArtifactInputsAfterRun(workflow, run);
+
+    expect(updated.techDesignSourceFiles?.map((file) => file.path)).toEqual(['docs/172014/technical-design/file/keep.md']);
+    expect(updated.openSpecArtifactAdjustment).toBe('');
+    expect(updated.openSpecSupplementBlocks).toEqual([]);
+    expect(run.params.sourceFiles).toEqual(['docs/172014/technical-design/file/current.md']);
+  });
+
+  it('OpenSpec 工件生成失败时保留技术方案补充材料', () => {
+    const now = new Date().toISOString();
+    const workflow: RequirementWorkflow = {
+      requirementId: '172014',
+      title: '定位菜单',
+      sources: [],
+      currentStage: 'IMPLEMENTATION',
+      status: 'IN_PROGRESS',
+      createdAt: now,
+      updatedAt: now,
+      stages: createEmptyStages(),
+      artifacts: [],
+      openSpecArtifactAdjustment: '失败时保留',
+      openSpecSupplementBlocks: [{ id: 'os-p', type: 'PARAGRAPH', text: '失败时保留' }],
+      techDesignSourceFiles: [
+        {
+          id: 'file-1',
+          name: '本次补充.md',
+          path: 'docs/172014/technical-design/file/current.md',
+          size: 100,
+          uploadedAt: now
+        }
+      ],
+      runs: [],
+      reviews: [],
+      issues: []
+    };
+    const run: RunRecord = {
+      id: 'run-openspec-ff',
+      requirementId: '172014',
+      actionType: 'OPENSPEC_FF',
+      stage: 'IMPLEMENTATION',
+      implementationStep: 'ARTIFACT_REVIEW',
+      status: 'FAILED',
+      startedAt: now,
+      finishedAt: now,
+      params: {
+        sourceFiles: ['docs/172014/technical-design/file/current.md']
+      }
+    };
+
+    const updated = consumeOpenSpecArtifactInputsAfterRun(workflow, run);
+
+    expect(updated.techDesignSourceFiles).toHaveLength(1);
+    expect(updated.openSpecArtifactAdjustment).toBe('失败时保留');
+    expect(updated.openSpecSupplementBlocks).toEqual([{ id: 'os-p', type: 'PARAGRAPH', text: '失败时保留' }]);
+  });
+
   it('技术方案生成成功后消费增量输入并清空当前补充材料和说明', async () => {
     const workspaceRoot = await tmpDir('ai-delivery-tech-design-consume-');
     await prepareTechDesign(workspaceRoot);
@@ -773,6 +1074,7 @@ describe('router requirement detail', () => {
     const rawLedger = await fs.readFile(path.join(workspaceRoot, techDesignInputLedgerPath('172014')), 'utf8');
 
     expect(updated.techDesignClarification).toBe('');
+    expect(updated.techDesignSupplementBlocks).toEqual([]);
     expect(updated.techDesignSourceFiles).toEqual([]);
     expect(updated.techDesignConsumedQuestionPaths).toEqual([
       'docs/172014/technical-design/questions/20260604-173000-question.md',
@@ -827,6 +1129,7 @@ describe('router requirement detail', () => {
     expect(second.changed).toBe(false);
     expect(run.techDesignInputsConsumedAt).toBeTruthy();
     expect(first.workflow.techDesignClarification).toBe('运行期间新增说明');
+    expect(first.workflow.techDesignSupplementBlocks?.map((block) => block.type)).toEqual(['PARAGRAPH']);
     expect(first.workflow.techDesignSourceFiles?.map((file) => file.path)).toEqual([
       'docs/172014/technical-design/file/file-2.md'
     ]);
@@ -874,6 +1177,7 @@ describe('router requirement detail', () => {
     const summary = await fs.readFile(path.join(workspaceRoot, techDesignAnnotationSummaryPath('172014')), 'utf8');
 
     expect(updated.techDesignClarification).toBe('补充异常场景');
+    expect(updated.techDesignSupplementBlocks).toHaveLength(3);
     expect(updated.techDesignSourceFiles).toHaveLength(1);
     expect(updated.techDesignConsumedQuestionPaths).toEqual(['docs/172014/technical-design/questions/20260604-173000-question.md']);
     expect(annotations.annotations[0].consumedAt).toBeUndefined();
@@ -897,6 +1201,7 @@ describe('router requirement detail', () => {
 
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(updated.techDesignClarification).toBe('补充异常场景');
+    expect(updated.techDesignSupplementBlocks).toHaveLength(3);
     expect(updated.techDesignSourceFiles).toHaveLength(1);
   });
 });

@@ -127,11 +127,31 @@ export interface OpenSpecArtifactInputSnapshot {
   capturedAt: string;
 }
 
+export type OpenSpecVisualContextSource = 'PRD_SOURCE' | 'PRD_FILES' | 'TECH_DESIGN_SOURCE';
+
+export interface OpenSpecVisualContextCandidate {
+  id: string;
+  name: string;
+  path: string;
+  source: OpenSpecVisualContextSource;
+  size?: number;
+  mimeType?: string;
+  uploadedAt?: string;
+}
+
+export interface OpenSpecVisualContextSnapshot {
+  contextPath: string;
+  selectedPaths: string[];
+  capturedAt: string;
+}
+
 export interface OpenSpecArtifactActionParams {
   baseTechDesignVersionId?: string;
   targetTechDesignVersionId?: string;
   artifactAdjustment?: string;
   openSpecArtifactContextPath?: string;
+  openSpecVisualContextPath?: string;
+  visualContextFiles?: string[];
 }
 
 export interface RunRecord {
@@ -165,6 +185,7 @@ export interface RunRecord {
   techDesignInputSnapshot?: TechDesignGenerationInputSnapshot;
   techDesignInputsConsumedAt?: string;
   openSpecArtifactInputSnapshot?: OpenSpecArtifactInputSnapshot;
+  openSpecVisualContextSnapshot?: OpenSpecVisualContextSnapshot;
   error?: string;
 }
 
@@ -279,6 +300,49 @@ export interface PrdSourceFile {
 }
 
 export type TechDesignSourceFile = PrdSourceFile;
+
+export type SupplementBlockStatus = 'READY' | 'UPLOADING' | 'FAILED';
+export type SupplementFileContextRole = 'INLINE' | 'ATTACHMENT';
+
+export interface SupplementParagraphBlock {
+  id: string;
+  type: 'PARAGRAPH';
+  text: string;
+}
+
+export interface SupplementFileBlock {
+  id: string;
+  type: 'IMAGE' | 'FILE';
+  fileId: string;
+  name: string;
+  path: string;
+  size: number;
+  mimeType?: string;
+  uploadedAt?: string;
+  caption?: string;
+  status?: SupplementBlockStatus;
+  error?: string;
+  contextRole?: SupplementFileContextRole;
+}
+
+export type SupplementBlock = SupplementParagraphBlock | SupplementFileBlock;
+
+export interface SupplementComposerValue {
+  blocks: SupplementBlock[];
+  markdown: string;
+  sourceFiles: string[];
+}
+
+export interface SupplementInputsUpdate {
+  prdClarification?: string;
+  prdSupplementBlocks?: SupplementBlock[];
+  prdClarificationBlocks?: SupplementBlock[];
+  techDesignClarification?: string;
+  techDesignSupplementBlocks?: SupplementBlock[];
+  openSpecArtifactAdjustment?: string;
+  openSpecSupplementBlocks?: SupplementBlock[];
+  openSpecVisualContextPaths?: string[];
+}
 
 export type TechDesignInputLedgerEntryType = 'QUESTION' | 'SOURCE_FILE' | 'CLARIFICATION';
 
@@ -529,6 +593,78 @@ export interface RetrospectiveWorkflowState {
   invalidatedReason?: string;
 }
 
+export type AiCodeCompletenessStatus = 'NOT_READY' | 'READY' | 'CALCULATED' | 'FAILED';
+
+export interface AiCodeCompletenessProjectCommit {
+  projectName: string;
+  projectPath: string;
+  branch?: string;
+  baseCommit?: string;
+  aiCommit?: string;
+  finalCommit?: string;
+  source?: 'AUTO' | 'MANUAL' | 'MANUAL_OVERRIDE';
+  updatedAt?: string;
+  error?: string;
+}
+
+export interface AiCodeCompletenessProjectMetrics extends AiCodeCompletenessProjectCommit {
+  aiAdditions: number;
+  aiDeletions: number;
+  aiChangeLines: number;
+  aiChangedFiles: number;
+  followUpAdditions: number;
+  followUpDeletions: number;
+  followUpChangeLines: number;
+  followUpChangedFiles: number;
+  stableAiFiles: number;
+  aiFileStabilityRate?: number;
+}
+
+export interface AiCodeCompletenessSummary {
+  aiAdditions: number;
+  aiDeletions: number;
+  aiChangeLines: number;
+  aiChangedFiles: number;
+  followUpAdditions: number;
+  followUpDeletions: number;
+  followUpChangeLines: number;
+  followUpChangedFiles: number;
+  stableAiFiles: number;
+  completenessRate?: number;
+  followUpAdjustmentRate?: number;
+  aiFileStabilityRate?: number;
+}
+
+export interface AiCodeCompletenessState {
+  status: AiCodeCompletenessStatus;
+  projects: AiCodeCompletenessProjectCommit[];
+  summary?: AiCodeCompletenessSummary;
+  calculatedAt?: string;
+  reportPath?: string;
+  dataPath?: string;
+  error?: string;
+}
+
+export interface AiCodeCompletenessInput {
+  projects: Array<{
+    projectPath: string;
+    projectName?: string;
+    baseCommit?: string;
+    aiCommit?: string;
+  }>;
+}
+
+export interface AiCodeCompletenessResult {
+  requirementId: string;
+  status: AiCodeCompletenessStatus;
+  projects: AiCodeCompletenessProjectMetrics[];
+  summary?: AiCodeCompletenessSummary;
+  reportPath?: string;
+  dataPath?: string;
+  calculatedAt?: string;
+  error?: string;
+}
+
 export interface ImplementationStepState {
   step: WorkflowImplementationStep;
   status: WorkflowStatus;
@@ -546,11 +682,17 @@ export interface RequirementWorkflow {
   branchName?: string;
   projects?: WorkflowProject[];
   prdClarification?: string;
+  prdSupplementBlocks?: SupplementBlock[];
+  prdClarificationBlocks?: SupplementBlock[];
   techDesignDocument?: string;
   techDesignClarification?: string;
+  techDesignSupplementBlocks?: SupplementBlock[];
   techDesignConsumedQuestionPaths?: string[];
   prdSourceFiles?: PrdSourceFile[];
   techDesignSourceFiles?: TechDesignSourceFile[];
+  openSpecArtifactAdjustment?: string;
+  openSpecSupplementBlocks?: SupplementBlock[];
+  openSpecVisualContextPaths?: string[];
   sources: string[];
   currentStage: WorkflowStage | 'DONE';
   status: WorkflowStatus;
@@ -559,6 +701,7 @@ export interface RequirementWorkflow {
   stages: Record<WorkflowStage, StageState>;
   implementationSteps?: Partial<Record<WorkflowImplementationStep, ImplementationStepState>>;
   retrospective?: RetrospectiveWorkflowState;
+  aiCodeCompleteness?: AiCodeCompletenessState;
   artifacts: ArtifactRef[];
   runs: RunRecord[];
   reviews: ReviewRecord[];
@@ -577,10 +720,16 @@ export interface RequirementInput {
   branchName?: string;
   projects?: WorkflowProject[];
   prdClarification?: string;
+  prdSupplementBlocks?: SupplementBlock[];
+  prdClarificationBlocks?: SupplementBlock[];
   techDesignDocument?: string;
   techDesignClarification?: string;
+  techDesignSupplementBlocks?: SupplementBlock[];
   techDesignConsumedQuestionPaths?: string[];
   techDesignSourceFiles?: TechDesignSourceFile[];
+  openSpecArtifactAdjustment?: string;
+  openSpecSupplementBlocks?: SupplementBlock[];
+  openSpecVisualContextPaths?: string[];
   sources?: string[];
 }
 

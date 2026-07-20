@@ -124,6 +124,7 @@
         </div>
         <TechDesignAnnotationPanel
           v-if="showAnnotationPanel"
+          ref="annotationPanelRef"
           :annotations="selectedVersionAnnotations"
           :deletable-annotation-ids="deletableAnnotationIds"
           :deletable-reply-ids="deletableReplyIds"
@@ -238,6 +239,7 @@ const emit = defineEmits<{
 
 const markdownPreviewRef = ref<HTMLElement>();
 const previewScrollRef = ref<HTMLElement>();
+const annotationPanelRef = ref<{ focusAnnotation: (annotationId: string) => void }>();
 const versionDiffDialog = ref<InstanceType<typeof ArtifactVersionDiffDialog>>();
 const eyeCareStorageKey = 'ai-delivery-preview-eye-care';
 const outlineStorageKey = 'ai-delivery-preview-outline-collapsed';
@@ -274,6 +276,7 @@ let outlineObserver: IntersectionObserver | undefined;
 let renderGeneration = 0;
 let richPreviewWarningPath = '';
 let markdownFallbackWarningKey = '';
+let annotationHighlightFlashTimer: ReturnType<typeof setTimeout> | undefined;
 
 function readEyeCareMode() {
   try {
@@ -966,7 +969,12 @@ function scrollPreviewTarget(target: HTMLElement | null | undefined, block: 'sta
   const scrollerRect = scroller.getBoundingClientRect();
   const targetTop = targetRect.top - scrollerRect.top + scroller.scrollTop;
   const top = block === 'center' ? targetTop - (scroller.clientHeight - targetRect.height) / 2 : targetTop;
-  scroller.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+  const nextTop = Math.max(0, top);
+  if (typeof scroller.scrollTo === 'function') {
+    scroller.scrollTo({ top: nextTop, behavior: 'smooth' });
+    return;
+  }
+  scroller.scrollTop = nextTop;
 }
 
 function annotationMatchesSelectedVersion(annotation: TechDesignAnnotation): boolean {
@@ -1008,6 +1016,14 @@ function hasUsableSelectionRect(rect: DOMRect | undefined | null): rect is DOMRe
 }
 
 function readSelectionClientRect(event?: Event): ClientRectLike | undefined {
+  if (event instanceof MouseEvent && (event.clientX || event.clientY)) {
+    return {
+      top: event.clientY,
+      left: event.clientX,
+      width: 0,
+      height: 0
+    };
+  }
   const selection = window.getSelection?.();
   if (selection?.rangeCount) {
     const range = selection.getRangeAt(0);
@@ -1030,14 +1046,6 @@ function readSelectionClientRect(event?: Event): ClientRectLike | undefined {
         height: clientRect.height
       };
     }
-  }
-  if (event instanceof MouseEvent && (event.clientX || event.clientY)) {
-    return {
-      top: event.clientY,
-      left: event.clientX,
-      width: 0,
-      height: 0
-    };
   }
   const scrollerRect = previewScrollRef.value?.getBoundingClientRect();
   if (!scrollerRect) {
@@ -1291,6 +1299,56 @@ function locateAnnotation(annotation: TechDesignAnnotation) {
     return;
   }
   scrollPreviewTarget(target, 'center');
+  flashAnnotationHighlight(annotation.id);
+}
+
+function annotationHighlightElements(annotationId: string): Element[] {
+  return Array.from(markdownPreviewRef.value?.querySelectorAll<Element>('[data-annotation-id]') || []).filter(
+    (element) => element.getAttribute('data-annotation-id') === annotationId
+  );
+}
+
+function clearFlashingAnnotationHighlights() {
+  markdownPreviewRef.value
+    ?.querySelectorAll('.tech-design-annotation-highlight--flash, .tech-design-annotation-svg-highlight--flash')
+    .forEach((element) => element.classList.remove('tech-design-annotation-highlight--flash', 'tech-design-annotation-svg-highlight--flash'));
+}
+
+function flashAnnotationHighlight(annotationId: string) {
+  const elements = annotationHighlightElements(annotationId);
+  if (!elements.length) {
+    return;
+  }
+  if (annotationHighlightFlashTimer) {
+    clearTimeout(annotationHighlightFlashTimer);
+  }
+  clearFlashingAnnotationHighlights();
+  elements.forEach((element) => {
+    element.classList.add(
+      element.classList.contains('tech-design-annotation-svg-highlight')
+        ? 'tech-design-annotation-svg-highlight--flash'
+        : 'tech-design-annotation-highlight--flash'
+    );
+  });
+  annotationHighlightFlashTimer = setTimeout(() => {
+    elements.forEach((element) =>
+      element.classList.remove('tech-design-annotation-highlight--flash', 'tech-design-annotation-svg-highlight--flash')
+    );
+  }, 1400);
+}
+
+async function focusAnnotationPanel(annotationId: string) {
+  annotationPanelVisible.value = true;
+  await nextTick();
+  annotationPanelRef.value?.focusAnnotation(annotationId);
+}
+
+function focusAnnotationFromHighlight(annotationId: string) {
+  const annotation = selectedVersionAnnotations.value.find((item) => item.id === annotationId);
+  if (!annotation) {
+    return;
+  }
+  void focusAnnotationPanel(annotation.id);
 }
 
 function toggleAnnotationPanel() {
@@ -1306,6 +1364,16 @@ function openVersionDiff() {
 
 function handleMarkdownPreviewClick(event: MouseEvent) {
   const target = event.target as HTMLElement | null;
+  const annotationTarget = target?.closest<HTMLElement>('[data-annotation-id]');
+  if (annotationTarget && markdownPreviewRef.value?.contains(annotationTarget)) {
+    const annotationId = annotationTarget.dataset.annotationId;
+    if (annotationId) {
+      event.preventDefault();
+      event.stopPropagation();
+      focusAnnotationFromHighlight(annotationId);
+      return;
+    }
+  }
   const button = target?.closest<HTMLButtonElement>('[data-sequence-zoom-action]');
   if (!button || !markdownPreviewRef.value?.contains(button)) {
     return;
@@ -1369,6 +1437,9 @@ onUnmounted(() => {
   window.removeEventListener('mouseup', captureSelection);
   window.removeEventListener(TECH_DESIGN_ANNOTATION_CHANGED_EVENT, handleTechDesignAnnotationChanged);
   outlineObserver?.disconnect();
+  if (annotationHighlightFlashTimer) {
+    clearTimeout(annotationHighlightFlashTimer);
+  }
 });
 
 async function copyPath() {
@@ -2043,6 +2114,16 @@ defineExpose({ downloadMarkdownArtifact, downloadOriginalArtifact });
   border-radius: 3px;
   background: #fef08a;
   box-shadow: inset 0 -1px 0 #f59e0b;
+}
+
+.artifact-markdown :deep(.tech-design-annotation-highlight--flash) {
+  background: #bfdbfe;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.22), inset 0 -1px 0 #2563eb;
+}
+
+.artifact-markdown :deep(.tech-design-annotation-svg-highlight--flash) {
+  stroke: #2563eb;
+  stroke-width: 2;
 }
 
 .artifact-frame {

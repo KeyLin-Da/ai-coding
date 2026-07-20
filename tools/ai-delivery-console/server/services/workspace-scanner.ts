@@ -83,6 +83,30 @@ function artifactKindForFile(filePath: string): ArtifactRef['kind'] {
   return 'text';
 }
 
+async function appendSupplementInputArtifacts(
+  workspaceRoot: string,
+  relativeDir: string,
+  stage: WorkflowStage,
+  idPrefix: string,
+  labelPrefix: string,
+  artifacts: ArtifactRef[]
+): Promise<void> {
+  const files = await listFiles(path.join(workspaceRoot, relativeDir), 1);
+  for (const file of files.filter((item) => /\.md$/i.test(item))) {
+    const relative = path.relative(workspaceRoot, file);
+    artifacts.push(
+      await fileArtifact(
+        workspaceRoot,
+        `${idPrefix}-${artifacts.length}`,
+        stage,
+        `${labelPrefix} ${path.basename(file, path.extname(file))}`,
+        relative,
+        'markdown'
+      )
+    );
+  }
+}
+
 export async function scanRequirementArtifacts(
   workspaceRoot: string,
   requirementId: string,
@@ -96,6 +120,7 @@ export async function scanRequirementArtifacts(
   if (requirementType !== 'DEFECT' || prdAnalysis.exists) {
     artifacts.push(prdAnalysis);
   }
+  await appendSupplementInputArtifacts(workspaceRoot, `docs/${id}/prd/inputs/supplements`, 'PRD', 'prd-supplement-input', 'PRD 补充输入', artifacts);
   artifacts.push(await fileArtifact(workspaceRoot, 'technical-design', 'TECH_DESIGN', '技术方案评审文档', `docs/${id}/technical-design/design_review.md`, 'markdown'));
   const techDesignQuestions = await existingFileArtifact(
     workspaceRoot,
@@ -119,6 +144,14 @@ export async function scanRequirementArtifacts(
   if (techDesignInputLedger) {
     artifacts.push(techDesignInputLedger);
   }
+  await appendSupplementInputArtifacts(
+    workspaceRoot,
+    `docs/${id}/technical-design/inputs/supplements`,
+    'TECH_DESIGN',
+    'technical-design-supplement-input',
+    '技术方案补充输入',
+    artifacts
+  );
   const techDesignQuestionFiles = await listFiles(path.join(workspaceRoot, 'docs', id, 'technical-design', 'questions'), 2);
   for (const file of techDesignQuestionFiles.filter((item) => /\.md$/i.test(item))) {
     const relative = path.relative(workspaceRoot, file);
@@ -183,6 +216,27 @@ export async function scanRequirementArtifacts(
   for (const file of junitFiles.filter((item) => /\.(md|html)$/i.test(item))) {
     const relative = path.relative(workspaceRoot, file);
     artifacts.push(await fileArtifact(workspaceRoot, `junit-${artifacts.length}`, 'IMPLEMENTATION', path.basename(file), relative, file.endsWith('.html') ? 'html' : 'markdown'));
+  }
+
+  const aiCompletenessArtifacts = [
+    {
+      id: 'ai-code-completeness-report',
+      label: 'AI 代码完整度报告',
+      path: `docs/${id}/metrics/ai-code-completeness.md`,
+      kind: 'markdown' as const
+    },
+    {
+      id: 'ai-code-completeness-data',
+      label: 'AI 代码完整度数据',
+      path: `docs/${id}/metrics/ai-code-completeness.json`,
+      kind: 'json' as const
+    }
+  ];
+  for (const item of aiCompletenessArtifacts) {
+    const artifact = await existingFileArtifact(workspaceRoot, item.id, 'RETROSPECTIVE', item.label, item.path, item.kind);
+    if (artifact) {
+      artifacts.push(artifact);
+    }
   }
 
   const requirementReviewArtifacts = [

@@ -366,33 +366,51 @@ export async function commitAndPushProjectRepository(
   }
   const options = await credentialOptions(context, project);
 
-  // 1. 确保在默认分支上
-  const currentBranch = (await runGit(repoPath, ['branch', '--show-current'])).trim();
   const targetBranch = repository.defaultBranch || 'master';
+  const currentBranch = (await runGit(repoPath, ['branch', '--show-current'])).trim();
+  const initialStatus = (await runGit(repoPath, ['status', '--porcelain', '--untracked-files=all'])).trim();
   if (currentBranch !== targetBranch) {
-    await runGit(repoPath, ['checkout', targetBranch], options);
+    if (initialStatus) {
+      throw projectRepoBlockedError('项目产物仓当前不在默认分支，且存在本地变更，请先切回默认分支或清理本地变更后再提交');
+    }
+    try {
+      await runGit(repoPath, ['checkout', targetBranch], options);
+    } catch (error) {
+      if (isUntrackedOverwriteError(error)) {
+        throw projectRepoBlockedError('项目产物仓存在会被默认分支覆盖的未跟踪文件，请先清理后再提交');
+      }
+      throw error;
+    }
   }
 
-  // 2. 先拉取远端最新（避免冲突）
-  await runGit(repoPath, ['pull', 'origin', targetBranch, '--rebase'], options);
+  await runGit(repoPath, ['fetch', 'origin', targetBranch], options);
+  const counts = (await runGit(repoPath, ['rev-list', '--left-right', '--count', `HEAD...origin/${targetBranch}`])).trim();
+  const [, behindRaw] = counts.split(/\s+/);
+  const behind = Number(behindRaw || 0);
+  const statusBeforeCommit = (await runGit(repoPath, ['status', '--porcelain', '--untracked-files=all'])).trim();
+  if (behind > 0) {
+    if (statusBeforeCommit) {
+      throw projectRepoBlockedError('项目产物仓落后远端且存在本地变更，请先同步 Git 仓或手动处理本地变更后再提交');
+    }
+    await runGit(repoPath, ['pull', '--ff-only', 'origin', targetBranch], options);
+  }
 
-  // 3. 添加所有变更
   await runGit(repoPath, ['add', '-A'], options);
 
-  // 4. 检查是否有变更需要提交
   const status = (await runGit(repoPath, ['status', '--porcelain', '--untracked-files=all'])).trim();
   if (!status) {
-    // 没有变更，直接返回当前状态
     return inspectProjectRepository(context);
   }
 
-  // 5. 提交
   const message = input.message?.trim() || `sync: 自动同步产物 (${new Date().toLocaleString('zh-CN')})`;
   await runGit(repoPath, ['commit', '-m', message], options);
 
-  // 6. 推送到远端
-  await runGit(repoPath, ['push', 'origin', targetBranch], options);
+  try {
+    await runGit(repoPath, ['push', 'origin', targetBranch], options);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error || '');
+    throw new Error(`Git push失败或远端已更新，请同步 Git 仓后重试: ${message}`);
+  }
 
-  // 7. 返回最新状态
   return inspectProjectRepository(context);
 }

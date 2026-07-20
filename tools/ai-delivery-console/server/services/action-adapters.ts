@@ -25,6 +25,8 @@ import { buildArtifactPublishEvents, captureControlledArtifactSnapshot } from '.
 import { resolveWorkspaceOrRuntimePath } from './runtime-paths';
 import { confirmMemoryRecallForRun } from './memory-recall-service';
 import { prepareOpenSpecArtifactAction } from './open-spec-artifact-inputs';
+import { prepareOpenSpecVisualContextAction } from './open-spec-visual-context';
+import { prepareSupplementInputSnapshotAction } from './supplement-input-snapshots';
 
 const cliActionMap: Partial<Record<ActionInput['actionType'], string[]>> = {
   OPENSPEC_STATUS: ['openspec', 'status'],
@@ -257,16 +259,25 @@ function designQuestionInputParam(workflow: RequirementWorkflow, params: Record<
 }
 
 function openSpecInputParam(workflow: RequirementWorkflow, params: Record<string, unknown>): string {
-  const requirementId = normalizeRequirementId(workflow.requirementId);
   const versionContextPath = asString(params.openSpecArtifactContextPath);
+  const supplementInputPath = versionContextPath ? '' : asString(params.supplementInputPath);
   if (workflow.requirementType === 'DEFECT') {
-    return uniqueNonEmpty([technicalDesignDocumentPath(workflow, params), versionContextPath, ...techDesignSourcePaths(workflow, params)]).join(',');
+    return uniqueNonEmpty([
+      technicalDesignDocumentPath(workflow, params),
+      versionContextPath,
+      asString(params.openSpecVisualContextPath),
+      supplementInputPath,
+      ...asStringArray(params.visualContextFiles),
+      ...asStringArray(params.sourceFiles)
+    ]).join(',');
   }
   return uniqueNonEmpty([
     openSpecPrdDocumentPath(workflow, params),
     technicalDesignDocumentPath(workflow, params),
     versionContextPath,
-    `docs/${requirementId}/prd/files`,
+    asString(params.openSpecVisualContextPath),
+    supplementInputPath,
+    ...asStringArray(params.visualContextFiles),
     ...asStringArray(params.sourceFiles)
   ]).join(',');
 }
@@ -304,7 +315,8 @@ function retrospectiveScopeParam(params: Record<string, unknown>): string {
 function buildSkillCommand(workflow: RequirementWorkflow, action: ActionInput): string {
   const params = action.params || {};
   const requirementId = workflow.requirementId;
-  const sources = Array.isArray(params.sources) ? params.sources.join(',') : workflow.sources.join(',');
+  const sourceValues = Array.isArray(params.sources) ? params.sources : Array.isArray(params.sourceFiles) ? params.sourceFiles : workflow.sources;
+  const sources = sourceValues.map((item) => String(item).trim()).filter(Boolean).join(',');
   const description = normalizePrdClarification(asString(params.description)) || '';
   const prdClarification = prdDescription(workflow, params);
   const moduleName = asString(params.moduleName);
@@ -320,9 +332,11 @@ function buildSkillCommand(workflow: RequirementWorkflow, action: ActionInput): 
     case 'PRD_ANALYZE':
       return `/coding-prd-analyzer id=${requirementId}${prdClarification ? ` c=${prdClarification}` : ''}${sources ? ` ${sources}` : ''}`;
     case 'PRD_CLARIFY':
-      return `/coding-prd-analyzer id=${requirementId} c=${description || '<clarification>'}`;
-    case 'DESIGN_GENERATE':
-      return `/coding-design d=${designInputParam(workflow, params)} r=${requirementId}${projects ? ` p=${projects}` : ''}${clarification ? ` c=${clarification}` : ''}`;
+      return `/coding-prd-analyzer id=${requirementId} c=${description || '<clarification>'}${sources ? ` ${sources}` : ''}`;
+    case 'DESIGN_GENERATE': {
+      const designSkill = workflow.requirementType === 'DEFECT' ? 'coding-defect-design' : 'coding-design';
+      return `/${designSkill} d=${designInputParam(workflow, params)} r=${requirementId}${projects ? ` p=${projects}` : ''}${clarification ? ` c=${clarification}` : ''}`;
+    }
     case 'DESIGN_QUESTION':
       return `/coding-design-question r=${requirementId} q=${question} d=${designQuestionInputParam(workflow, params)}${projects ? ` p=${projects}` : ''} o=${outputPath}`;
     case 'JUNIT_GENERATE':
@@ -490,6 +504,9 @@ export function validateActionInput(workspaceRoot: string, action: ActionInput, 
     for (const value of asStringArray(params.sourceFiles)) {
       resolveWorkspaceOrRuntimePath(workspaceRoot, value);
     }
+    for (const value of asStringArray(params.visualContextFiles)) {
+      assertInsideWorkspace(workspaceRoot, value);
+    }
   }
   const allowed = new Set<ActionInput['actionType']>([
     'PRD_ANALYZE',
@@ -551,8 +568,11 @@ export async function executeAction(
   };
   if (normalizedAction.actionType === 'OPENSPEC_FF') {
     normalizedAction = await prepareOpenSpecArtifactAction(workspaceRoot, workflow, normalizedAction);
+    const visualContext = await prepareOpenSpecVisualContextAction(workspaceRoot, workflow, normalizedAction, startedAt);
+    normalizedAction = visualContext.action;
     run.params = normalizedAction.params || {};
     run.openSpecArtifactInputSnapshot = normalizedAction.openSpecArtifactInputSnapshot;
+    run.openSpecVisualContextSnapshot = visualContext.snapshot;
   }
   const artifactSnapshot = await captureControlledArtifactSnapshot(workspaceRoot, workflow);
 
@@ -673,6 +693,21 @@ export async function executeAction(
         message: '用户未启用项目记忆召回，本次生成不注入项目记忆'
       });
     }
+  }
+
+  const supplementSnapshot = await prepareSupplementInputSnapshotAction(workspaceRoot, workflow, normalizedAction, {
+    runId: run.id,
+    capturedAt: startedAt
+  });
+  normalizedAction = supplementSnapshot.action;
+  run.params = normalizedAction.params || {};
+  if (supplementSnapshot.snapshotPath) {
+    await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
+      type: 'INFO',
+      level: 'INFO',
+      message: `已生成补充输入快照: ${supplementSnapshot.snapshotPath}`,
+      data: { supplementInputPath: supplementSnapshot.snapshotPath }
+    });
   }
 
   const commandText = buildSkillCommand(workflow, normalizedAction);

@@ -690,6 +690,136 @@ describe('shared artifact preview', () => {
     wrapper.unmount();
   });
 
+  it('预览缩放后按选区视觉位置展示批注浮层', async () => {
+    vi.mocked(apiClient.listPublicTechDesignAnnotations).mockResolvedValue({
+      annotations: [],
+      hash: 'annotation-list-hash',
+      summaryPath: ''
+    });
+    const wrapper = mount(ArtifactPreviewShell, {
+      attachTo: document.body,
+      props: {
+        artifact: {
+          id: 'technical-design',
+          label: '技术方案',
+          path: 'docs/172014/technical-design/design_review.md',
+          stage: 'TECH_DESIGN',
+          kind: 'markdown',
+          exists: true,
+          hash: 'current-hash'
+        },
+        content: '# 技术方案\n\n需要缓存策略说明。',
+        publicToken: 'share-token',
+        canCreateAnnotation: true,
+        currentUserId: 1
+      }
+    });
+    await flushPromises();
+    await wrapper.find('.zoom-in-button').trigger('click');
+    await wrapper.find('.zoom-in-button').trigger('click');
+    await nextTick();
+    expect(wrapper.find('.zoom-percent').text()).toBe('120%');
+
+    const text = wrapper.find('.artifact-markdown p').element.firstChild as Text;
+    const range = document.createRange();
+    range.setStart(text, 2);
+    range.setEnd(text, 6);
+    Object.defineProperty(range, 'getBoundingClientRect', {
+      value: () =>
+        ({
+          top: 200,
+          left: 180,
+          width: 80,
+          height: 20,
+          right: 260,
+          bottom: 220,
+          x: 180,
+          y: 200,
+          toJSON: () => ({})
+        }) as DOMRect
+    });
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: 220, clientY: 300 }));
+    await nextTick();
+
+    const menu = wrapper.find('.selection-annotation-menu').element as HTMLElement;
+    expect(menu.style.left).toBe('220px');
+    expect(menu.style.top).toBe('252px');
+    window.getSelection()?.removeAllRanges();
+    wrapper.unmount();
+  });
+
+  it('点击正文批注高亮会定位右侧批注卡片并闪烁', async () => {
+    vi.mocked(apiClient.listPublicTechDesignAnnotations).mockResolvedValue({
+      annotations: [annotation({ id: 'annotation-current', contentHash: 'current-hash', selectedText: '当前内容', comment: '当前版本批注' })],
+      hash: 'annotation-list-hash',
+      summaryPath: ''
+    });
+    const originalScrollIntoView = Element.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    const wrapper = mount(ArtifactPreviewShell, {
+      props: {
+        artifact: {
+          id: 'technical-design',
+          label: '技术方案',
+          path: 'docs/172014/technical-design/design_review.md',
+          stage: 'TECH_DESIGN',
+          kind: 'markdown',
+          exists: true,
+          hash: 'current-hash'
+        },
+        content: '# 技术方案\n\n当前内容',
+        publicToken: 'share-token'
+      }
+    });
+    await flushPromises();
+
+    await wrapper.find('.tech-design-annotation-highlight').trigger('click');
+    await nextTick();
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center', behavior: 'smooth' });
+    const panelItem = wrapper.find('.annotation-item[data-annotation-id="annotation-current"]');
+    expect(panelItem.classes()).toContain('annotation-item--flash');
+    wrapper.unmount();
+    if (originalScrollIntoView) {
+      Element.prototype.scrollIntoView = originalScrollIntoView;
+    } else {
+      delete (Element.prototype as any).scrollIntoView;
+    }
+  });
+
+  it('右侧定位批注会滚动正文并闪烁对应高亮', async () => {
+    vi.mocked(apiClient.listPublicTechDesignAnnotations).mockResolvedValue({
+      annotations: [annotation({ id: 'annotation-current', contentHash: 'current-hash', selectedText: '当前内容', comment: '当前版本批注' })],
+      hash: 'annotation-list-hash',
+      summaryPath: ''
+    });
+    const wrapper = mount(ArtifactPreviewShell, {
+      props: {
+        artifact: {
+          id: 'technical-design',
+          label: '技术方案',
+          path: 'docs/172014/technical-design/design_review.md',
+          stage: 'TECH_DESIGN',
+          kind: 'markdown',
+          exists: true,
+          hash: 'current-hash'
+        },
+        content: '# 技术方案\n\n当前内容',
+        publicToken: 'share-token'
+      }
+    });
+    await flushPromises();
+
+    await wrapper.find('button[title="定位批注"]').trigger('click');
+    await nextTick();
+
+    expect(wrapper.find('.tech-design-annotation-highlight').classes()).toContain('tech-design-annotation-highlight--flash');
+    wrapper.unmount();
+  });
+
   it('选择正文后可从浮层菜单创建批注', async () => {
     vi.mocked(apiClient.listPublicTechDesignAnnotations).mockResolvedValue({
       annotations: [],

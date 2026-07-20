@@ -25,7 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class RequirementService {
 
-    private static final List<String> STAGES = Arrays.asList("PRD", "TECH_DESIGN", "IMPLEMENTATION", "CODE_REVIEW");
+    private static final List<String> STAGES = Arrays.asList("PRD", "TECH_DESIGN", "IMPLEMENTATION", "CODE_REVIEW", "RETROSPECTIVE");
 
     private final PermissionService permissionService;
     private final RequirementMapper requirementMapper;
@@ -47,6 +47,7 @@ public class RequirementService {
             existing.setBranchName(defaultBranchName(request));
             requirementMapper.updateById(existing);
             replaceProjects(existing.getId(), request.getProjectNames());
+            ensureWorkflowStages(existing);
             return get(userId, request.getProjectId(), request.getRequirementId());
         }
 
@@ -211,5 +212,30 @@ public class RequirementService {
             return "TECH_DESIGN".equals(stage) ? "DRAFT" : "NOT_STARTED";
         }
         return "PRD".equals(stage) ? "DRAFT" : "NOT_STARTED";
+    }
+
+    private void ensureWorkflowStages(RequirementEntity requirement) {
+        for (String stage : STAGES) {
+            WorkflowStageEntity existing = workflowStageMapper.selectOne(new LambdaQueryWrapper<WorkflowStageEntity>()
+                .eq(WorkflowStageEntity::getRequirementPk, requirement.getId())
+                .eq(WorkflowStageEntity::getStage, stage)
+                .last("LIMIT 1"));
+            if (existing != null) {
+                continue;
+            }
+            WorkflowStageEntity entity = new WorkflowStageEntity();
+            entity.setRequirementPk(requirement.getId());
+            entity.setStage(stage);
+            entity.setStatus(missingStageStatus(requirement, stage));
+            entity.setVersion(0L);
+            workflowStageMapper.insert(entity);
+        }
+    }
+
+    private String missingStageStatus(RequirementEntity requirement, String stage) {
+        if ("RETROSPECTIVE".equals(stage) && ("DONE".equals(requirement.getCurrentStage()) || "DONE".equals(requirement.getStatus()))) {
+            return "SKIPPED";
+        }
+        return initialStageStatus(requirement.getRequirementType(), stage);
     }
 }

@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { PrdSourceFile, RequirementWorkflow, TechDesignSourceFile } from '../../shared/workflow';
+import type { PrdSourceFile, RequirementWorkflow, SupplementBlock, TechDesignSourceFile } from '../../shared/workflow';
 import { assertInsideWorkspace, createId, normalizeRequirementId, toRelativePath } from './workspace';
 
 export interface UploadedPrdSourceFile {
@@ -77,6 +77,15 @@ export async function saveTechDesignSourceFileSnapshot(
   return saveSourceFileSnapshot(workspaceRoot, file, getTechDesignSourceFileDir(workspaceRoot, requirementId));
 }
 
+function removeFileBlocks(blocks: SupplementBlock[] | undefined, fileId: string, filePath: string): SupplementBlock[] {
+  return (blocks || []).filter((block) => {
+    if (block.type === 'PARAGRAPH') {
+      return true;
+    }
+    return block.fileId !== fileId && block.path !== filePath;
+  });
+}
+
 export async function deletePrdSourceFileSnapshot(
   workspaceRoot: string,
   workflow: RequirementWorkflow,
@@ -96,6 +105,8 @@ export async function deletePrdSourceFileSnapshot(
   return {
     ...workflow,
     prdSourceFiles: workflow.prdSourceFiles?.filter((item) => item.id !== fileId) || [],
+    prdSupplementBlocks: removeFileBlocks(workflow.prdSupplementBlocks, fileId, file.path),
+    prdClarificationBlocks: removeFileBlocks(workflow.prdClarificationBlocks, fileId, file.path),
     sources: workflow.sources.filter((source) => source !== file.path)
   };
 }
@@ -118,6 +129,8 @@ export async function deleteTechDesignSourceFileSnapshot(
   await fs.rm(absolutePath, { force: true });
   return {
     ...workflow,
-    techDesignSourceFiles: workflow.techDesignSourceFiles?.filter((item) => item.id !== fileId) || []
+    techDesignSourceFiles: workflow.techDesignSourceFiles?.filter((item) => item.id !== fileId) || [],
+    techDesignSupplementBlocks: removeFileBlocks(workflow.techDesignSupplementBlocks, fileId, file.path),
+    openSpecSupplementBlocks: removeFileBlocks(workflow.openSpecSupplementBlocks, fileId, file.path)
   };
 }

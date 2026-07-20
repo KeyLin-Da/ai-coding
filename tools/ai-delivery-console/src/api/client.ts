@@ -1,9 +1,13 @@
 import type {
   ActionInput,
+  AiCodeCompletenessInput,
+  AiCodeCompletenessResult,
+  AiCodeCompletenessState,
   AgentProvider,
   ArtifactRef,
   GitChangeSummary,
   GitStageUntrackedInput,
+  OpenSpecVisualContextCandidate,
   OpenSpecSummary,
   RequirementTokenUsageSummary,
   RequirementTokenUsagePage,
@@ -14,6 +18,7 @@ import type {
   RunRecord,
   RunTokenUsageDetail,
   RunTokenUsageRun,
+  SupplementInputsUpdate,
   TechDesignAnnotationCreateInput,
   TechDesignAnnotationDeleteInput,
   TechDesignAnnotationList,
@@ -955,6 +960,11 @@ export const apiClient = {
       `/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/openspec-summary?changeName=${encodeURIComponent(changeName)}`
     );
   },
+  listOpenSpecVisualContextCandidates(requirementId: string) {
+    return runnerRequest<{ candidates: OpenSpecVisualContextCandidate[] }>(
+      `/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/openspec-visual-context-candidates`
+    );
+  },
   updateOpenSpecTask(requirementId: string, input: { changeName: string; line: number; completed: boolean; raw: string }) {
     return runnerRequest<OpenSpecSummary>(`/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/openspec-tasks`, {
       method: 'POST',
@@ -963,6 +973,27 @@ export const apiClient = {
   },
   getGitChanges(requirementId: string) {
     return runnerRequest<GitChangeSummary>(`/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/git-changes`);
+  },
+  getAiCodeCompleteness(requirementId: string) {
+    return runnerRequest<AiCodeCompletenessState>(`/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/ai-completeness`);
+  },
+  calculateAiCodeCompleteness(requirementId: string, input: AiCodeCompletenessInput) {
+    return runnerRequest<{ result: AiCodeCompletenessResult; workflow: RequirementWorkflow }>(
+      `/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/ai-completeness/calculate`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input)
+      }
+    );
+  },
+  captureAiCodeCompletenessAiCommit(requirementId: string) {
+    return runnerRequest<RequirementWorkflow>(
+      `/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/ai-completeness/capture-ai-commit`,
+      {
+        method: 'POST',
+        body: JSON.stringify({})
+      }
+    );
   },
   stageUntrackedFiles(requirementId: string, input: GitStageUntrackedInput) {
     return runnerRequest<GitChangeSummary>(`/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/git-changes/stage-untracked`, {
@@ -1008,6 +1039,12 @@ export const apiClient = {
       method: 'POST',
       body: JSON.stringify(input)
     });
+  },
+  updateSupplementInputs(requirementId: string, input: SupplementInputsUpdate) {
+    return runnerRequest<RequirementWorkflow>(`/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/supplement-inputs`, {
+      method: 'POST',
+      body: JSON.stringify(input)
+    }).then(normalizeRequirementWorkflow);
   },
   readArtifact(path: string, projectId?: string | number) {
     const params = new URLSearchParams({ path });

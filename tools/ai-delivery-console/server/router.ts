@@ -4,12 +4,15 @@ import path from 'node:path';
 import { URL } from 'node:url';
 import type {
   ActionInput,
+  AiCodeCompletenessInput,
   GitStageUntrackedInput,
   PrdSourceFile,
   RequirementInput,
   RequirementWorkflow,
   ReviewInput,
   RunRecord,
+  SupplementBlock,
+  SupplementInputsUpdate,
   TechDesignGenerationInputSnapshot,
   TechDesignSourceFile,
   WorkflowStatus
@@ -31,6 +34,14 @@ import {
 } from './services/agent-providers';
 import { normalizeOpenSpecChangeName, readOpenSpecSummary, updateOpenSpecTaskStatus } from './services/openspec-summary';
 import { readGitChanges, stageUntrackedFiles } from './services/git-changes';
+import {
+  assertProjectsCleanAndPushed,
+  buildAiCodeCompletenessState,
+  calculateAiCodeCompleteness,
+  captureBaseCommits,
+  captureRemoteAiCommits,
+  mergeAiCommitCaptures
+} from './services/ai-code-completeness';
 import { buildArtifactGitSyncPlan, confirmArtifactGitSync, type ArtifactGitSyncConfirmInput, type ArtifactGitSyncPlanInput } from './services/artifact-git-sync';
 import { centerPublicRequest, centerRequest } from './services/center-client';
 import { readProjectHistory, listProjectsFromConfiguredPaths } from './services/project-history';
@@ -98,6 +109,7 @@ import {
   saveTechDesignSourceFileSnapshot,
   type UploadedPrdSourceFile
 } from './services/prd-source-files';
+import { listOpenSpecVisualContextCandidates } from './services/open-spec-visual-context';
 import {
   assertPreviewableArtifactPath,
   contentTypeForPath,
@@ -168,6 +180,76 @@ async function parseBody<T>(request: IncomingMessage): Promise<T> {
   }
   const raw = Buffer.concat(chunks).toString('utf8');
   return raw ? (JSON.parse(raw) as T) : ({} as T);
+}
+
+function hasBodyField<T extends object>(input: T, key: keyof T): boolean {
+  return Object.prototype.hasOwnProperty.call(input, key);
+}
+
+function normalizeSupplementBlocksInput(value: unknown): SupplementBlock[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const blocks: SupplementBlock[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object') {
+      continue;
+    }
+    const block = item as Record<string, unknown>;
+    const id = String(block.id || '').trim();
+    if (!id) {
+      continue;
+    }
+    if (block.type === 'PARAGRAPH') {
+      const text = String(block.text || '').trim();
+      if (text) {
+        blocks.push({ id, type: 'PARAGRAPH', text });
+      }
+      continue;
+    }
+    if (block.type === 'IMAGE' || block.type === 'FILE') {
+      blocks.push({
+        id,
+        type: block.type,
+        fileId: String(block.fileId || id).trim(),
+        name: String(block.name || '').trim(),
+        path: String(block.path || '').trim(),
+        size: Number(block.size || 0),
+        mimeType: typeof block.mimeType === 'string' ? block.mimeType : undefined,
+        uploadedAt: typeof block.uploadedAt === 'string' ? block.uploadedAt : undefined,
+        caption: typeof block.caption === 'string' ? block.caption.trim() : undefined,
+        status: block.status === 'UPLOADING' || block.status === 'FAILED' ? block.status : 'READY',
+        error: typeof block.error === 'string' ? block.error : undefined,
+        contextRole: block.contextRole === 'INLINE' || block.contextRole === 'ATTACHMENT'
+          ? block.contextRole
+          : /^pasted-/i.test(String(block.name || ''))
+            ? 'INLINE'
+            : 'ATTACHMENT'
+      });
+    }
+  }
+  return blocks;
+}
+
+function supplementBlockKeySet(value: unknown): Set<string> {
+  const keys = new Set<string>();
+  for (const block of normalizeSupplementBlocksInput(value)) {
+    keys.add(block.id);
+    if (block.type === 'IMAGE' || block.type === 'FILE') {
+      [block.fileId, block.path].filter(Boolean).forEach((key) => keys.add(String(key)));
+    }
+  }
+  return keys;
+}
+
+function supplementBlockConsumed(block: SupplementBlock, consumedKeys: Set<string>): boolean {
+  if (consumedKeys.has(block.id)) {
+    return true;
+  }
+  if (block.type === 'IMAGE' || block.type === 'FILE') {
+    return consumedKeys.has(block.fileId) || consumedKeys.has(block.path);
+  }
+  return false;
 }
 
 function splitBuffer(buffer: Buffer, delimiter: Buffer): Buffer[] {
@@ -366,11 +448,25 @@ export async function consumeTechDesignInputsAfterRun(
   const consumedSourcePathSet = new Set(consumedSourceFilePaths.map(normalizeArtifactPath));
   const currentClarification = String(workflow.techDesignClarification || '').trim();
   const consumedClarification = String(clarification || '').trim();
+  const shouldKeepClarification = Boolean(snapshot && currentClarification !== consumedClarification);
+  const consumedSupplementBlockKeys = supplementBlockKeySet(params.supplementBlocks);
+  const nextTechDesignSupplementBlocks = snapshot
+    ? (workflow.techDesignSupplementBlocks || []).filter((block) => {
+        if (block.type === 'PARAGRAPH') {
+          return shouldKeepClarification;
+        }
+        if (supplementBlockConsumed(block, consumedSupplementBlockKeys)) {
+          return false;
+        }
+        return !consumedSourcePathSet.has(normalizeArtifactPath(block.path));
+      })
+    : [];
   return {
     ...workflow,
-    techDesignClarification: snapshot && currentClarification !== consumedClarification
+    techDesignClarification: shouldKeepClarification
       ? workflow.techDesignClarification
       : '',
+    techDesignSupplementBlocks: nextTechDesignSupplementBlocks,
     techDesignSourceFiles: snapshot
       ? (workflow.techDesignSourceFiles || []).filter((file) => !consumedSourcePathSet.has(normalizeArtifactPath(file.path)))
       : [],
@@ -510,12 +606,20 @@ export function applyPrdClarificationRun(workflow: RequirementWorkflow, run: Run
   if (run.actionType !== 'PRD_CLARIFY' || !['SUCCEEDED', 'COMPLETED'].includes(run.status)) {
     return workflow;
   }
+  const sources = Array.isArray(run.params?.sources)
+    ? run.params.sources.map((item) => String(item).trim().replace(/\\/g, '/')).filter(Boolean)
+    : [];
+  const consumed = new Set(sources);
   const artifactPath =
     workflow.artifacts.find((artifact) => artifact.stage === 'PRD' && artifact.exists && artifact.kind !== 'directory')?.path ||
     workflow.stages.PRD.artifactPath ||
     `docs/${workflow.requirementId}/prd/analysis.md`;
   return {
     ...workflow,
+    prdClarification: '',
+    prdClarificationBlocks: [],
+    prdSourceFiles: (workflow.prdSourceFiles || []).filter((file) => !consumed.has(String(file.path || '').replace(/\\/g, '/'))),
+    sources: (workflow.sources || []).filter((source) => !consumed.has(String(source || '').replace(/\\/g, '/'))),
     currentStage: 'PRD',
     status: 'IN_PROGRESS',
     stages: {
@@ -527,6 +631,40 @@ export function applyPrdClarificationRun(workflow: RequirementWorkflow, run: Run
         runId: run.id
       }
     }
+  };
+}
+
+export function consumePrdAnalyzeInputsAfterRun(workflow: RequirementWorkflow, run: RunRecord): RequirementWorkflow {
+  if (run.actionType !== 'PRD_ANALYZE' || !['SUCCEEDED', 'COMPLETED'].includes(run.status)) {
+    return workflow;
+  }
+  const sources = Array.isArray(run.params?.sources)
+    ? run.params.sources.map((item) => String(item).trim().replace(/\\/g, '/')).filter(Boolean)
+    : [];
+  const consumed = new Set(sources);
+  return {
+    ...workflow,
+    prdClarification: '',
+    prdSupplementBlocks: [],
+    prdSourceFiles: (workflow.prdSourceFiles || []).filter((file) => !consumed.has(String(file.path || '').replace(/\\/g, '/'))),
+    sources: (workflow.sources || []).filter((source) => !consumed.has(String(source || '').replace(/\\/g, '/')))
+  };
+}
+
+export function consumeOpenSpecArtifactInputsAfterRun(workflow: RequirementWorkflow, run: RunRecord): RequirementWorkflow {
+  if (run.actionType !== 'OPENSPEC_FF' || !['SUCCEEDED', 'COMPLETED'].includes(run.status)) {
+    return workflow;
+  }
+  const sourceFiles = Array.isArray(run.params?.sourceFiles)
+    ? run.params.sourceFiles.map((item) => String(item).trim().replace(/\\/g, '/')).filter(Boolean)
+    : [];
+  const consumed = new Set(sourceFiles);
+  return {
+    ...workflow,
+    openSpecArtifactAdjustment: '',
+    openSpecSupplementBlocks: [],
+    openSpecVisualContextPaths: [],
+    techDesignSourceFiles: (workflow.techDesignSourceFiles || []).filter((file) => !consumed.has(String(file.path || '').replace(/\\/g, '/')))
   };
 }
 
@@ -1192,6 +1330,64 @@ export function createRouter(workspaceRoot: string) {
         return;
       }
 
+      const visualContextCandidatesMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/openspec-visual-context-candidates$/);
+      if (request.method === 'GET' && visualContextCandidatesMatch) {
+        const requirementId = visualContextCandidatesMatch[1];
+        const { root } = await resolveWorkflowStore(requestContext);
+        const workflow = (await loadMergedWorkflow(requestContext, requirementId)).workflow;
+        if (!workflow) {
+          send(response, 404, { message: '需求不存在' });
+          return;
+        }
+        send(response, 200, { data: { candidates: await listOpenSpecVisualContextCandidates(root, workflow) } });
+        return;
+      }
+
+      const supplementInputsMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/supplement-inputs$/);
+      if ((request.method === 'POST' || request.method === 'PATCH') && supplementInputsMatch) {
+        const requirementId = supplementInputsMatch[1];
+        const input = await parseBody<SupplementInputsUpdate>(request);
+        const { root, repository } = await resolveWorkflowStore(requestContext);
+        const lock = new WorkflowLock(root, requirementId);
+        await lock.acquire();
+        try {
+          let workflow = (await loadMergedWorkflow(requestContext, requirementId)).workflow;
+          if (!workflow) {
+            send(response, 404, { message: '需求不存在' });
+            return;
+          }
+          await assertCollaborationWritableWorkflow(requestContext, workflow);
+          const nextWorkflow: RequirementWorkflow = {
+            ...workflow,
+            prdClarification: hasBodyField(input, 'prdClarification') ? input.prdClarification || '' : workflow.prdClarification,
+            prdSupplementBlocks: hasBodyField(input, 'prdSupplementBlocks')
+              ? normalizeSupplementBlocksInput(input.prdSupplementBlocks)
+              : workflow.prdSupplementBlocks || [],
+            prdClarificationBlocks: hasBodyField(input, 'prdClarificationBlocks')
+              ? normalizeSupplementBlocksInput(input.prdClarificationBlocks)
+              : workflow.prdClarificationBlocks || [],
+            techDesignClarification: hasBodyField(input, 'techDesignClarification') ? input.techDesignClarification || '' : workflow.techDesignClarification,
+            techDesignSupplementBlocks: hasBodyField(input, 'techDesignSupplementBlocks')
+              ? normalizeSupplementBlocksInput(input.techDesignSupplementBlocks)
+              : workflow.techDesignSupplementBlocks || [],
+            openSpecArtifactAdjustment: hasBodyField(input, 'openSpecArtifactAdjustment')
+              ? input.openSpecArtifactAdjustment || ''
+              : workflow.openSpecArtifactAdjustment,
+            openSpecSupplementBlocks: hasBodyField(input, 'openSpecSupplementBlocks')
+              ? normalizeSupplementBlocksInput(input.openSpecSupplementBlocks)
+              : workflow.openSpecSupplementBlocks || [],
+            openSpecVisualContextPaths: hasBodyField(input, 'openSpecVisualContextPaths')
+              ? uniqueNormalizedPaths(input.openSpecVisualContextPaths || [])
+              : workflow.openSpecVisualContextPaths || []
+          };
+          workflow = await repository.save(nextWorkflow);
+          send(response, 200, { data: workflow });
+        } finally {
+          await lock.release();
+        }
+        return;
+      }
+
       const retrospectiveMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/retrospective$/);
       if (request.method === 'GET' && retrospectiveMatch) {
         const { root, workflow } = await loadMergedWorkflow(requestContext, retrospectiveMatch[1], true);
@@ -1248,6 +1444,71 @@ export function createRouter(workspaceRoot: string) {
           return;
         }
         send(response, 200, { data: await readGitChanges(root, workflow.projects || [], workflow.branchName, await loadCurrentProjectPaths(requestContext, true)) });
+        return;
+      }
+
+      const aiCompletenessMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/ai-completeness$/);
+      if (request.method === 'GET' && aiCompletenessMatch) {
+        const { workflow } = await loadMergedWorkflow(requestContext, aiCompletenessMatch[1]);
+        if (!workflow) {
+          send(response, 404, { message: '需求不存在' });
+          return;
+        }
+        send(response, 200, { data: await buildAiCodeCompletenessState(workflow) });
+        return;
+      }
+
+      const aiCompletenessCalculateMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/ai-completeness\/calculate$/);
+      if (request.method === 'POST' && aiCompletenessCalculateMatch) {
+        const requirementId = aiCompletenessCalculateMatch[1];
+        const input = await parseBody<AiCodeCompletenessInput>(request);
+        const { root, repository } = await resolveWorkflowStore(requestContext, true);
+        const lock = new WorkflowLock(root, requirementId);
+        await lock.acquire();
+        try {
+          let workflow = (await loadMergedWorkflow(requestContext, requirementId, true)).workflow;
+          if (!workflow) {
+            send(response, 404, { message: '需求不存在' });
+            return;
+          }
+          await assertWritableWorkflow(requestContext, workflow);
+          const projectPaths = workflow.projects?.length ? await loadCurrentProjectPaths(requestContext, true) : [];
+          const { state, result } = await calculateAiCodeCompleteness(root, workflow, input, projectPaths);
+          workflow = {
+            ...workflow,
+            aiCodeCompleteness: state
+          };
+          workflow = await saveWithArtifacts(root, repository, workflow);
+          send(response, 200, { data: { result, workflow } });
+        } finally {
+          await lock.release();
+        }
+        return;
+      }
+
+      const aiCompletenessCaptureMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/ai-completeness\/capture-ai-commit$/);
+      if (request.method === 'POST' && aiCompletenessCaptureMatch) {
+        const requirementId = aiCompletenessCaptureMatch[1];
+        const { root, repository } = await resolveWorkflowStore(requestContext, true);
+        const lock = new WorkflowLock(root, requirementId);
+        await lock.acquire();
+        try {
+          let workflow = (await loadMergedWorkflow(requestContext, requirementId, true)).workflow;
+          if (!workflow) {
+            send(response, 404, { message: '需求不存在' });
+            return;
+          }
+          await assertWritableWorkflow(requestContext, workflow);
+          const projectPaths = workflow.projects?.length ? await loadCurrentProjectPaths(requestContext, true) : [];
+          workflow = {
+            ...workflow,
+            aiCodeCompleteness: await captureRemoteAiCommits(root, workflow, projectPaths)
+          };
+          workflow = await repository.save(workflow);
+          send(response, 200, { data: workflow });
+        } finally {
+          await lock.release();
+        }
         return;
       }
 
@@ -1792,15 +2053,27 @@ export function createRouter(workspaceRoot: string) {
             workflow = {
               ...workflow,
               sources,
-              prdClarification: normalizePrdClarification(typeof params.description === 'string' ? params.description : workflow.prdClarification)
+              prdClarification: normalizePrdClarification(typeof params.description === 'string' ? params.description : workflow.prdClarification),
+              prdSupplementBlocks: Array.isArray(params.supplementBlocks)
+                ? normalizeSupplementBlocksInput(params.supplementBlocks)
+                : workflow.prdSupplementBlocks || []
             };
           }
           if (action.actionType === 'PRD_CLARIFY') {
             await assertPrdClarificationReady(root, workflow, action);
             const params = action.params || {};
+            const sources = Array.isArray(params.sources)
+              ? params.sources.map((item) => String(item).trim()).filter(Boolean)
+              : Array.isArray(params.sourceFiles)
+                ? params.sourceFiles.map((item) => String(item).trim()).filter(Boolean)
+                : [];
             workflow = {
               ...workflow,
-              prdClarification: normalizePrdClarification(typeof params.description === 'string' ? params.description : '')
+              sources: [...new Set([...(workflow.sources || []), ...sources])],
+              prdClarification: normalizePrdClarification(typeof params.description === 'string' ? params.description : ''),
+              prdClarificationBlocks: Array.isArray(params.supplementBlocks)
+                ? normalizeSupplementBlocksInput(params.supplementBlocks)
+                : workflow.prdClarificationBlocks || []
             };
           }
           if (action.actionType === 'DESIGN_GENERATE') {
@@ -1830,7 +2103,10 @@ export function createRouter(workspaceRoot: string) {
             workflow = {
               ...workflow,
               techDesignDocument: documentPath,
-              techDesignClarification: typeof params.clarification === 'string' ? params.clarification : workflow.techDesignClarification
+              techDesignClarification: typeof params.clarification === 'string' ? params.clarification : workflow.techDesignClarification,
+              techDesignSupplementBlocks: Array.isArray(params.supplementBlocks)
+                ? normalizeSupplementBlocksInput(params.supplementBlocks)
+                : workflow.techDesignSupplementBlocks || []
             };
           }
           if (['OPENSPEC_STATUS', 'OPENSPEC_NEW_CHANGE', 'OPENSPEC_FF', 'OPENSPEC_APPLY', 'OPENSPEC_VERIFY', 'OPENSPEC_ARCHIVE'].includes(action.actionType)) {
@@ -1847,7 +2123,23 @@ export function createRouter(workspaceRoot: string) {
               }
             };
           }
+          if (action.actionType === 'OPENSPEC_FF') {
+            const params = action.params || {};
+            workflow = {
+              ...workflow,
+              openSpecArtifactAdjustment: typeof params.artifactAdjustment === 'string' ? params.artifactAdjustment : workflow.openSpecArtifactAdjustment,
+              openSpecSupplementBlocks: Array.isArray(params.supplementBlocks)
+                ? normalizeSupplementBlocksInput(params.supplementBlocks)
+                : workflow.openSpecSupplementBlocks || []
+            };
+          }
           const projectPaths = workflow.projects?.length ? await loadCurrentProjectPaths(requestContext, true) : [];
+          if (effectiveAction.actionType === 'OPENSPEC_APPLY') {
+            workflow = {
+              ...workflow,
+              aiCodeCompleteness: await captureBaseCommits(root, workflow, projectPaths)
+            };
+          }
           const run = await executeAction(root, workflow, effectiveAction, async (updatedRun) => {
             const latest = await repository.load(requirementId);
             if (!latest) {
@@ -1860,6 +2152,9 @@ export function createRouter(workspaceRoot: string) {
               latest.runs.unshift(updatedRun);
             }
             let updatedWorkflow = applyImplementationRun(latest, updatedRun);
+            updatedWorkflow = consumePrdAnalyzeInputsAfterRun(updatedWorkflow, updatedRun);
+            updatedWorkflow = applyPrdClarificationRun(updatedWorkflow, updatedRun);
+            updatedWorkflow = consumeOpenSpecArtifactInputsAfterRun(updatedWorkflow, updatedRun);
             if (['SUCCEEDED', 'COMPLETED'].includes(updatedRun.status)) {
               try {
                 updatedWorkflow = (await finalizeSuccessfulTechDesignRuns(root, updatedWorkflow, requestContext)).workflow;
@@ -1911,6 +2206,7 @@ export function createRouter(workspaceRoot: string) {
           }
           workflow.runs.unshift(run);
           workflow = applyImplementationRun(workflow, run);
+          workflow = consumePrdAnalyzeInputsAfterRun(workflow, run);
           workflow = await consumeTechDesignInputsAfterRun(root, workflow, run, requestContext);
           await markMemoryRecallApplied(root, workflow, run, requestContext.projectId);
           const retrospectiveResult = await importRetrospectiveRunOutputs(root, workflow, run, requestContext.projectId);
@@ -1946,6 +2242,7 @@ export function createRouter(workspaceRoot: string) {
             );
           }
           workflow = applyPrdClarificationRun(workflow, run);
+          workflow = consumeOpenSpecArtifactInputsAfterRun(workflow, run);
           if (effectiveAction.actionType === 'RETURN_TO_IMPLEMENTATION') {
             const issues = await refreshCodeReviewIssues(root, workflow);
             workflow = returnToImplementation(workflow, issues);
@@ -2509,6 +2806,14 @@ export function createRouter(workspaceRoot: string) {
                 recallFeedbackCount: retrospective.recallFeedbackCount,
                 unresolvedRiskCount: retrospective.unresolvedRiskCount
               }
+            };
+          }
+          if (input.stage === 'IMPLEMENTATION' && input.implementationStep === 'CHANGE_INSPECTION' && input.decision === 'APPROVED') {
+            const projectPaths = workflow.projects?.length ? await loadCurrentProjectPaths(requestContext, true) : [];
+            const aiCommits = await assertProjectsCleanAndPushed(root, workflow.projects || [], workflow.branchName, projectPaths);
+            workflow = {
+              ...workflow,
+              aiCodeCompleteness: mergeAiCommitCaptures(workflow, aiCommits)
             };
           }
           workflow = await applyReview(root, workflow, input);
