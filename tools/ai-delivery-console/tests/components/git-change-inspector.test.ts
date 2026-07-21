@@ -7,7 +7,9 @@ import { ElMessage } from 'element-plus';
 
 vi.mock('@/api/client', () => ({
   apiClient: {
-    stageUntrackedFiles: vi.fn()
+    stageUntrackedFiles: vi.fn(),
+    getGitDiffPreview: vi.fn(),
+    getGitChangedFilePreview: vi.fn()
   }
 }));
 
@@ -17,7 +19,8 @@ vi.mock('element-plus', async () => {
     ...actual,
     ElMessage: {
       success: vi.fn(),
-      error: vi.fn()
+      error: vi.fn(),
+      warning: vi.fn()
     }
   };
 });
@@ -41,6 +44,20 @@ function componentStubs() {
     ElEmpty: {
       props: ['description'],
       template: '<div>{{ description }}<slot /></div>'
+    },
+    ElDialog: {
+      props: ['modelValue'],
+      template: '<div v-if="modelValue" class="dialog"><slot name="header" /><slot /></div>'
+    },
+    ElDropdown: {
+      template: '<div class="dropdown"><slot /><slot name="dropdown" /></div>'
+    },
+    ElDropdownMenu: {
+      template: '<div><slot /></div>'
+    },
+    ElDropdownItem: {
+      props: ['command'],
+      template: '<button class="dropdown-item"><slot /></button>'
     },
     ElRadioButton: {
       template: '<span><slot /></span>'
@@ -155,6 +172,12 @@ function baseSummary(): GitChangeSummary {
 describe('GitChangeInspector', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    Object.defineProperty(navigator, 'clipboard', {
+      value: {
+        writeText: vi.fn().mockResolvedValue(undefined)
+      },
+      configurable: true
+    });
   });
 
   it('展示工程概览、文件列表并用 diff2html 渲染差异', () => {
@@ -330,6 +353,109 @@ describe('GitChangeInspector', () => {
     expect(treePathByText('a.ts')?.classes()).toContain('git-file-path-modified');
     expect(treePathByText('new.ts')?.classes()).toContain('git-file-path-added');
     expect(treePathByText('generated.ts')?.classes()).toContain('git-file-path-pending');
+  });
+
+  it('在右侧 diff 文件头展示统计并支持单文件和全量展开收起', async () => {
+    const wrapper = mountInspector(baseSummary());
+
+    expect(wrapper.find('.git-diff-total').text()).toContain('1 个文件');
+    expect(wrapper.find('.git-diff-file-header').text()).toContain('src/a.ts');
+    expect(wrapper.find('.git-diff-file-header').text()).toContain('+1');
+    expect(wrapper.find('.git-diff-file-header').text()).toContain('-1');
+
+    await wrapper.find('.git-diff-file-toggle').trigger('click');
+    expect(wrapper.find('.git-diff-file-body').isVisible()).toBe(false);
+
+    await wrapper.find('.git-diff-expand-all-button').trigger('click');
+    expect(wrapper.find('.git-diff-file-body').isVisible()).toBe(true);
+
+    await wrapper.find('.git-diff-collapse-all-button').trigger('click');
+    expect(wrapper.find('.git-diff-file-body').isVisible()).toBe(false);
+  });
+
+  it('支持从右侧文件头复制路径并切换扩展上下文', async () => {
+    const summary = baseSummary();
+    const expandedDiff = [
+      'diff --git a/src/a.ts b/src/a.ts',
+      'index e69de29..4b825dc 100644',
+      '--- a/src/a.ts',
+      '+++ b/src/a.ts',
+      '@@ -1 +1 @@',
+      '-old',
+      '+new-with-context'
+    ].join('\n');
+    vi.mocked(apiClient.getGitDiffPreview).mockResolvedValue({
+      projectPath: 'opp-gateway',
+      filePath: undefined,
+      contextLines: 30,
+      diff: expandedDiff,
+      truncated: true,
+      files: summary.projects[0].files
+    });
+    const wrapper = mountInspector(summary);
+
+    // 菜单命令直接作用于当前 diff 文件头对应的文件。
+    const item = (wrapper.vm as any).renderedDiffFiles[0];
+    await (wrapper.vm as any).handleDiffFileCommand('copy', item);
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('src/a.ts');
+    expect(ElMessage.success).toHaveBeenCalledWith('已复制文件路径');
+
+    await wrapper.find('.git-context-select').setValue('30');
+    await flushPromises();
+
+    expect(apiClient.getGitDiffPreview).toHaveBeenCalledWith('172014', {
+      projectPath: 'opp-gateway',
+      filePath: undefined,
+      contextLines: 30
+    });
+    expect(wrapper.html()).toContain('new-with-context');
+    expect(ElMessage.warning).toHaveBeenCalledWith('扩展上下文后的 diff 内容过长，已截断展示');
+  });
+
+  it('支持从右侧文件头查看完整文件并定位首个变更行', async () => {
+    vi.mocked(apiClient.getGitChangedFilePreview).mockResolvedValue({
+      projectPath: 'opp-gateway',
+      filePath: 'src/a.ts',
+      language: 'typescript',
+      size: 16,
+      updatedAt: '2026-05-26T10:00:00.000Z',
+      focusLine: 1,
+      previewable: true,
+      content: 'new\nnext\n'
+    });
+    const wrapper = mountInspector(baseSummary());
+    const item = (wrapper.vm as any).renderedDiffFiles[0];
+
+    // 完整文件预览使用首个变更新行号作为 focusLine，打开后应展示源码内容。
+    await (wrapper.vm as any).handleDiffFileCommand('view', item);
+    await flushPromises();
+
+    expect(apiClient.getGitChangedFilePreview).toHaveBeenCalledWith('172014', {
+      projectPath: 'opp-gateway',
+      filePath: 'src/a.ts',
+      focusLine: 1
+    });
+    expect(wrapper.find('.dialog').text()).toContain('src/a.ts');
+    expect(wrapper.find('.dialog').text()).toContain('typescript');
+    expect(wrapper.find('.git-file-preview-line.focus').text()).toContain('new');
+  });
+
+  it('完整文件不可预览时展示可读提示', async () => {
+    vi.mocked(apiClient.getGitChangedFilePreview).mockResolvedValue({
+      projectPath: 'opp-gateway',
+      filePath: 'src/a.ts',
+      language: 'typescript',
+      size: 0,
+      previewable: false,
+      reason: '文件当前不存在或不可预览'
+    });
+    const wrapper = mountInspector(baseSummary());
+    const item = (wrapper.vm as any).renderedDiffFiles[0];
+
+    await (wrapper.vm as any).handleDiffFileCommand('view', item);
+    await flushPromises();
+
+    expect(wrapper.find('.dialog').text()).toContain('文件当前不存在或不可预览');
   });
 
   it('支持选择待确认新文件并在暂存成功后回传新摘要', async () => {

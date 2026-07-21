@@ -170,7 +170,7 @@
                 <div class="design-input-heading">
                   <div>
                     <strong>增量上下文</strong>
-                    <p class="muted">仅新增答疑、批注、补充输入会纳入下一次生成。</p>
+                    <p class="muted">仅新增答疑、批注、补充输入会纳入下一次生成，补充输入成功生成后自动清空，失败时保留。</p>
                   </div>
                 </div>
                 <div class="design-context-grid">
@@ -195,19 +195,12 @@
                     </div>
                   </section>
                   <section class="design-context-card design-supplement-card" aria-label="技术方案补充说明">
-                    <div class="design-context-card-header">
-                      <div>
-                        <strong>补充说明</strong>
-                        <p class="muted">可补充文本、截图、设计稿或文件。</p>
-                      </div>
-                    </div>
                     <SupplementInputSummary
                       :text="designClarification"
                       :blocks="techDesignSupplementBlocks"
                       :files="techDesignSourceFiles"
                       @edit="techDesignSupplementDialogVisible = true"
                     />
-                    <p class="design-supplement-note muted">补充输入成功生成后自动清空，失败时保留。</p>
                   </section>
                 </div>
                 <div class="design-run-footer">

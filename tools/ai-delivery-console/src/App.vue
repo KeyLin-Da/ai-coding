@@ -23,9 +23,22 @@
         <el-button v-if="auth.isAuthenticated" :icon="Refresh" :loading="refreshing" @click="refresh">刷新</el-button>
       </div>
     </header>
-    <main class="app-main" :class="{ 'with-project-nav': showProjectNav }">
-      <aside v-if="showProjectNav" class="project-nav" aria-label="项目导航">
-        <el-menu :default-active="activeMenu" class="project-menu" router>
+    <main
+      class="app-main"
+      :class="{ 'with-project-nav': showProjectNav, 'project-nav-collapsed': showProjectNav && projectNavCollapsed }"
+    >
+      <aside v-if="showProjectNav" class="project-nav" :class="{ collapsed: projectNavCollapsed }" aria-label="项目导航">
+        <div class="project-nav-toggle-row">
+          <el-button
+            class="project-nav-toggle"
+            circle
+            :icon="projectNavCollapsed ? Expand : Fold"
+            :title="projectNavCollapsed ? '展开左侧菜单' : '收起左侧菜单'"
+            :aria-label="projectNavCollapsed ? '展开左侧菜单' : '收起左侧菜单'"
+            @click="toggleProjectNav"
+          />
+        </div>
+        <el-menu :default-active="activeMenu" class="project-menu" :collapse="projectNavCollapsed" router>
           <el-menu-item index="/">
             <el-icon><List /></el-icon>
             <span>需求工作流</span>
@@ -34,7 +47,7 @@
             <template #title>
               <el-icon><Collection /></el-icon>
               <span>项目记忆</span>
-              <el-badge v-if="pendingMemoryCount" class="nav-badge" :value="pendingMemoryCount" />
+              <el-badge v-if="pendingMemoryCount && !projectNavCollapsed" class="nav-badge" :value="pendingMemoryCount" />
             </template>
             <el-menu-item index="/memory">经验库</el-menu-item>
             <el-menu-item index="/memory/candidates">
@@ -58,7 +71,7 @@
 </template>
 
 <script setup lang="ts">
-import { Collection, FolderOpened, List, Refresh, Setting, User } from '@element-plus/icons-vue';
+import { Collection, Expand, FolderOpened, Fold, List, Refresh, Setting, User } from '@element-plus/icons-vue';
 import { computed, onMounted, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import { useRoute } from 'vue-router';
@@ -74,6 +87,17 @@ const store = useWorkflowStore();
 const refreshing = ref(false);
 const syncingRepo = ref(false);
 const pendingMemoryCount = ref(0);
+const projectNavCollapsedStorageKey = 'ai-delivery-console:project-nav-collapsed';
+
+function readProjectNavCollapsed() {
+  try {
+    return window.localStorage.getItem(projectNavCollapsedStorageKey) === '1';
+  } catch {
+    return false;
+  }
+}
+
+const projectNavCollapsed = ref(readProjectNavCollapsed());
 
 const showProjectNav = computed(() => {
   if (!auth.isAuthenticated || !project.current || route.meta.public) {
@@ -148,6 +172,15 @@ async function syncRepo() {
   }
 }
 
+function toggleProjectNav() {
+  projectNavCollapsed.value = !projectNavCollapsed.value;
+  try {
+    window.localStorage.setItem(projectNavCollapsedStorageKey, projectNavCollapsed.value ? '1' : '0');
+  } catch {
+    // localStorage 不可用时忽略，当前会话内仍可正常折叠。
+  }
+}
+
 onMounted(loadPendingMemoryCount);
 watch(() => project.current?.id, loadPendingMemoryCount);
 watch(() => route.fullPath, () => {
@@ -165,16 +198,44 @@ watch(() => route.fullPath, () => {
   align-items: start;
 }
 
+.app-main.with-project-nav.project-nav-collapsed {
+  grid-template-columns: 64px minmax(0, 1fr);
+}
+
 .project-nav {
   position: sticky;
   top: 16px;
+  width: 224px;
   min-width: 0;
 }
 
+.project-nav.collapsed {
+  width: 64px;
+}
+
+.project-nav-toggle-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.project-nav.collapsed .project-nav-toggle-row {
+  justify-content: center;
+}
+
+.project-nav-toggle {
+  flex: 0 0 auto;
+}
+
 .project-menu {
+  width: 100%;
   border: 1px solid #dbe3ef;
   border-radius: 8px;
   overflow: hidden;
+}
+
+.project-menu.el-menu--collapse {
+  width: 64px;
 }
 
 .app-content {
@@ -194,8 +255,17 @@ watch(() => route.fullPath, () => {
     grid-template-columns: 1fr;
   }
 
+  .app-main.with-project-nav.project-nav-collapsed {
+    grid-template-columns: 1fr;
+  }
+
   .project-nav {
     position: static;
+    width: 100%;
+  }
+
+  .project-nav.collapsed {
+    width: 64px;
   }
 }
 </style>

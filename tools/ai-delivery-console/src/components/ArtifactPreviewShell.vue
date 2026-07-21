@@ -114,7 +114,14 @@
               @mouseup="captureSelection"
               @keyup="captureSelection"
             ></article>
-            <iframe v-else-if="isHtml" class="artifact-frame" :src="htmlPreviewUrl" title="产物预览"></iframe>
+            <iframe
+              v-else-if="isHtml"
+              ref="htmlFrameRef"
+              class="artifact-frame"
+              :src="htmlPreviewUrl"
+              title="产物预览"
+              @load="handleHtmlFrameLoad"
+            ></iframe>
             <iframe v-else-if="isPdf" class="artifact-frame" :src="assetUrl" title="产物预览"></iframe>
             <div v-else-if="isImage" class="artifact-image-wrap">
               <img :src="assetUrl" :alt="artifact?.label || '产物图片'" />
@@ -239,6 +246,7 @@ const emit = defineEmits<{
 
 const markdownPreviewRef = ref<HTMLElement>();
 const previewScrollRef = ref<HTMLElement>();
+const htmlFrameRef = ref<HTMLIFrameElement>();
 const annotationPanelRef = ref<{ focusAnnotation: (annotationId: string) => void }>();
 const versionDiffDialog = ref<InstanceType<typeof ArtifactVersionDiffDialog>>();
 const eyeCareStorageKey = 'ai-delivery-preview-eye-care';
@@ -247,16 +255,113 @@ const minZoomPercent = 60;
 const maxZoomPercent = 400;
 const defaultZoomPercent = 100;
 const zoomStepPercent = 10;
-const sequenceReadableZoomThreshold = 130;
-const sequenceReadableScale = 0.1;
-const sequenceReadableMinWidth = 2300;
 const sequenceDiagramMinZoomPercent = 60;
 const sequenceDiagramMaxZoomPercent = 300;
 const sequenceDiagramDefaultZoomPercent = 100;
-const sequenceDiagramZoomStepPercent = 10;
+const sequenceDiagramZoomStepPercent = 5;
+const annotationPromptZIndex = 3300;
 const markdownRendererVersion = 'markdown-v1';
 const mermaidRendererVersion = 'mermaid-v1';
 const mermaidTheme = 'default';
+const junitFallbackStyleId = 'ai-delivery-junit-report-fallback-style';
+const junitFallbackStyle = `
+  html, body {
+    margin: 0 !important;
+    min-height: 100%;
+    background: #f6f8fb !important;
+    color: #172033 !important;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif !important;
+    line-height: 1.58 !important;
+  }
+
+  body {
+    padding: 32px clamp(18px, 4vw, 48px) 48px !important;
+  }
+
+  body > h1:first-child,
+  body > h2:first-child,
+  body > section,
+  body > table,
+  body > p,
+  body > div {
+    max-width: 1180px;
+  }
+
+  h1 {
+    margin: 0 0 20px !important;
+    padding-bottom: 14px;
+    border-bottom: 2px solid #dbe5f3;
+    color: #111827 !important;
+    font-size: 30px !important;
+    line-height: 1.25 !important;
+  }
+
+  h2 {
+    margin: 30px 0 12px !important;
+    padding-left: 12px;
+    border-left: 4px solid #3b82f6;
+    color: #172033 !important;
+    font-size: 22px !important;
+  }
+
+  h3 {
+    margin: 24px 0 10px !important;
+    color: #172033 !important;
+    font-size: 17px !important;
+  }
+
+  p, .section p {
+    color: #4b5b73 !important;
+  }
+
+  a {
+    color: #2563eb !important;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+  }
+
+  table {
+    width: 100% !important;
+    margin: 14px 0 24px !important;
+    border-spacing: 0 !important;
+    border-collapse: collapse !important;
+    overflow: hidden;
+    border: 1px solid #dbe3ef !important;
+    border-radius: 8px;
+    background: #fff !important;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+  }
+
+  th,
+  td {
+    padding: 10px 12px !important;
+    border: 1px solid #dbe3ef !important;
+    text-align: left !important;
+    vertical-align: middle !important;
+    white-space: nowrap;
+  }
+
+  th {
+    color: #1e293b !important;
+    background: #f1f5f9 !important;
+    font-weight: 700 !important;
+  }
+
+  tr:nth-child(even) td {
+    background: #f8fafc !important;
+  }
+
+  img[src*="icon_"],
+  img[src*="/logos/"],
+  img[src*="logos/"] {
+    display: none !important;
+  }
+
+  hr {
+    border: 0;
+    border-top: 1px solid #dbe3ef;
+  }
+`;
 const zoomPercent = ref(defaultZoomPercent);
 const readingMode = ref<ReadingMode>('RICH');
 const internalContent = ref('');
@@ -277,6 +382,7 @@ let renderGeneration = 0;
 let richPreviewWarningPath = '';
 let markdownFallbackWarningKey = '';
 let annotationHighlightFlashTimer: ReturnType<typeof setTimeout> | undefined;
+let fullscreenSequenceDiagram: HTMLElement | undefined;
 
 function readEyeCareMode() {
   try {
@@ -329,6 +435,7 @@ const isMarkdown = computed(() => props.artifact?.kind === 'markdown' || ['.md',
 const isHtml = computed(() => props.artifact?.kind === 'html' || ['.html', '.htm'].includes(extension.value));
 const isPdf = computed(() => extension.value === '.pdf');
 const isImage = computed(() => props.artifact?.kind === 'image' || ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'].includes(extension.value));
+const isJUnitHtml = computed(() => Boolean(isHtml.value && props.artifact?.path.replace(/\\/g, '/').includes('/junit/')));
 const requirementId = computed(() => props.artifact?.path.match(/^docs\/([^/]+)\//)?.[1] || '');
 const requirementPk = computed(() => (props.requirementPk == null || props.requirementPk === '' ? '' : String(props.requirementPk)));
 const isTechDesignMarkdown = computed(() =>
@@ -379,6 +486,38 @@ const previewHtml = computed(() => {
       : (assetPath) => artifactReadUrl(assetPath, props.projectId)
   );
 });
+
+function looksLikeSurefireReport(documentRef: Document) {
+  const title = documentRef.title || '';
+  const bodyText = documentRef.body?.textContent || '';
+  return /Surefire Report/i.test(`${title}\n${bodyText}`) || /Tests\s+Errors\s+Failures\s+Skipped\s+Success Rate/i.test(bodyText);
+}
+
+function injectJUnitReportFallbackStyle(documentRef: Document) {
+  if (documentRef.getElementById(junitFallbackStyleId)) {
+    return;
+  }
+  const style = documentRef.createElement('style');
+  style.id = junitFallbackStyleId;
+  style.textContent = junitFallbackStyle;
+  documentRef.head?.appendChild(style);
+  documentRef.documentElement.classList.add('ai-delivery-junit-report-preview');
+}
+
+function handleHtmlFrameLoad() {
+  if (!isJUnitHtml.value) {
+    return;
+  }
+  try {
+    const documentRef = htmlFrameRef.value?.contentDocument;
+    if (!documentRef || !looksLikeSurefireReport(documentRef)) {
+      return;
+    }
+    injectJUnitReportFallbackStyle(documentRef);
+  } catch {
+    // 跨源或浏览器限制时保持原始 HTML 展示。
+  }
+}
 const formattedContent = computed(() => {
   if (extension.value === '.json') {
     try {
@@ -795,6 +934,14 @@ function readSvgNaturalWidth(svg: SVGElement) {
   return naturalWidth;
 }
 
+function readSvgRenderedWidth(svg: SVGElement) {
+  const rect = typeof svg.getBoundingClientRect === 'function' ? svg.getBoundingClientRect() : undefined;
+  if (rect && Number.isFinite(rect.width) && rect.width > 0) {
+    return rect.width;
+  }
+  return readSvgNumericValue(svg.style.width);
+}
+
 function clampSequenceDiagramZoomPercent(value: number) {
   return Math.min(sequenceDiagramMaxZoomPercent, Math.max(sequenceDiagramMinZoomPercent, value));
 }
@@ -813,10 +960,12 @@ function updateSequenceDiagramToolbar(diagram: HTMLElement) {
     return;
   }
   const zoom = readSequenceDiagramZoomPercent(diagram);
+  const isFullscreen = diagram.classList.contains('sequence-diagram-fullscreen');
   const percent = toolbar.querySelector<HTMLElement>('[data-sequence-zoom-percent="true"]');
   const zoomOutButton = toolbar.querySelector<HTMLButtonElement>('[data-sequence-zoom-action="out"]');
   const zoomInButton = toolbar.querySelector<HTMLButtonElement>('[data-sequence-zoom-action="in"]');
   const resetButton = toolbar.querySelector<HTMLButtonElement>('[data-sequence-zoom-action="reset"]');
+  const fullscreenButton = toolbar.querySelector<HTMLButtonElement>('[data-sequence-zoom-action="fullscreen"]');
   if (percent) {
     percent.textContent = `${zoom}%`;
   }
@@ -828,6 +977,11 @@ function updateSequenceDiagramToolbar(diagram: HTMLElement) {
   }
   if (resetButton) {
     resetButton.disabled = zoom === sequenceDiagramDefaultZoomPercent;
+  }
+  if (fullscreenButton) {
+    fullscreenButton.textContent = isFullscreen ? '退出' : '全屏';
+    fullscreenButton.title = isFullscreen ? '退出全屏' : '全屏查看时序图';
+    fullscreenButton.setAttribute('aria-label', isFullscreen ? '退出全屏' : '全屏查看时序图');
   }
 }
 
@@ -845,21 +999,48 @@ function ensureSequenceDiagramToolbar(diagram: HTMLElement) {
       <span class="sequence-diagram-zoom-percent" data-sequence-zoom-percent="true">100%</span>
       <button type="button" class="sequence-diagram-zoom-button" data-sequence-zoom-action="in" title="放大时序图" aria-label="放大时序图">+</button>
       <button type="button" class="sequence-diagram-reset-button" data-sequence-zoom-action="reset" title="恢复时序图 100%" aria-label="恢复时序图 100%">1:1</button>
+      <button type="button" class="sequence-diagram-fullscreen-button" data-sequence-zoom-action="fullscreen" title="全屏查看时序图" aria-label="全屏查看时序图">全屏</button>
     `;
     diagram.prepend(toolbar);
   }
   updateSequenceDiagramToolbar(diagram);
 }
 
+function applyMermaidDiagramDocumentZoomIsolation(diagram: HTMLElement) {
+  const inverseZoom = 1 / zoomScale.value;
+  diagram.style.setProperty('--mermaid-document-zoom-scale', Number.isFinite(inverseZoom) ? String(inverseZoom) : '1');
+}
+
+function applyDefaultMermaidSvgSize(svg: SVGElement) {
+  svg.style.width = '';
+  svg.style.minWidth = '';
+  svg.style.maxWidth = '100%';
+  svg.style.height = 'auto';
+}
+
+function resetSequenceDiagramZoomBaseWidth(diagram: HTMLElement) {
+  delete diagram.dataset.sequenceZoomBaseWidth;
+}
+
+function readSequenceDiagramZoomBaseWidth(diagram: HTMLElement, svg: SVGElement) {
+  const cachedWidth = readSvgNumericValue(diagram.dataset.sequenceZoomBaseWidth);
+  if (cachedWidth > 0) {
+    return cachedWidth;
+  }
+  const baseWidth = Math.ceil(readSvgRenderedWidth(svg) || readSvgNaturalWidth(svg));
+  if (baseWidth > 0) {
+    diagram.dataset.sequenceZoomBaseWidth = String(baseWidth);
+  }
+  return baseWidth;
+}
+
 function applyMermaidSvgSize(diagram: HTMLElement, svg: SVGElement) {
   const isSequenceDiagram = diagram.dataset.mermaidType === 'sequence';
   if (isSequenceDiagram) {
     const sequenceZoomPercent = readSequenceDiagramZoomPercent(diagram);
-    const shouldUseReadableSequenceSize =
-      zoomPercent.value >= sequenceReadableZoomThreshold || sequenceZoomPercent !== sequenceDiagramDefaultZoomPercent;
+    const shouldUseReadableSequenceSize = sequenceZoomPercent !== sequenceDiagramDefaultZoomPercent;
     if (shouldUseReadableSequenceSize) {
-      const naturalWidth = readSvgNaturalWidth(svg);
-      const baseWidth = Math.ceil(Math.max(naturalWidth * sequenceReadableScale, sequenceReadableMinWidth));
+      const baseWidth = readSequenceDiagramZoomBaseWidth(diagram, svg);
       const targetWidth = Math.ceil(baseWidth * (sequenceZoomPercent / 100));
       svg.style.width = `${targetWidth}px`;
       svg.style.minWidth = `${targetWidth}px`;
@@ -867,11 +1048,9 @@ function applyMermaidSvgSize(diagram: HTMLElement, svg: SVGElement) {
       svg.style.height = 'auto';
       return;
     }
+    resetSequenceDiagramZoomBaseWidth(diagram);
   }
-  svg.style.width = '';
-  svg.style.minWidth = '';
-  svg.style.maxWidth = '100%';
-  svg.style.height = 'auto';
+  applyDefaultMermaidSvgSize(svg);
 }
 
 function setSequenceDiagramZoomPercent(diagram: HTMLElement, value: number) {
@@ -884,15 +1063,46 @@ function setSequenceDiagramZoomPercent(diagram: HTMLElement, value: number) {
   updateSequenceDiagramToolbar(diagram);
 }
 
+function setSequenceDiagramFullscreen(diagram: HTMLElement, fullscreen: boolean) {
+  hideSelectionMenu();
+  if (fullscreenSequenceDiagram && fullscreenSequenceDiagram !== diagram) {
+    fullscreenSequenceDiagram.classList.remove('sequence-diagram-fullscreen');
+    fullscreenSequenceDiagram.dataset.sequenceFullscreen = 'false';
+    updateSequenceDiagramToolbar(fullscreenSequenceDiagram);
+  }
+  diagram.classList.toggle('sequence-diagram-fullscreen', fullscreen);
+  diagram.dataset.sequenceFullscreen = fullscreen ? 'true' : 'false';
+  fullscreenSequenceDiagram = fullscreen ? diagram : undefined;
+  resetSequenceDiagramZoomBaseWidth(diagram);
+  const svg = diagram.querySelector<SVGElement>('svg');
+  if (svg) {
+    applyDefaultMermaidSvgSize(svg);
+    applyMermaidSvgSize(diagram, svg);
+  }
+  updateSequenceDiagramToolbar(diagram);
+}
+
+function exitSequenceDiagramFullscreen() {
+  if (!fullscreenSequenceDiagram) {
+    return false;
+  }
+  setSequenceDiagramFullscreen(fullscreenSequenceDiagram, false);
+  return true;
+}
+
 function enhanceMermaidDiagrams() {
   if (!markdownPreviewRef.value) {
     return;
+  }
+  if (fullscreenSequenceDiagram && !markdownPreviewRef.value.contains(fullscreenSequenceDiagram)) {
+    fullscreenSequenceDiagram = undefined;
   }
   markdownPreviewRef.value.querySelectorAll<HTMLElement>('.mermaid-diagram').forEach((diagram) => {
     const svg = diagram.querySelector<SVGElement>('svg');
     if (!svg) {
       return;
     }
+    applyMermaidDiagramDocumentZoomIsolation(diagram);
     if (diagram.dataset.mermaidType === 'sequence') {
       ensureSequenceDiagramToolbar(diagram);
     }
@@ -1123,7 +1333,8 @@ async function createAnnotationFromSelection() {
       inputType: 'textarea',
       inputPlaceholder: '请输入批注意见',
       confirmButtonText: '保存',
-      cancelButtonText: '取消'
+      cancelButtonText: '取消',
+      zIndex: annotationPromptZIndex
     });
     const comment = String(result.value || '').trim();
     if (!comment) {
@@ -1396,11 +1607,18 @@ function handleMarkdownPreviewClick(event: MouseEvent) {
   }
   if (action === 'reset') {
     setSequenceDiagramZoomPercent(diagram, sequenceDiagramDefaultZoomPercent);
+    return;
+  }
+  if (action === 'fullscreen') {
+    setSequenceDiagramFullscreen(diagram, !diagram.classList.contains('sequence-diagram-fullscreen'));
   }
 }
 
 function handleZoomShortcut(event: KeyboardEvent) {
   if (event.key === 'Escape') {
+    if (exitSequenceDiagramFullscreen()) {
+      event.preventDefault();
+    }
     clearSelectionDraft();
     return;
   }
@@ -1436,6 +1654,7 @@ onUnmounted(() => {
   window.removeEventListener('keydown', handleZoomShortcut);
   window.removeEventListener('mouseup', captureSelection);
   window.removeEventListener(TECH_DESIGN_ANNOTATION_CHANGED_EVENT, handleTechDesignAnnotationChanged);
+  exitSequenceDiagramFullscreen();
   outlineObserver?.disconnect();
   if (annotationHighlightFlashTimer) {
     clearTimeout(annotationHighlightFlashTimer);
@@ -1564,6 +1783,17 @@ function clonePreviewForExport() {
     parent.removeChild(node);
     parent.normalize();
   });
+  clone.querySelectorAll<HTMLElement>('.mermaid-diagram').forEach((diagram) => {
+    diagram.classList.remove('sequence-diagram-fullscreen');
+    diagram.style.removeProperty('--mermaid-document-zoom-scale');
+    diagram.removeAttribute('data-sequence-fullscreen');
+    const fullscreenButton = diagram.querySelector<HTMLButtonElement>('[data-sequence-zoom-action="fullscreen"]');
+    if (fullscreenButton) {
+      fullscreenButton.textContent = '全屏';
+      fullscreenButton.title = '全屏查看时序图';
+      fullscreenButton.setAttribute('aria-label', '全屏查看时序图');
+    }
+  });
   return clone.innerHTML;
 }
 
@@ -1634,6 +1864,7 @@ function buildExportHtml(name: string) {
     }
     .mermaid-diagram {
       position: relative;
+      zoom: var(--mermaid-document-zoom-scale, 1);
       width: 100%;
       margin: 24px 0 28px;
       overflow-x: auto;
@@ -1660,7 +1891,8 @@ function buildExportHtml(name: string) {
       box-shadow: 0 6px 18px rgba(15, 23, 42, 0.1);
     }
     .sequence-diagram-zoom-button,
-    .sequence-diagram-reset-button {
+    .sequence-diagram-reset-button,
+    .sequence-diagram-fullscreen-button {
       height: 24px;
       min-width: 24px;
       padding: 0 7px;
@@ -1671,10 +1903,24 @@ function buildExportHtml(name: string) {
       cursor: pointer;
     }
     .sequence-diagram-zoom-button:disabled,
-    .sequence-diagram-reset-button:disabled {
+    .sequence-diagram-reset-button:disabled,
+    .sequence-diagram-fullscreen-button:disabled {
       color: #94a3b8;
       cursor: not-allowed;
       background: #f8fafc;
+    }
+    .sequence-diagram-fullscreen {
+      position: fixed;
+      inset: 18px;
+      z-index: 3100;
+      width: auto;
+      margin: 0;
+      padding: 54px 18px 18px;
+      overflow: auto;
+      border: 1px solid #d8e0ec;
+      border-radius: 8px;
+      background: #ffffff;
+      box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24);
     }
     .sequence-diagram-zoom-percent {
       min-width: 44px;
@@ -2013,6 +2259,7 @@ defineExpose({ downloadMarkdownArtifact, downloadOriginalArtifact });
 
 .artifact-markdown :deep(.mermaid-diagram) {
   position: relative;
+  zoom: var(--mermaid-document-zoom-scale, 1);
   width: 100%;
   margin: 24px 0 28px;
   padding: 8px 0 14px;
@@ -2052,7 +2299,8 @@ defineExpose({ downloadMarkdownArtifact, downloadOriginalArtifact });
 }
 
 .artifact-markdown :deep(.sequence-diagram-zoom-button),
-.artifact-markdown :deep(.sequence-diagram-reset-button) {
+.artifact-markdown :deep(.sequence-diagram-reset-button),
+.artifact-markdown :deep(.sequence-diagram-fullscreen-button) {
   height: 24px;
   min-width: 24px;
   padding: 0 7px;
@@ -2066,10 +2314,30 @@ defineExpose({ downloadMarkdownArtifact, downloadOriginalArtifact });
 }
 
 .artifact-markdown :deep(.sequence-diagram-zoom-button:disabled),
-.artifact-markdown :deep(.sequence-diagram-reset-button:disabled) {
+.artifact-markdown :deep(.sequence-diagram-reset-button:disabled),
+.artifact-markdown :deep(.sequence-diagram-fullscreen-button:disabled) {
   color: #94a3b8;
   cursor: not-allowed;
   background: #f8fafc;
+}
+
+.artifact-markdown :deep(.sequence-diagram-fullscreen) {
+  position: fixed;
+  inset: 18px;
+  z-index: 3100;
+  width: auto;
+  margin: 0;
+  padding: 54px 18px 18px;
+  overflow: auto;
+  border: 1px solid #d8e0ec;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24);
+}
+
+.artifact-preview-shell.eye-care .artifact-markdown :deep(.sequence-diagram-fullscreen) {
+  border-color: #d6c8a7;
+  background: #f8f1df;
 }
 
 .artifact-markdown :deep(.sequence-diagram-zoom-percent) {
@@ -2165,7 +2433,7 @@ defineExpose({ downloadMarkdownArtifact, downloadOriginalArtifact });
 
 .selection-annotation-menu {
   position: fixed;
-  z-index: 2200;
+  z-index: 3200;
   transform: translateX(-50%);
   filter: drop-shadow(0 8px 18px rgba(15, 23, 42, 0.18));
 }

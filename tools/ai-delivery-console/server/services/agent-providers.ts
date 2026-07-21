@@ -60,41 +60,40 @@ function defaultProviders(): AgentProvider[] {
       available: Boolean(serverConfig.codexCommand),
       supportsStreaming: true,
       supportsInteractive: Boolean(serverConfig.codexInteractiveCommand)
+    },
+    {
+      id: 'codebuddy',
+      name: 'CodeBuddy',
+      description: '使用本机 CodeBuddy CLI 执行技能 Prompt。',
+      inputMode: 'STDIN',
+      command: splitCommand(serverConfig.codebuddyCommand),
+      interactiveCommand: splitCommand(serverConfig.codebuddyInteractiveCommand),
+      available: isCliAvailable('codebuddy'),
+      supportsStreaming: true,
+      supportsInteractive: Boolean(serverConfig.codebuddyInteractiveCommand)
+    },
+    {
+      id: 'qoder',
+      name: 'Qoder',
+      description: '使用本机 qcode CLI 执行技能 Prompt。',
+      inputMode: 'STDIN',
+      command: splitCommand(serverConfig.qoderCommand),
+      interactiveCommand: splitCommand(serverConfig.qoderInteractiveCommand),
+      available: isCliAvailable('qcode'),
+      supportsStreaming: false,
+      supportsInteractive: Boolean(serverConfig.qoderInteractiveCommand)
+    },
+    {
+      id: 'qwen',
+      name: 'Qwen',
+      description: '使用本机 Qwen CLI 执行技能 Prompt。',
+      inputMode: 'STDIN',
+      command: splitCommand(serverConfig.qwenCommand),
+      interactiveCommand: splitCommand(serverConfig.qwenInteractiveCommand),
+      available: isCliAvailable('qwen'),
+      supportsStreaming: false,
+      supportsInteractive: Boolean(serverConfig.qwenInteractiveCommand)
     }
-//,
-//    {
-//      id: 'codebuddy',
-//      name: 'CodeBuddy',
-//      description: '使用本机 CodeBuddy CLI 执行技能 Prompt。',
-//      inputMode: 'STDIN',
-//      command: splitCommand(serverConfig.codebuddyCommand),
-//      interactiveCommand: splitCommand(serverConfig.codebuddyInteractiveCommand),
-//      available: isCliAvailable('codebuddy'),
-//      supportsStreaming: true,
-//      supportsInteractive: Boolean(serverConfig.codebuddyInteractiveCommand)
-//    },
-//    {
-//      id: 'qoder',
-//      name: 'Qoder',
-//      description: '使用本机 qcode CLI 执行技能 Prompt。',
-//      inputMode: 'STDIN',
-//      command: splitCommand(serverConfig.qoderCommand),
-//      interactiveCommand: splitCommand(serverConfig.qoderInteractiveCommand),
-//      available: isCliAvailable('qcode'),
-//      supportsStreaming: false,
-//      supportsInteractive: Boolean(serverConfig.qoderInteractiveCommand)
-//    },
-//    {
-//      id: 'qwen',
-//      name: 'Qwen',
-//      description: '使用本机 Qwen CLI 执行技能 Prompt。',
-//      inputMode: 'STDIN',
-//      command: splitCommand(serverConfig.qwenCommand),
-//      interactiveCommand: splitCommand(serverConfig.qwenInteractiveCommand),
-//      available: isCliAvailable('qwen'),
-//      supportsStreaming: false,
-//      supportsInteractive: Boolean(serverConfig.qwenInteractiveCommand)
-//    }
   ];
 }
 

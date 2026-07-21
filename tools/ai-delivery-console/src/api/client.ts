@@ -6,6 +6,8 @@ import type {
   AgentProvider,
   ArtifactRef,
   GitChangeSummary,
+  GitDiffPreview,
+  GitFilePreview,
   GitStageUntrackedInput,
   OpenSpecVisualContextCandidate,
   OpenSpecSummary,
@@ -973,6 +975,26 @@ export const apiClient = {
   },
   getGitChanges(requirementId: string) {
     return runnerRequest<GitChangeSummary>(`/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/git-changes`);
+  },
+  getGitDiffPreview(requirementId: string, input: { projectPath: string; filePath?: string; contextLines?: number }) {
+    const params = new URLSearchParams({
+      projectPath: input.projectPath,
+      contextLines: String(input.contextLines || 3)
+    });
+    if (input.filePath) {
+      params.set('filePath', input.filePath);
+    }
+    return runnerRequest<GitDiffPreview>(`/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/git-changes/diff?${params.toString()}`);
+  },
+  getGitChangedFilePreview(requirementId: string, input: { projectPath: string; filePath: string; focusLine?: number }) {
+    const params = new URLSearchParams({
+      projectPath: input.projectPath,
+      filePath: input.filePath
+    });
+    if (input.focusLine) {
+      params.set('focusLine', String(input.focusLine));
+    }
+    return runnerRequest<GitFilePreview>(`/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/git-changes/file?${params.toString()}`);
   },
   getAiCodeCompleteness(requirementId: string) {
     return runnerRequest<AiCodeCompletenessState>(`/api/ai-delivery/requirements/${encodeURIComponent(requirementId)}/ai-completeness`);

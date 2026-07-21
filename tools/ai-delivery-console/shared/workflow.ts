@@ -555,6 +555,34 @@ export interface GitStageUntrackedInput {
   files: string[];
 }
 
+export interface GitDiffQueryInput {
+  projectPath: string;
+  filePath?: string;
+  contextLines?: number;
+  focusLine?: number;
+}
+
+export interface GitDiffPreview {
+  projectPath: string;
+  filePath?: string;
+  contextLines: number;
+  diff: string;
+  truncated: boolean;
+  files: GitChangedFile[];
+}
+
+export interface GitFilePreview {
+  projectPath: string;
+  filePath: string;
+  language: string;
+  size: number;
+  updatedAt?: string;
+  focusLine?: number;
+  previewable: boolean;
+  content?: string;
+  reason?: string;
+}
+
 export type AgentInputMode = 'PROMPT_FILE' | 'STDIN' | 'ARGUMENTS' | 'MANUAL';
 
 export interface AgentProvider {

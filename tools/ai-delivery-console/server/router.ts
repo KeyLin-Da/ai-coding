@@ -5,6 +5,7 @@ import { URL } from 'node:url';
 import type {
   ActionInput,
   AiCodeCompletenessInput,
+  GitDiffQueryInput,
   GitStageUntrackedInput,
   PrdSourceFile,
   RequirementInput,
@@ -33,7 +34,7 @@ import {
   retryWorkflowCenterRunStatuses
 } from './services/agent-providers';
 import { normalizeOpenSpecChangeName, readOpenSpecSummary, updateOpenSpecTaskStatus } from './services/openspec-summary';
-import { readGitChanges, stageUntrackedFiles } from './services/git-changes';
+import { readGitChangedFilePreview, readGitChanges, readGitDiffPreview, stageUntrackedFiles } from './services/git-changes';
 import {
   assertProjectsCleanAndPushed,
   buildAiCodeCompletenessState,
@@ -1433,6 +1434,38 @@ export function createRouter(workspaceRoot: string) {
         } finally {
           await lock.release();
         }
+        return;
+      }
+
+      const gitDiffPreviewMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/git-changes\/diff$/);
+      if (request.method === 'GET' && gitDiffPreviewMatch) {
+        const { root, workflow } = await loadMergedWorkflow(requestContext, gitDiffPreviewMatch[1]);
+        if (!workflow) {
+          send(response, 404, { message: '需求不存在' });
+          return;
+        }
+        const input: GitDiffQueryInput = {
+          projectPath: url.searchParams.get('projectPath') || '',
+          filePath: url.searchParams.get('filePath') || undefined,
+          contextLines: Number(url.searchParams.get('contextLines') || 3)
+        };
+        send(response, 200, { data: await readGitDiffPreview(root, workflow.projects || [], input, await loadCurrentProjectPaths(requestContext, true)) });
+        return;
+      }
+
+      const gitFilePreviewMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/git-changes\/file$/);
+      if (request.method === 'GET' && gitFilePreviewMatch) {
+        const { root, workflow } = await loadMergedWorkflow(requestContext, gitFilePreviewMatch[1]);
+        if (!workflow) {
+          send(response, 404, { message: '需求不存在' });
+          return;
+        }
+        const input: GitDiffQueryInput = {
+          projectPath: url.searchParams.get('projectPath') || '',
+          filePath: url.searchParams.get('filePath') || undefined,
+          focusLine: Number(url.searchParams.get('focusLine') || 0) || undefined
+        };
+        send(response, 200, { data: await readGitChangedFilePreview(root, workflow.projects || [], input, await loadCurrentProjectPaths(requestContext, true)) });
         return;
       }
 
