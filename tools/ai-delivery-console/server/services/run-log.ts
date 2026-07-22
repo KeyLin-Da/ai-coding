@@ -13,8 +13,11 @@ const TERMINAL_TRANSCRIPT_MAX_BYTES = 256 * 1024;
 
 export function stripTerminalControlSequences(text: string): string {
   return text
+    // eslint-disable-next-line no-control-regex
     .replace(/\x1B\][^\x07]*(?:\x07|\x1B\\)/g, '')
+    // eslint-disable-next-line no-control-regex
     .replace(/[\x1B\x9B]\[[0-?]*[ -/]*[@-~]/g, '')
+    // eslint-disable-next-line no-control-regex
     .replace(/\x1B[@-Z\\-_]/g, '')
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n');
@@ -170,13 +173,70 @@ export async function readTerminalTranscriptChunk(
   }
 }
 
+export async function readRawTerminalTranscriptChunk(
+  workspaceRoot: string,
+  transcriptPath: string | undefined,
+  offset = 0,
+  maxBytes = TERMINAL_TRANSCRIPT_MAX_BYTES
+): Promise<{ text: string; nextOffset: number; truncated: boolean; bytesRead: number }> {
+  if (!transcriptPath) {
+    return { text: '', nextOffset: offset, truncated: false, bytesRead: 0 };
+  }
+
+  try {
+    const absoluteTranscriptPath = resolveWorkspaceOrRuntimePath(workspaceRoot, transcriptPath);
+    const stat = await fs.stat(absoluteTranscriptPath);
+    if (!stat.isFile()) {
+      return { text: '', nextOffset: offset, truncated: false, bytesRead: 0 };
+    }
+
+    const safeOffset = offset > stat.size ? 0 : Math.max(0, offset);
+    const availableBytes = stat.size - safeOffset;
+    if (availableBytes <= 0) {
+      return { text: '', nextOffset: stat.size, truncated: false, bytesRead: 0 };
+    }
+
+    const readStart = availableBytes > maxBytes ? stat.size - maxBytes : safeOffset;
+    const readLength = stat.size - readStart;
+    const buffer = Buffer.alloc(readLength);
+    const file = await fs.open(absoluteTranscriptPath, 'r');
+    try {
+      const result = await file.read(buffer, 0, readLength, readStart);
+      return {
+        text: buffer.subarray(0, result.bytesRead).toString('utf8'),
+        nextOffset: stat.size,
+        truncated: readStart > safeOffset,
+        bytesRead: result.bytesRead
+      };
+    } finally {
+      await file.close();
+    }
+  } catch (error: any) {
+    if (error.code === 'ENOENT') {
+      return { text: '', nextOffset: offset, truncated: false, bytesRead: 0 };
+    }
+    throw error;
+  }
+}
+
 export async function readRunEventsWithTranscript(
   workspaceRoot: string,
   requirementId: string,
   runId: string,
-  transcriptPath?: string
+  transcriptPath?: string,
+  rawTranscriptPath?: string
 ): Promise<RunEvent[]> {
   const events = await readRunEvents(workspaceRoot, requirementId, runId);
   const transcript = await readTerminalTranscriptChunk(workspaceRoot, transcriptPath, 0);
+  if (transcript.event && rawTranscriptPath) {
+    const raw = await readRawTerminalTranscriptChunk(workspaceRoot, rawTranscriptPath, 0);
+    transcript.event.data = {
+      ...((transcript.event.data && typeof transcript.event.data === 'object') ? transcript.event.data : {}),
+      rawTranscriptPath,
+      rawText: raw.text,
+      rawBytesRead: raw.bytesRead,
+      rawTruncated: raw.truncated
+    };
+  }
   return transcript.event ? [...events, transcript.event] : events;
 }

@@ -8,20 +8,19 @@
           <strong>{{ workflow.requirementId }}</strong>
         </div>
         <div class="requirement-hero-actions">
-        <div class="requirement-execution-controls">
-                    <el-select v-model="selectedAgentId" class="execution-select agent-select" placeholder="选择 Agent">
-                      <el-option v-for="agent in store.agents" :key="agent.id" :label="agent.name" :value="agent.id">
-                        <span>{{ agent.name }}</span>
-                        <span class="muted" style="float: right">{{ agent.available ? '可用' : '不可用' }}</span>
-                      </el-option>
-                    </el-select>
-                    <el-select v-model="selectedExecutionMode" class="execution-select mode-select" placeholder="执行方式">
-                      <!-- <el-option label="后台执行" value="BACKGROUND" /> -->
-                      <!-- <el-option label="本地终端" value="TERMINAL" /> -->
-                      <el-option label="交互终端" value="INTERACTIVE_TERMINAL" />
-                      <el-option label="手动复制" value="MANUAL_COPY" />
-                    </el-select>
-                  </div>
+          <div class="requirement-execution-controls">
+            <el-select v-model="selectedAgentId" class="execution-select agent-select" placeholder="选择 Agent">
+              <el-option v-for="agent in store.agents" :key="agent.id" :label="agent.name" :value="agent.id">
+                <span>{{ agent.name }}</span>
+                <span class="muted" style="float: right">{{ agent.available ? '可用' : '不可用' }}</span>
+              </el-option>
+            </el-select>
+            <el-select v-model="selectedExecutionMode" class="execution-select mode-select" placeholder="执行方式">
+              <el-option label="内嵌终端" value="EMBEDDED_TERMINAL" />
+              <el-option label="外部终端" value="INTERACTIVE_TERMINAL" />
+              <el-option label="手动复制" value="MANUAL_COPY" />
+            </el-select>
+          </div>
           <el-button :icon="Collection" @click="$router.push({ name: 'project-memory-candidates', query: { requirementId: workflow.requirementId } })">经验记忆</el-button>
           <el-button :icon="Refresh" @click="runRefresh">刷新产物</el-button>
           <el-button :icon="Back" @click="$router.push('/')">返回列表</el-button>
@@ -75,7 +74,7 @@
     </section>
 
     <div class="stage-grid">
-      <main>
+      <main class="stage-input-column">
         <section class="workspace-band stage-panel">
           <div class="toolbar stage-panel-header">
             <div>
@@ -438,7 +437,6 @@
                 </div>
                 <el-alert v-else type="warning" show-icon title="尚未扫描到单元测试报告，开始实施任务应产出 docs/{需求号}/junit/** 报告作为验证证据" />
               </section>
-
             </div>
 
             <div v-else-if="activeStage === 'CODE_REVIEW'" class="stage-actions">
@@ -639,6 +637,22 @@
         </section>
       </main>
 
+      <EmbeddedTerminalWorkbench
+        class="stage-terminal-column"
+        :workflow="workflow"
+        :current-run="currentStageRun"
+        :events="store.runEvents"
+        :selected-execution-mode="selectedExecutionMode"
+        :active-stage="activeStage"
+        :active-implementation-step="activeImplementationStep"
+        :token-usage="currentRunTokenUsage"
+        :run-token-text="currentRunTokenText"
+        :connection-status="store.terminalConnectionStatus"
+        @open-log="openRunLog"
+        @cancel-run="cancelRun"
+        @connection-status="store.setTerminalConnectionStatus"
+      />
+
       <ArtifactSidebar
         :workflow="workflow"
         :artifacts="workflow.artifacts"
@@ -790,6 +804,7 @@ import ReviewDialog from '@/components/ReviewDialog.vue';
 import RunLogDrawer from '@/components/RunLogDrawer.vue';
 import TokenUsageDetailDialog from '@/components/TokenUsageDetailDialog.vue';
 import ArtifactSidebar from '@/components/ArtifactSidebar.vue';
+import EmbeddedTerminalWorkbench from '@/components/EmbeddedTerminalWorkbench.vue';
 import ArtifactPreviewDialog from '@/components/ArtifactPreviewDialog.vue';
 import ArtifactEditDialog from '@/components/ArtifactEditDialog.vue';
 import ArtifactVersionDiffDialog from '@/components/ArtifactVersionDiffDialog.vue';
@@ -852,7 +867,7 @@ const changeName = ref('');
 const branchName = ref('');
 const codeReviewMode = ref<'commit' | 'staged'>('commit');
 const selectedAgentId = ref('codex');
-const selectedExecutionMode = ref<ExecutionMode>('INTERACTIVE_TERMINAL');
+const selectedExecutionMode = ref<ExecutionMode>('EMBEDDED_TERMINAL');
 const designClarification = ref('');
 const techDesignSupplementBlocks = ref<SupplementBlock[]>([]);
 const techDesignSupplementDialogVisible = ref(false);
@@ -2120,7 +2135,13 @@ async function runOrCopyAction(action: ActionInput, afterRun?: (run?: RunRecord)
     const result = await store.runAction(action);
     const run = result?.run;
     if (run?.id) {
-      if (isTerminalOpenedRun(run)) {
+      if (isEmbeddedTerminalRun(run)) {
+        store.setActiveTerminalRun(run.id);
+        store.setTerminalConnectionStatus(run.status === 'RUNNING' ? 'CONNECTING' : 'UNAVAILABLE');
+        await store.loadRunEvents(run.id);
+        store.streamRunEvents(run.id);
+        ElMessage.success(run.status === 'RUNNING' ? '已启动内嵌终端' : '内嵌终端未启动，请查看提示并切换兜底方式');
+      } else if (isTerminalOpenedRun(run)) {
         ElMessage.success(terminalOpenedMessage(run));
       } else {
         await openRunLog(run.id);
@@ -2137,6 +2158,10 @@ async function runOrCopyAction(action: ActionInput, afterRun?: (run?: RunRecord)
 
 function isTerminalOpenedRun(run: RunRecord): boolean {
   return run.status === 'TERMINAL_OPENED';
+}
+
+function isEmbeddedTerminalRun(run: RunRecord): boolean {
+  return run.executionMode === 'EMBEDDED_TERMINAL';
 }
 
 function terminalOpenedMessage(run: RunRecord): string {
@@ -2767,7 +2792,13 @@ watch(
   async (runId) => {
     if (!runId) {
       currentRunTokenUsage.value = undefined;
+      store.setActiveTerminalRun(undefined);
       return;
+    }
+    if (currentStageRun.value?.executionMode === 'EMBEDDED_TERMINAL') {
+      store.setActiveTerminalRun(runId);
+      store.setTerminalConnectionStatus(currentStageRun.value.status === 'RUNNING' ? 'CONNECTING' : 'READONLY');
+      store.streamRunEvents(runId);
     }
     currentRunTokenUsage.value = await loadRunTokenUsage(runId);
   },
@@ -2943,7 +2974,25 @@ onUnmounted(() => {
 }
 
 .stage-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 380px) minmax(560px, 1fr) minmax(300px, 340px);
+  align-items: start;
+  gap: 16px;
   margin-top: 0;
+}
+
+.stage-input-column {
+  min-width: 0;
+}
+
+.stage-input-column :deep(.el-descriptions),
+.stage-input-column :deep(.el-table),
+.stage-input-column :deep(.el-tabs) {
+  max-width: 100%;
+}
+
+.stage-terminal-column {
+  min-width: 0;
 }
 
 .stage-panel {
@@ -2956,6 +3005,7 @@ onUnmounted(() => {
 
 .stage-content {
   padding: 16px;
+  overflow: auto;
 }
 
 .stage-actions {
@@ -3000,11 +3050,12 @@ onUnmounted(() => {
 .action-line {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
 .action-line .el-input {
-  max-width: 360px;
+  max-width: 100%;
 }
 
 .openspec-artifact-input-panel {
@@ -3867,6 +3918,22 @@ onUnmounted(() => {
 .prd-clarification-document span {
   color: #64748b;
   overflow-wrap: anywhere;
+}
+
+@media (max-width: 1280px) {
+  .stage-grid {
+    grid-template-columns: minmax(280px, 360px) minmax(520px, 1fr);
+  }
+
+  .stage-grid :deep(.artifact-sidebar) {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 960px) {
+  .stage-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 760px) {

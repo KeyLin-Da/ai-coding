@@ -39,16 +39,21 @@
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.1.0",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
     "diff2html": "^3.4.56",
     "element-plus": "2.7.6",
     "markdown-it": "^14.1.0",
     "markdown-it-mermaid": "^0.2.5",
     "mermaid": "^11.15.0",
+    "node-pty": "^1.0.0",
     "pinia": "2.0.33",
     "vue": "^3.2.47",
-    "vue-router": "^4.1.6"
+    "vue-router": "^4.1.6",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@types/ws": "^8.5.13",
     "@vitejs/plugin-vue": "^4.0.0",
     "@vue/eslint-config-prettier": "^7.0.0",
     "@vue/test-utils": "^2.0.2",

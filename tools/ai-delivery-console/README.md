@@ -14,7 +14,7 @@ AI 需求交付控制台是 `ai-coding` 工具链的主要入口，提供 Web �
 ```mermaid
 flowchart LR
   Browser[Web / Electron UI] -->|/center-api + WebSocket| Center[AI Delivery Center :8728]
-  Browser -->|/runner-api + SSE| Runner[Local Runner :8718]
+  Browser -->|/runner-api + SSE + Terminal WS| Runner[Local Runner :8718]
   Runner --> Agent[Codex / CodeBuddy / Qoder / Qwen]
   Runner --> OpenSpec[OpenSpec CLI]
   Runner --> LocalRepo[本地 AI 产物仓]
@@ -26,7 +26,7 @@ flowchart LR
 - **前端 UI**：Vue 3 + TypeScript + Vite + Element Plus，包含 Web 页面与 Electron 桌面端。
 - **Local Runner**：Node.js + tsx + 原生 HTTP 服务，负责本机 Git、OpenSpec、Agent CLI、产物扫描、技能同步和 bootstrap import。
 - **AI Delivery Center**：Spring Boot 协作中心，负责登录、项目、需求、审核、issue、Job、运行事件、Git 版本索引和权限。
-- **实时链路**：需求/项目事件走 Center WebSocket/STOMP；单次本地 Run 日志抽屉走 Runner EventSource/SSE；Center Run 可通过 WebSocket run 订阅补齐。
+- **实时链路**：需求/项目事件走 Center WebSocket/STOMP；单次本地 Run 日志抽屉走 Runner EventSource/SSE；内嵌终端走 Runner WebSocket；Center Run 可通过 WebSocket run 订阅补齐。
 - **Git-backed 产物仓**：新产物以 Git 仓为事实源，Center 保存版本索引，不保存 Git 私钥、本机绝对路径或 Agent token。
 
 ## 现在能做什么
@@ -92,8 +92,11 @@ Runner 支持多 Agent Provider：
 
 当前页面执行方式主要包括：
 
-- **交互终端**：生成 Prompt 和可执行脚本，打开本机终端运行 Agent，适合需要授权确认或原生交互的动作。
+- **内嵌终端**：默认方式。Runner 使用 PTY 启动 Agent，页面中间工作台支持 ANSI 输出、输入、resize、Ctrl-C、重连和历史只读回放。依赖 `node-pty`、`ws`、`@xterm/xterm`、`@xterm/addon-fit`。
+- **外部终端**：生成 Prompt 和可执行脚本，打开本机系统终端运行 Agent。适合内嵌终端依赖不可用、Windows 首版不支持 PTY、或需要完全原生终端能力的场景。
 - **手动复制**：复制标准命令和上下文，由用户在自己的 Agent 环境中执行，完成后回到页面刷新产物。
+
+内嵌终端不可用时，页面会保留外部终端和手动复制入口；已完成的终端会话仍可在历史列表中查看 stripped 文本摘要，内嵌会话额外保存 raw ANSI transcript 用于只读回放。
 
 Provider 命令可通过环境变量覆盖：
 
@@ -141,6 +144,7 @@ HTTP(S) 页面不直接访问 `8718` 或 Center 域名，而是通过同源路�
 ```text
 /runner-api/* -> Local Runner
 /center-api/* -> AI Delivery Center
+/runner-api/* -> Runner WebSocket upgrade
 /center-api/* -> Center WebSocket upgrade
 ```
 
@@ -257,7 +261,7 @@ Runner 私有运行态不进入项目 Git 仓：
 <deliveryWorkspaceRoot>/.ai-delivery/runtime/**
 ```
 
-包括 Prompt、脚本、run event outbox、终端 transcript、阶段命令日志、锁文件、本地 run 状态等。历史 `docs/{需求号}/reports/run-*.log` 也会被同步和分享规则排除。
+包括 Prompt、脚本、run event outbox、终端 transcript、raw ANSI transcript、阶段命令日志、锁文件、本地 run 状态等。历史 `docs/{需求号}/reports/run-*.log` 也会被同步和分享规则排除。
 
 ## Bootstrap 导入旧产物
 
@@ -370,7 +374,11 @@ openspec validate <change-name> --strict
 
 ### Q: Agent 执行失败？
 
-检查当前 Agent Provider 是否可用、命令模板是否正确、涉及工程目录是否已配置。交互终端模式会生成脚本并打开本机终端，网页端目录选择器不可用时需手动输入路径。
+检查当前 Agent Provider 是否可用、命令模板是否正确、涉及工程目录是否已配置。内嵌终端依赖本机 `node-pty` 和 Runner WebSocket；不可用时切换到外部终端或手动复制。外部终端模式会生成脚本并打开本机终端，网页端目录选择器不可用时需手动输入路径。
+
+### Q: Windows 是否支持内嵌终端？
+
+首版以内嵌 PTY 在 macOS/Linux 可用为目标。Windows 如遇 `node-pty` 原生依赖或 PTY 行为差异，页面会提示切换到外部终端或手动复制，后续可单独补 Windows 适配。
 
 ### Q: 运行日志没有实时追加？
 

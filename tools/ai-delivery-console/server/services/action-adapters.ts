@@ -10,6 +10,7 @@ import {
   beginCenterJobLease,
   finishCenterJobForRun,
   getAgentProvider,
+  startAgentInEmbeddedTerminal,
   startAgentInTerminal,
   startAgentProcess
 } from './agent-providers';
@@ -50,7 +51,11 @@ function hasParam(params: Record<string, unknown>, key: string): boolean {
 }
 
 function executionMode(params: Record<string, unknown>): ExecutionMode {
-  if (params.executionMode === 'TERMINAL' || params.executionMode === 'INTERACTIVE_TERMINAL') {
+  if (
+    params.executionMode === 'TERMINAL' ||
+    params.executionMode === 'INTERACTIVE_TERMINAL' ||
+    params.executionMode === 'EMBEDDED_TERMINAL'
+  ) {
     return params.executionMode;
   }
   return 'BACKGROUND';
@@ -784,6 +789,21 @@ export async function executeAction(
     await appendChangedArtifactEvents(updatedRun);
     await onRunUpdate(updatedRun);
   };
+  if (executionMode(params) === 'EMBEDDED_TERMINAL') {
+    const terminalRun = await startAgentInEmbeddedTerminal(
+      workspaceRoot,
+      workflow,
+      run,
+      provider,
+      commandText,
+      projectPaths,
+      options.centerConfig
+    );
+    if (['FAILED', 'CANCELLED'].includes(terminalRun.status)) {
+      await onRunUpdateWithArtifacts(terminalRun);
+    }
+    return terminalRun;
+  }
   if (['TERMINAL', 'INTERACTIVE_TERMINAL'].includes(executionMode(params))) {
     const terminalRun = await startAgentInTerminal(
       workspaceRoot,

@@ -17,6 +17,11 @@ import {
 } from './center-runner-adapter';
 import { collectCodexSessionUsage } from './codex-session-usage';
 import { recordCodexUsageEvents, retryTokenUsageOutbox } from './token-usage-recorder';
+import {
+  cancelEmbeddedTerminalRun,
+  hasEmbeddedTerminalSession,
+  startEmbeddedTerminalSession
+} from './embedded-terminal-service';
 
 const activeProcesses = new Map<string, ChildProcessWithoutNullStreams>();
 const cancelledRunIds = new Set<string>();
@@ -244,14 +249,19 @@ function isInteractiveTerminalRun(run: RunRecord): boolean {
 }
 
 function isTerminalExecutionMode(run: RunRecord): boolean {
-  return run.executionMode === 'TERMINAL' || run.executionMode === 'INTERACTIVE_TERMINAL';
+  return run.executionMode === 'TERMINAL' || run.executionMode === 'INTERACTIVE_TERMINAL' || run.executionMode === 'EMBEDDED_TERMINAL';
 }
 
 function terminalCommandTemplate(provider: AgentProvider, run: RunRecord): string[] {
-  return isInteractiveTerminalRun(run) ? provider.interactiveCommand || [] : provider.command || [];
+  return run.executionMode === 'INTERACTIVE_TERMINAL' || run.executionMode === 'EMBEDDED_TERMINAL'
+    ? provider.interactiveCommand || []
+    : provider.command || [];
 }
 
 function terminalExecutionModeLabel(run: RunRecord): string {
+  if (run.executionMode === 'EMBEDDED_TERMINAL') {
+    return '内嵌终端';
+  }
   return isInteractiveTerminalRun(run) ? '交互终端' : '本地终端';
 }
 
@@ -501,13 +511,23 @@ export async function refreshTerminalRunStatuses(
     const absoluteStatusPath = resolveWorkspaceOrRuntimePath(workspaceRoot, run.terminalStatusPath);
     const raw = await fs.readFile(absoluteStatusPath, 'utf8').catch(() => '');
     if (!raw.trim()) {
+      if (run.executionMode === 'EMBEDDED_TERMINAL' && run.status === 'RUNNING' && !hasEmbeddedTerminalSession(run.id)) {
+        await markLostEmbeddedTerminalRun(workspaceRoot, workflow, run, centerConfig);
+        changed = true;
+        continue;
+      }
       if (await completeDesignTerminalRunFromArtifact(workspaceRoot, workflow, run, centerConfig)) {
         changed = true;
       }
       continue;
     }
-    const status = JSON.parse(raw) as { status?: RunStatus; exitCode?: number; finishedAt?: string; transcriptPath?: string };
+    const status = JSON.parse(raw) as { status?: RunStatus; exitCode?: number; finishedAt?: string; transcriptPath?: string; rawTranscriptPath?: string };
     if (!status.status || !finalStatuses.has(status.status)) {
+      if (run.executionMode === 'EMBEDDED_TERMINAL' && run.status === 'RUNNING' && !hasEmbeddedTerminalSession(run.id)) {
+        await markLostEmbeddedTerminalRun(workspaceRoot, workflow, run, centerConfig);
+        changed = true;
+        continue;
+      }
       if (await completeDesignTerminalRunFromArtifact(workspaceRoot, workflow, run, centerConfig)) {
         changed = true;
       }
@@ -518,13 +538,19 @@ export async function refreshTerminalRunStatuses(
     const terminalLabel = terminalExecutionModeLabel(run);
     run.error = status.status === 'FAILED' ? `${terminalLabel} Agent 退出码: ${status.exitCode ?? 'unknown'}` : undefined;
     await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
-      type: status.status === 'FAILED' ? 'ERROR' : 'EXIT',
-      level: status.status === 'FAILED' ? 'ERROR' : 'INFO',
-      message: status.status === 'FAILED' ? `${terminalLabel} Agent 执行失败，退出码 ${status.exitCode ?? 'unknown'}` : `${terminalLabel} Agent 执行完成`,
+      type: status.status === 'CANCELLED' ? 'CANCELLED' : status.status === 'FAILED' ? 'ERROR' : 'EXIT',
+      level: status.status === 'CANCELLED' ? 'WARN' : status.status === 'FAILED' ? 'ERROR' : 'INFO',
+      message:
+        status.status === 'CANCELLED'
+          ? `${terminalLabel} Agent 运行已取消`
+          : status.status === 'FAILED'
+            ? `${terminalLabel} Agent 执行失败，退出码 ${status.exitCode ?? 'unknown'}`
+            : `${terminalLabel} Agent 执行完成`,
       agentId: run.agentId,
       data: {
         exitCode: status.exitCode,
         transcriptPath: status.transcriptPath || run.terminalTranscriptPath,
+        rawTranscriptPath: status.rawTranscriptPath || run.terminalRawTranscriptPath,
         statusPath: run.terminalStatusPath
       }
     });
@@ -544,6 +570,42 @@ export async function refreshTerminalRunStatuses(
     changed = true;
   }
   return { workflow, changed };
+}
+
+async function markLostEmbeddedTerminalRun(
+  workspaceRoot: string,
+  workflow: RequirementWorkflow,
+  run: RunRecord,
+  centerConfig?: CenterRunnerConfig
+): Promise<void> {
+  run.status = 'FAILED';
+  run.finishedAt = new Date().toISOString();
+  run.error = '内嵌终端会话已丢失，可能是 Runner 重启或 PTY 进程已退出';
+  run.terminalSessionStatus = 'UNAVAILABLE';
+  await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
+    type: 'ERROR',
+    level: 'ERROR',
+    message: run.error,
+    agentId: run.agentId,
+    data: {
+      statusPath: run.terminalStatusPath,
+      transcriptPath: run.terminalTranscriptPath,
+      rawTranscriptPath: run.terminalRawTranscriptPath
+    }
+  });
+  if (run.centerJobId && centerConfig) {
+    try {
+      await finishCenterJobForRun(run, centerConfig);
+      run.centerSyncedAt = new Date().toISOString();
+    } catch (error: any) {
+      await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
+        type: 'WARN',
+        level: 'WARN',
+        message: `Center Run 状态同步失败：${error?.message || 'unknown error'}`,
+        agentId: run.agentId
+      });
+    }
+  }
 }
 
 function technicalDesignArtifactPath(workflow: RequirementWorkflow): string {
@@ -945,7 +1007,99 @@ export async function startAgentInTerminal(
   return run;
 }
 
+export async function startAgentInEmbeddedTerminal(
+  workspaceRoot: string,
+  workflow: RequirementWorkflow,
+  run: RunRecord,
+  provider: AgentProvider,
+  commandText: string,
+  projectPaths?: string[],
+  centerConfig?: CenterRunnerConfig
+): Promise<RunRecord> {
+  run.executionMode = 'EMBEDDED_TERMINAL';
+  const commandTemplate = terminalCommandTemplate(provider, run);
+
+  if (provider.inputMode === 'MANUAL' || !commandTemplate.length) {
+    run.status = 'WAITING_FOR_AGENT';
+    run.commandText = commandText;
+    run.finishedAt = new Date().toISOString();
+    await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
+      type: 'WARN',
+      level: 'WARN',
+      message:
+        provider.inputMode === 'MANUAL'
+          ? '当前 Agent 为手动模式，请复制标准调用文本执行'
+          : `内嵌终端未配置可执行命令: ${provider.name}`,
+      agentId: provider.id,
+      data: { commandText }
+    });
+    return run;
+  }
+
+  if (!provider.available) {
+    run.status = 'WAITING_FOR_AGENT';
+    run.commandText = commandText;
+    run.finishedAt = new Date().toISOString();
+    await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
+      type: 'WARN',
+      level: 'WARN',
+      message: `Agent Provider 不可用: ${provider.name}`,
+      agentId: provider.id,
+      data: { commandText }
+    });
+    return run;
+  }
+
+  try {
+    const promptPath = await createPromptEnvelope(workspaceRoot, workflow, run, commandText, projectPaths);
+    const absolutePromptPath = resolveWorkspaceOrRuntimePath(workspaceRoot, promptPath);
+    const promptContent = await fs.readFile(absolutePromptPath, 'utf8');
+    const projectRoots = agentReadableProjectRoots(workspaceRoot, await selectedProjectRoots(workspaceRoot, workflow, projectPaths));
+    const renderedCommand = renderCommand(commandTemplate, {
+      workspaceRoot,
+      promptFile: absolutePromptPath,
+      promptPath: absolutePromptPath,
+      prompt: promptContent,
+      commandText,
+      requirementId: workflow.requirementId,
+      runId: run.id,
+      projectAddDirArgs: projectAddDirArgs(projectRoots),
+      projectParentAddDirArgs: projectParentAddDirArgs(projectPaths)
+    });
+    const started = await startEmbeddedTerminalSession({
+      workspaceRoot,
+      workflow,
+      run,
+      provider,
+      commandText,
+      promptPath,
+      renderedCommand
+    });
+    beginCenterJobLease(started, centerConfig);
+    return started;
+  } catch (error: any) {
+    run.status = 'FAILED';
+    run.error = error.message;
+    run.finishedAt = new Date().toISOString();
+    await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
+      type: 'ERROR',
+      level: 'ERROR',
+      message: error.message,
+      agentId: provider.id
+    });
+    return run;
+  }
+}
+
 export async function cancelAgentRun(workspaceRoot: string, requirementId: string, runId: string): Promise<boolean> {
+  if (cancelEmbeddedTerminalRun(runId)) {
+    await appendRunEvent(workspaceRoot, requirementId, runId, {
+      type: 'CANCELLED',
+      level: 'WARN',
+      message: '用户取消内嵌终端运行'
+    });
+    return true;
+  }
   const child = activeProcesses.get(runId);
   if (!child) {
     return false;

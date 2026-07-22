@@ -106,6 +106,25 @@ export function resolveWebSocketUrl(path: string, protocol?: string): string {
   return absolute.toString();
 }
 
+export function resolveRunnerWebSocketUrl(path: string, protocol?: string): string {
+  const pageProtocol = protocol || (typeof window === 'undefined' ? 'http:' : window.location.protocol);
+  if (usesSameOriginGateway()) {
+    const absolute = new URL(proxyPath(RUNNER_PROXY_PREFIX, path), window.location.origin);
+    absolute.protocol = pageProtocol === 'https:' ? 'wss:' : 'ws:';
+    return absolute.toString();
+  }
+  if (/^wss?:\/\//.test(path)) {
+    return path;
+  }
+  const absolute = new URL(path, runtimeConfig.runnerBaseUrl.replace(/\/+$/, '') + '/');
+  if (absolute.protocol === 'https:') {
+    absolute.protocol = 'wss:';
+  } else if (absolute.protocol === 'http:' || pageProtocol === 'file:') {
+    absolute.protocol = 'ws:';
+  }
+  return absolute.toString();
+}
+
 export function apiRuntimeHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
   if (runtimeConfig.accessToken) {

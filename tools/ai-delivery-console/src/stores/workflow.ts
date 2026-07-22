@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ElMessage } from 'element-plus';
-import type { ActionInput, AgentProvider, RequirementInput, RequirementWorkflow, ReviewInput, RunEvent, SupplementInputsUpdate } from '@shared/workflow';
+import type { ActionInput, AgentProvider, RequirementInput, RequirementWorkflow, ReviewInput, RunEvent, SupplementInputsUpdate, TerminalSessionStatus } from '@shared/workflow';
 import { apiClient, type DeleteTechDesignQuestionInput } from '@/api/client';
 import { getApiRuntimeConfig } from '@/api/runtime';
 import { dispatchTechDesignAnnotationChanged } from '@/services/annotation-realtime';
@@ -23,6 +23,9 @@ interface WorkflowState {
   realtimeStatus: 'CONNECTING' | 'CONNECTED' | 'DISCONNECTED' | 'ERROR';
   lastEventId: number;
   activeRunId?: string;
+  activeTerminalRunId?: string;
+  selectedTerminalRunId?: string;
+  terminalConnectionStatus: TerminalSessionStatus;
   runEventSeqs: Record<string, number>;
   runEventSource?: EventSource;
 }
@@ -38,6 +41,9 @@ export const useWorkflowStore = defineStore('workflow', {
     realtimeStatus: 'DISCONNECTED',
     lastEventId: 0,
     activeRunId: undefined,
+    activeTerminalRunId: undefined,
+    selectedTerminalRunId: undefined,
+    terminalConnectionStatus: 'DISCONNECTED',
     runEventSeqs: {},
     runEventSource: undefined
   }),
@@ -196,6 +202,18 @@ export const useWorkflowStore = defineStore('workflow', {
       }
       await apiClient.cancelRun(this.current.requirementId, runId);
       await this.loadRequirement(this.current.requirementId);
+    },
+    setActiveTerminalRun(runId?: string) {
+      this.activeTerminalRunId = runId;
+      if (runId) {
+        this.selectedTerminalRunId = runId;
+      }
+    },
+    selectTerminalRun(runId?: string) {
+      this.selectedTerminalRunId = runId;
+    },
+    setTerminalConnectionStatus(status: TerminalSessionStatus) {
+      this.terminalConnectionStatus = status;
     },
     mergeWorkflowLocally(workflow: RequirementWorkflow) {
       this.current = workflow;

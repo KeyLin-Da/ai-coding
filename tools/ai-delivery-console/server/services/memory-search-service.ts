@@ -1,4 +1,4 @@
-import type { MemoryCard, MemoryQueryProfile, MemoryRecallScoreBreakdown, MemorySearchConfig } from '../../shared/memory';
+import type { MemoryCard, MemoryQueryProfile, MemoryRecallScoreBreakdown } from '../../shared/memory';
 import type { RequirementWorkflow, WorkflowStage } from '../../shared/workflow';
 import { MemoryRepository } from './memory-repository';
 import { defaultMemorySearchConfig } from './memory-search-config';

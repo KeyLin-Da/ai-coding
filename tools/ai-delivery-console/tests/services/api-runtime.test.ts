@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   resolveApiUrl,
   resolveRunnerApiUrl,
+  resolveRunnerWebSocketUrl,
   resolveWebSocketUrl,
   setApiRuntimeConfig
 } from '../../src/api/runtime';
@@ -59,11 +60,30 @@ describe('api runtime 同源网关', () => {
     expect(resolveWebSocketUrl('/api/ai-delivery/ws')).toBe('ws://127.0.0.1:5178/center-api/api/ai-delivery/ws');
   });
 
+  it('HTTP 页面使用 Runner 同源 ws 地址连接内嵌终端', () => {
+    stubPageLocation('http:', 'http://127.0.0.1:5178');
+
+    expect(resolveRunnerWebSocketUrl('/api/ai-delivery/runs/run-1/terminal')).toBe(
+      'ws://127.0.0.1:5178/runner-api/api/ai-delivery/runs/run-1/terminal'
+    );
+  });
+
+  it('HTTPS 页面使用 Runner 同源 wss 地址连接内嵌终端', () => {
+    stubPageLocation('https:', 'https://console.example.com');
+
+    expect(resolveRunnerWebSocketUrl('ws://127.0.0.1:8718/api/ai-delivery/runs/run-1/terminal')).toBe(
+      'wss://console.example.com/runner-api/api/ai-delivery/runs/run-1/terminal'
+    );
+  });
+
   it('file 页面保留 Center、Runner 与 WebSocket 直连地址', () => {
     stubPageLocation('file:', 'null');
 
     expect(resolveApiUrl('/api/ai-delivery/projects')).toBe('https://center.example.com/api/ai-delivery/projects');
     expect(resolveRunnerApiUrl('/api/ai-delivery/agents')).toBe('http://127.0.0.1:8718/api/ai-delivery/agents');
     expect(resolveWebSocketUrl('/api/ai-delivery/ws')).toBe('wss://center.example.com/api/ai-delivery/ws');
+    expect(resolveRunnerWebSocketUrl('/api/ai-delivery/runs/run-1/terminal')).toBe(
+      'ws://127.0.0.1:8718/api/ai-delivery/runs/run-1/terminal'
+    );
   });
 });

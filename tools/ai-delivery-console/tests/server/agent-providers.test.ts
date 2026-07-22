@@ -12,6 +12,7 @@ import {
   listAgentProviders,
   refreshTerminalRunStatuses,
   retryWorkflowCenterRunStatuses,
+  startAgentInEmbeddedTerminal,
   startAgentInTerminal,
   startAgentProcess,
   terminalCommandLine
@@ -438,6 +439,32 @@ describe('agent-providers', () => {
     expect(script).toContain('script -q -a "$TRANSCRIPT_FILE" zsh -lc "setopt pipefail; $COMMAND_PREVIEW"');
   });
 
+  it('内嵌终端模式不可用时不生成外部 Terminal launcher', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-embedded-terminal-'));
+    const provider: AgentProvider = {
+      id: 'embedded-agent',
+      name: 'Embedded Agent',
+      inputMode: 'STDIN',
+      command: ['background-agent'],
+      interactiveCommand: ['interactive-agent', '--prompt', '{prompt}'],
+      available: false,
+      supportsStreaming: true,
+      supportsInteractive: true
+    };
+    const run = {
+      ...runRecord('run-embedded-unavailable'),
+      executionMode: 'EMBEDDED_TERMINAL' as const
+    };
+
+    const result = await startAgentInEmbeddedTerminal(root, workflow(), run, provider, '/coding-prd-analyzer id=172014');
+    const events = await readRunEvents(root, '172014', run.id);
+
+    expect(result.status).toBe('WAITING_FOR_AGENT');
+    expect(result.executionMode).toBe('EMBEDDED_TERMINAL');
+    expect(result.terminalScriptPath).toBeUndefined();
+    expect(events.some((event) => event.level === 'WARN' && event.message.includes('Agent Provider 不可用'))).toBe(true);
+  });
+
   it('终端 launcher 长时间不退出时仍返回 TERMINAL_OPENED', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-terminal-launch-'));
     const originalCommand = process.env.AI_DELIVERY_TERMINAL_COMMAND;
@@ -567,6 +594,37 @@ describe('agent-providers', () => {
     expect(refreshed.workflow.runs[0].executionMode).toBe('INTERACTIVE_TERMINAL');
     expect(refreshed.workflow.runs[0].status).toBe('SUCCEEDED');
     expect(events.some((event) => event.type === 'EXIT' && event.message.includes('交互终端 Agent'))).toBe(true);
+  });
+
+  it('刷新内嵌终端运行中状态时回收已丢失会话', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-embedded-terminal-'));
+    const item = workflow();
+    const run: RunRecord = {
+      ...runRecord('run-embedded-lost'),
+      status: 'RUNNING',
+      executionMode: 'EMBEDDED_TERMINAL',
+      terminalStatusPath: '.ai-delivery-runtime/requirements/172014/runs/run-embedded-lost.terminal-status.json',
+      terminalTranscriptPath: '.ai-delivery-runtime/requirements/172014/runs/run-embedded-lost.terminal.log',
+      terminalRawTranscriptPath: '.ai-delivery-runtime/requirements/172014/runs/run-embedded-lost.terminal.ansi'
+    };
+    item.runs.push(run);
+    await fs.mkdir(path.dirname(resolveWorkspaceOrRuntimePath(root, run.terminalStatusPath)), { recursive: true });
+    await fs.writeFile(
+      resolveWorkspaceOrRuntimePath(root, run.terminalStatusPath),
+      JSON.stringify({
+        status: 'RUNNING',
+        transcriptPath: run.terminalTranscriptPath,
+        rawTranscriptPath: run.terminalRawTranscriptPath
+      })
+    );
+
+    const refreshed = await refreshTerminalRunStatuses(root, item);
+    const events = await readRunEvents(root, '172014', run.id);
+
+    expect(refreshed.changed).toBe(true);
+    expect(refreshed.workflow.runs[0].status).toBe('FAILED');
+    expect(refreshed.workflow.runs[0].terminalSessionStatus).toBe('UNAVAILABLE');
+    expect(events.some((event) => event.type === 'ERROR' && event.message.includes('内嵌终端会话已丢失'))).toBe(true);
   });
 
   it.each(['TERMINAL', 'INTERACTIVE_TERMINAL'] as const)(

@@ -2335,7 +2335,7 @@ export function createRouter(workspaceRoot: string) {
         const requirementId = url.searchParams.get('requirementId') || '';
         const { root, workflow } = await loadMergedWorkflow(requestContext, requirementId);
         const run = workflow?.runs.find((item) => item.id === runMatch[1]);
-        send(response, 200, { data: await readRunEventsWithTranscript(root, requirementId, runMatch[1], run?.terminalTranscriptPath) });
+        send(response, 200, { data: await readRunEventsWithTranscript(root, requirementId, runMatch[1], run?.terminalTranscriptPath, run?.terminalRawTranscriptPath) });
         return;
       }
 

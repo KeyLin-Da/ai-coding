@@ -812,7 +812,7 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
       actionType: 'PRD_CLARIFY',
       params: {
         agentId: 'codex',
-        executionMode: 'INTERACTIVE_TERMINAL',
+        executionMode: 'EMBEDDED_TERMINAL',
         description: expect.stringContaining('补充异常场景'),
         sources: ['docs/172014/prd/files/prd-screenshot.png'],
         supplementBlocks: expect.arrayContaining([
@@ -2568,7 +2568,7 @@ describe('RequirementDetail OpenSpec 工件生成', () => {
         actionType: 'RETROSPECTIVE_GENERATE',
         params: expect.objectContaining({
           agentId: 'codex',
-          executionMode: 'INTERACTIVE_TERMINAL',
+          executionMode: 'EMBEDDED_TERMINAL',
           branchName: 'feature/opp-172014'
         })
       })

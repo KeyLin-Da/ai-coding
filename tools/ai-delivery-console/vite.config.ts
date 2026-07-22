@@ -42,6 +42,7 @@ export default defineConfig(({ mode }) => {
     '/runner-api': {
       target: runnerTarget,
       changeOrigin: true,
+      ws: true,
       rewrite: (pathname: string) => pathname.replace(/^\/runner-api/, '')
     },
     '/center-api': {

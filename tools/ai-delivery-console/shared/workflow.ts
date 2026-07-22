@@ -30,7 +30,9 @@ export type ReviewDecision = 'APPROVED' | 'REJECTED' | 'RISK_ACCEPTED';
 
 export type RequirementType = 'REQUIREMENT' | 'DEFECT';
 
-export type ExecutionMode = 'BACKGROUND' | 'TERMINAL' | 'INTERACTIVE_TERMINAL' | 'MANUAL_COPY';
+export type ExecutionMode = 'BACKGROUND' | 'TERMINAL' | 'INTERACTIVE_TERMINAL' | 'EMBEDDED_TERMINAL' | 'MANUAL_COPY';
+
+export type TerminalSessionStatus = 'DISCONNECTED' | 'CONNECTING' | 'CONNECTED' | 'RECONNECTING' | 'READONLY' | 'UNAVAILABLE' | 'ERROR';
 
 export const implementationSteps = ['START_CHANGE', 'ARTIFACT_REVIEW', 'APPLY', 'CHANGE_INSPECTION'] as const;
 
@@ -172,7 +174,12 @@ export interface RunRecord {
   outputPath?: string;
   terminalScriptPath?: string;
   terminalTranscriptPath?: string;
+  terminalRawTranscriptPath?: string;
   terminalStatusPath?: string;
+  terminalSessionId?: string;
+  terminalSessionStatus?: TerminalSessionStatus;
+  terminalCols?: number;
+  terminalRows?: number;
   centerJobId?: number;
   centerRunId?: number;
   codexSessionId?: string;
@@ -790,6 +797,14 @@ export const stageLabels: Record<WorkflowStage, string> = {
 export const requirementTypeLabels: Record<RequirementType, string> = {
   REQUIREMENT: '需求',
   DEFECT: '缺陷'
+};
+
+export const executionModeLabels: Record<ExecutionMode, string> = {
+  BACKGROUND: '后台执行',
+  TERMINAL: '本地终端',
+  INTERACTIVE_TERMINAL: '外部交互终端',
+  EMBEDDED_TERMINAL: '内嵌终端',
+  MANUAL_COPY: '手动复制'
 };
 
 export const statusLabels: Record<WorkflowStatus | RunStatus, string> = {

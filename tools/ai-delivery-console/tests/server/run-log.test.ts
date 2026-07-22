@@ -4,6 +4,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   appendRunEvent,
+  readRawTerminalTranscriptChunk,
   readRunEventsWithTranscript,
   readTerminalTranscriptChunk,
   stripTerminalControlSequences
@@ -61,10 +62,34 @@ describe('run-log', () => {
     expect(result.event?.text).toContain('[AI Delivery] 开始执行');
     expect(result.event?.text).toContain('Update available');
     expect(result.event?.text).toContain('完成');
-    expect(result.event?.text).not.toMatch(/\x1B|\x9B|\[\?2004h|\[38;5;6;49m|\[0m|\]0;Codex/);
+    expect(result.event?.text).not.toContain('\x1B');
+    expect(result.event?.text).not.toContain('\x9B');
+    expect(result.event?.text).not.toContain('[?2004h');
+    expect(result.event?.text).not.toContain('[38;5;6;49m');
+    expect(result.event?.text).not.toContain(']0;Codex');
   });
 
   it('清理控制序列时保留普通方括号日志内容', () => {
     expect(stripTerminalControlSequences('[AI Delivery] [INFO] 正常输出')).toBe('[AI Delivery] [INFO] 正常输出');
+  });
+
+  it('同时返回 stripped transcript 和 raw ANSI transcript', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-run-log-'));
+    const runDir = getRunRuntimeDir(root, '172014');
+    const absoluteTranscriptPath = path.join(runDir, 'run-embedded.terminal.log');
+    const absoluteRawTranscriptPath = path.join(runDir, 'run-embedded.terminal.ansi');
+    const transcriptPath = toRuntimePathRef(root, absoluteTranscriptPath);
+    const rawTranscriptPath = toRuntimePathRef(root, absoluteRawTranscriptPath);
+    await fs.mkdir(runDir, { recursive: true });
+    await fs.writeFile(absoluteTranscriptPath, 'ready\n', 'utf8');
+    await fs.writeFile(absoluteRawTranscriptPath, '\x1B[32mready\x1B[0m\n', 'utf8');
+
+    const raw = await readRawTerminalTranscriptChunk(root, rawTranscriptPath, 0);
+    const events = await readRunEventsWithTranscript(root, '172014', 'run-embedded', transcriptPath, rawTranscriptPath);
+    const transcriptEvent = events.find((event) => event.type === 'STDOUT');
+
+    expect(raw.text).toContain('\x1B[32mready');
+    expect(transcriptEvent?.text).toBe('ready\n');
+    expect((transcriptEvent?.data as any).rawText).toContain('\x1B[32mready');
   });
 });
