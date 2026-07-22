@@ -123,6 +123,7 @@ export function centerTechDesignAnnotationsEnabled(context: LocalRequestContext,
 function toTechDesignAnnotation(requirementId: string, item: CenterAnnotationPayload): TechDesignAnnotation {
   const now = new Date().toISOString();
   const id = String(item.id || '');
+  const consumedAt = normalizeCenterDate(item.consumedAt);
   return {
     id,
     requirementId: normalizeRequirementId(requirementId),
@@ -134,9 +135,9 @@ function toTechDesignAnnotation(requirementId: string, item: CenterAnnotationPay
     selectedText: String(item.selectedText || ''),
     anchor: normalizeAnchor(item.anchor),
     comment: String(item.comment || ''),
-    status: normalizeStatus(item.status),
-    includeInNextGeneration: item.includeInNextGeneration !== false,
-    consumedAt: normalizeCenterDate(item.consumedAt),
+    status: consumedAt ? 'RESOLVED' : normalizeStatus(item.status),
+    includeInNextGeneration: consumedAt ? false : item.includeInNextGeneration !== false,
+    consumedAt,
     consumedRunId: item.consumedRunId,
     createdBy: item.createdBy,
     createdByName: normalizeText(item.createdByName, 100),
@@ -505,7 +506,8 @@ export async function consumeCenterTechDesignAnnotationsAndSnapshot(
   workspaceRoot: string,
   context: LocalRequestContext,
   workflow: RequirementWorkflow,
-  runId: string
+  runId: string,
+  annotationIds?: string[]
 ): Promise<TechDesignAnnotation[]> {
   if (!centerTechDesignAnnotationsEnabled(context, workflow)) {
     return [];
@@ -514,7 +516,10 @@ export async function consumeCenterTechDesignAnnotationsAndSnapshot(
   try {
     payload = await centerRequest<CenterAnnotationPayload[]>(context, centerAnnotationPath(workflow, '/consume'), {
       method: 'POST',
-      body: JSON.stringify({ runId })
+      body: JSON.stringify({
+        runId,
+        ...(annotationIds === undefined ? {} : { annotationIds })
+      })
     });
   } catch (error) {
     if (isCenterEndpointUnavailableError(error)) {

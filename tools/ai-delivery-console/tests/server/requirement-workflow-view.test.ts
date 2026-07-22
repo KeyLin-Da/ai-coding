@@ -5,7 +5,8 @@ import {
   centerRequirementToWorkflow,
   clearCenterRequirementWorkflowCache,
   loadCachedCenterRequirementWorkflow,
-  mergeRequirementWorkflow
+  mergeRequirementWorkflow,
+  upsertCenterRequirement
 } from '../../server/services/requirement-workflow-view';
 
 function localRequirementWorkflow(): RequirementWorkflow {
@@ -71,6 +72,60 @@ describe('requirement-workflow-view', () => {
     expect(merged.stages.PRD.status).toBe('SKIPPED');
     expect(merged.stages.IMPLEMENTATION.changeName).toBe('req-172014');
     expect(merged.techDesignSourceFiles?.[0].path).toBe('docs/172014/technical-design/file/file-1.md');
+  });
+
+  it('需求 upsert 将涉及工程名称同步到中心并返回中心主键', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          id: 100,
+          projectId: 10,
+          requirementId: '172014',
+          title: '更新需求',
+          requirementType: 'REQUIREMENT',
+          branchName: 'feature/opp#172014',
+          status: 'DRAFT',
+          currentStage: 'PRD',
+          stages: [],
+          projectNames: ['opp-api', 'opp-learn']
+        }
+      })
+    } as Response));
+
+    const result = await upsertCenterRequirement(
+      {
+        centerBaseUrl: 'http://center.local',
+        userId: 1,
+        projectId: 10,
+        fetchImpl
+      },
+      {
+        requirementId: '172014',
+        title: '更新需求',
+        requirementType: 'REQUIREMENT',
+        branchName: 'feature/opp#172014',
+        projects: [
+          { name: 'opp-api', path: '/workspace/opp-api' },
+          { name: 'opp-learn', path: '/workspace/opp-learn' }
+        ]
+      }
+    );
+
+    expect(result.id).toBe(100);
+    expect(result.projects).toEqual([
+      { name: 'opp-api', path: 'opp-api' },
+      { name: 'opp-learn', path: 'opp-learn' }
+    ]);
+    expect(JSON.parse(String(fetchImpl.mock.calls[0][1]?.body))).toEqual({
+      projectId: 10,
+      requirementId: '172014',
+      title: '更新需求',
+      requirementType: 'REQUIREMENT',
+      branchName: 'feature/opp#172014',
+      projectNames: ['opp-api', 'opp-learn']
+    });
   });
 
   it('历史已进入代码评审的需求不会因缺少顶层审核记录回退', () => {
@@ -181,7 +236,7 @@ describe('requirement-workflow-view', () => {
     expect(centerWorkflow.currentStage).toBe('IMPLEMENTATION');
   });
 
-  it('合并中心 DONE 状态时不按本地阶段缺失回退', () => {
+  it('合并中心 DONE 状态时会按本地未完成阶段回退，避免跳过后续复盘', () => {
     const centerWorkflow = centerRequirementToWorkflow({
       id: 100,
       projectId: 10,
@@ -208,8 +263,8 @@ describe('requirement-workflow-view', () => {
 
     const merged = mergeRequirementWorkflow(centerWorkflow, localRequirementWorkflow());
 
-    expect(merged.currentStage).toBe('DONE');
-    expect(merged.status).toBe('DONE');
+    expect(merged.currentStage).toBe('CODE_REVIEW');
+    expect(merged.status).toBe('IN_PROGRESS');
   });
 
   it('中心详情读取超时时先返回 undefined，并在完成后命中短缓存', async () => {

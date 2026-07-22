@@ -41,13 +41,13 @@ function normalizeQuestion(question: string) {
 }
 
 function extractMarkedSection(body: string, label: string) {
-  const pattern = new RegExp(`\\*\\*${label}[:：]\\*\\*\\s*\\n([\\s\\S]*?)(?=\\n\\*\\*[^*]+[:：]\\*\\*|\\n##\\s+|$)`);
+  const pattern = new RegExp(`\\*\\*${label}[:：]\\*\\*\\s*\\n([\\s\\S]*?)(?=\\n\\*\\*[^*]+[:：]\\*\\*|$)`);
   return (body.match(pattern)?.[1] || '').trim();
 }
 
 export function parseTechDesignQuestionRecords(content: string, sourcePath = ''): TechDesignQuestionRecord[] {
   const normalized = content.replace(/\r\n/g, '\n');
-  const headings = Array.from(normalized.matchAll(/^##\s+(.+?)\s*$/gm));
+  const headings = Array.from(normalized.matchAll(/^##\s+(.+?)\s*$/gm)).filter((match) => normalizeText(match[1] || '').includes('/'));
 
   return headings
     .map((match, index) => {
@@ -55,7 +55,7 @@ export function parseTechDesignQuestionRecords(content: string, sourcePath = '')
       const bodyStart = (match.index || 0) + match[0].length;
       const bodyEnd = headings[index + 1]?.index ?? normalized.length;
       const body = normalized.slice(bodyStart, bodyEnd);
-      const questionMatch = body.match(/\*\*问题[:：]\*\*\s*\n([\s\S]*?)(?=\n\*\*[^*]+[:：]\*\*|\n##\s+|$)/);
+      const questionMatch = body.match(/\*\*问题[:：]\*\*\s*\n([\s\S]*?)(?=\n\*\*[^*]+[:：]\*\*|$)/);
       const question = (questionMatch?.[1] || '').trim();
       if (!question) {
         return undefined;

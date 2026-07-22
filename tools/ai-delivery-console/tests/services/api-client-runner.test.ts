@@ -32,6 +32,16 @@ function workflow(): RequirementWorkflow {
   };
 }
 
+function legacyWorkflowWithoutRetrospective(): RequirementWorkflow {
+  const item = workflow();
+  const legacyStages = { ...item.stages };
+  delete (legacyStages as Partial<typeof legacyStages>).RETROSPECTIVE;
+  return {
+    ...item,
+    stages: legacyStages as RequirementWorkflow['stages']
+  };
+}
+
 function centerRequirement() {
   return {
     id: 100,
@@ -114,17 +124,85 @@ describe('apiClient Runner docs endpoints', () => {
   });
 
   it('需求详情优先从 Runner 合并接口读取，保留本地扫描产物', async () => {
-    const fetchMock = vi.fn().mockImplementation(() => okResponse(workflow()));
+    const fetchMock = vi.fn().mockImplementation(() => okResponse(legacyWorkflowWithoutRetrospective()));
     vi.stubGlobal('fetch', fetchMock);
 
     const result = await apiClient.getRequirement('172014');
 
     expect(result.currentStage).toBe('TECH_DESIGN');
+    expect(result.stages.RETROSPECTIVE.status).toBe('NOT_STARTED');
     expect(result.artifacts[0].path).toBe('docs/172014/technical-design/design_review.md');
     expect(fetchMock).toHaveBeenCalledWith(
       '/runner-api/api/ai-delivery/requirements/172014?projectId=10',
       expect.any(Object)
     );
+  });
+
+  it('创建或编辑需求通过 Runner 同步中心和本地涉及工程', async () => {
+    const expected = {
+      ...workflow(),
+      id: 100,
+      projects: [
+        { name: 'opp-api', path: '/workspace/opp-api' },
+        { name: 'opp-learn', path: '/workspace/opp-learn' }
+      ]
+    };
+    const fetchMock = vi.fn().mockImplementation(() => okResponse(expected));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiClient.createRequirement({
+      id: 100,
+      requirementId: '172014',
+      title: '补充材料',
+      requirementType: 'DEFECT',
+      branchName: 'bugfix/opp#172014',
+      projects: expected.projects
+    });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/runner-api/api/ai-delivery/requirements');
+    expect(JSON.parse(String(init.body))).toEqual({
+      id: 100,
+      projectId: 10,
+      requirementId: '172014',
+      title: '补充材料',
+      requirementType: 'DEFECT',
+      branchName: 'bugfix/opp#172014',
+      projects: expected.projects
+    });
+    expect(result.projects).toEqual(expected.projects);
+  });
+
+  it('审核提交使用中心需求主键而不是业务需求编号', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      okResponse({
+        id: 501,
+        requirementPk: 100,
+        stage: 'IMPLEMENTATION',
+        implementationStep: 'START_CHANGE',
+        decision: 'APPROVED'
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiClient.submitReview({
+      requirementId: '172014',
+      requirementPk: 100,
+      stage: 'IMPLEMENTATION',
+      implementationStep: 'START_CHANGE',
+      decision: 'APPROVED',
+      comment: '开始变更通过'
+    });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/center-api/api/ai-delivery/reviews');
+    expect(JSON.parse(String(init.body))).toEqual({
+      requirementPk: 100,
+      stage: 'IMPLEMENTATION',
+      implementationStep: 'START_CHANGE',
+      decision: 'APPROVED',
+      comment: '开始变更通过'
+    });
   });
 
   it('Runner 不可用时需求详情兜底中心服务，仍能打开基础详情', async () => {
@@ -183,7 +261,7 @@ describe('apiClient Runner docs endpoints', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    await apiClient.runAction('172014', { actionType: 'DESIGN_GENERATE' });
+    const result = await apiClient.runAction('172014', { actionType: 'DESIGN_GENERATE' });
 
     expect(fetchMock).toHaveBeenCalledWith(
       '/runner-api/api/ai-delivery/requirements/172014/actions',
@@ -191,6 +269,7 @@ describe('apiClient Runner docs endpoints', () => {
         method: 'POST'
       })
     );
+    expect(result.workflow.stages.RETROSPECTIVE.status).toBe('NOT_STARTED');
   });
 
   it('命令预览提交到本地 Runner', async () => {

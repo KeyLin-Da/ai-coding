@@ -223,6 +223,18 @@
               <p class="muted">{{ activeProject.project.name }} · diff2html</p>
             </div>
             <div class="git-diff-actions">
+              <span v-if="renderedDiffFiles.length" class="git-diff-total">
+                {{ renderedDiffFiles.length }} 个文件 · <span class="additions">+{{ currentDiffAdditions }}</span>
+                <span class="deletions">-{{ currentDiffDeletions }}</span>
+              </span>
+              <select v-model.number="diffContextLines" class="git-context-select" :disabled="isLoadingExpandedDiff" @change="loadDiffContext">
+                <option :value="3">默认上下文</option>
+                <option :value="30">更多上下文</option>
+                <option :value="100">大量上下文</option>
+                <option :value="200">完整上下文</option>
+              </select>
+              <el-button class="git-diff-expand-all-button" size="small" :disabled="!renderedDiffFiles.length" @click="expandAllDiffFiles">展开全部</el-button>
+              <el-button class="git-diff-collapse-all-button" size="small" :disabled="!renderedDiffFiles.length" @click="collapseAllDiffFiles">收起全部</el-button>
               <el-radio-group v-model="diffViewMode" size="small">
                 <el-radio-button value="line-by-line">统一视图</el-radio-button>
                 <el-radio-button value="side-by-side">左右对比</el-radio-button>
@@ -237,7 +249,43 @@
               />
             </div>
           </div>
-          <div v-if="currentDiffHtml" class="git-diff-html" v-html="currentDiffHtml"></div>
+          <el-alert
+            v-if="expandedDiffPreview?.truncated"
+            class="git-diff-context-alert"
+            type="warning"
+            show-icon
+            title="扩展上下文后的 diff 内容过长，已截断展示"
+          />
+          <div v-if="renderedDiffFiles.length" class="git-diff-html">
+            <article v-for="item in renderedDiffFiles" :key="item.file.path" class="git-diff-file-card" :class="{ collapsed: isDiffFileCollapsed(item.file.path) }">
+              <header class="git-diff-file-header">
+                <button class="git-diff-file-toggle" type="button" :title="isDiffFileCollapsed(item.file.path) ? '展开文件 diff' : '收起文件 diff'" @click="toggleDiffFile(item.file.path)">
+                  {{ isDiffFileCollapsed(item.file.path) ? '+' : '-' }}
+                </button>
+                <span class="git-diff-file-heat" :title="`变更规模 ${item.changeSize} 行`">
+                  <span :style="{ width: `${item.heatPercent}%` }" />
+                </span>
+                <div class="git-diff-file-meta">
+                  <strong :title="item.file.path">{{ item.file.path }}</strong>
+                  <p>
+                    <span class="git-file-status">{{ item.file.status }}</span>
+                    <span class="additions">+{{ item.file.additions || 0 }}</span>
+                    <span class="deletions">-{{ item.file.deletions || 0 }}</span>
+                  </p>
+                </div>
+                <el-dropdown trigger="click" @command="(command) => handleDiffFileCommand(String(command), item)">
+                  <el-button class="git-diff-file-menu" size="small" circle title="文件操作">...</el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="view">查看文件</el-dropdown-item>
+                      <el-dropdown-item command="copy">复制文件路径</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+              </header>
+              <div v-show="!isDiffFileCollapsed(item.file.path)" class="git-diff-file-body" v-html="item.html"></div>
+            </article>
+          </div>
           <el-empty v-else description="当前选择暂无可视化 diff" />
         </section>
       </div>
@@ -245,18 +293,45 @@
       <el-empty v-else description="暂无已纳入变更或待确认新文件" />
     </template>
     <el-empty v-else description="尚未读取 Git 变更" />
+    <el-dialog v-model="filePreviewVisible" class="git-file-preview-dialog" width="82%" destroy-on-close>
+      <template #header>
+        <div class="git-file-preview-title">
+          <strong>{{ filePreview?.filePath || filePreviewTarget?.file.path || '查看文件' }}</strong>
+          <p v-if="filePreview">
+            {{ filePreview.projectPath }} · {{ filePreview.language }} · {{ formatFileSize(filePreview.size) }}
+            <span v-if="filePreview.updatedAt"> · {{ filePreview.updatedAt }}</span>
+          </p>
+        </div>
+      </template>
+      <div v-loading="filePreviewLoading" class="git-file-preview-body">
+        <el-alert v-if="filePreviewError" type="error" show-icon :title="filePreviewError" />
+        <el-empty v-else-if="filePreview && !filePreview.previewable" :description="filePreview.reason || '文件当前不可预览'" />
+        <ol v-else-if="filePreview?.content" ref="filePreviewContentRef" class="git-file-preview-code">
+          <li
+            v-for="line in filePreviewLines"
+            :key="line.number"
+            class="git-file-preview-line"
+            :class="{ focus: line.number === filePreview.focusLine }"
+            :data-line="line.number"
+          >
+            <span>{{ line.text || ' ' }}</span>
+          </li>
+        </ol>
+        <el-empty v-else-if="!filePreviewLoading" description="暂无文件内容" />
+      </div>
+    </el-dialog>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { DocumentChecked, FullScreen, Minus } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { html as diffToHtml } from 'diff2html/bundles/js/diff2html.min.js';
 import 'diff2html/bundles/css/diff2html.min.css';
 import { apiClient } from '@/api/client';
-import type { GitChangedFile, GitChangeSummary, GitProjectChangeSummary } from '@shared/workflow';
-import { buildFileTree, extractFileDiff, filePathToneClass, flattenTreeRows, type GitTreeRow } from '@/utils/git-file-tree';
+import type { GitChangedFile, GitChangeSummary, GitDiffPreview, GitFilePreview, GitProjectChangeSummary } from '@shared/workflow';
+import { buildFileTree, extractFileDiffSections, filePathToneClass, findFirstChangedNewLine, flattenTreeRows, type GitTreeRow } from '@/utils/git-file-tree';
 
 const props = defineProps<{
   summary?: GitChangeSummary;
@@ -274,12 +349,31 @@ const fileListViewMode = ref<'flat' | 'tree'>('flat');
 const selectedUntrackedFilePaths = ref<string[]>([]);
 const isStagingUntracked = ref(false);
 const isDiffFullscreen = ref(false);
+const diffContextLines = ref(3);
+const isLoadingExpandedDiff = ref(false);
+const expandedDiffPreview = ref<GitDiffPreview>();
+const collapsedDiffFilePaths = ref<string[]>([]);
+const filePreviewVisible = ref(false);
+const filePreviewLoading = ref(false);
+const filePreviewError = ref('');
+const filePreview = ref<GitFilePreview>();
+const filePreviewTarget = ref<RenderedDiffFile>();
+const filePreviewContentRef = ref<HTMLElement>();
 const collapsedChangedTreeDirectoryPaths = ref<string[]>([]);
 const collapsedUntrackedTreeDirectoryPaths = ref<string[]>([]);
 
 interface FileGroups {
   files: GitChangedFile[];
   untrackedFiles: GitChangedFile[];
+}
+
+interface RenderedDiffFile {
+  file: GitChangedFile;
+  diff: string;
+  html: string;
+  firstChangedLine?: number;
+  changeSize: number;
+  heatPercent: number;
 }
 
 function normalizeFileGroups(files: GitChangedFile[] = [], untrackedFiles?: GitChangedFile[]): FileGroups {
@@ -342,26 +436,49 @@ const untrackedTreeRows = computed<GitTreeRow<GitChangedFile>[]>(() => {
   return flattenTreeRows(tree, collapsedUntrackedTreeDirectoryPaths.value);
 });
 
-const currentDiff = computed(() => {
-  if (!activeProject.value) {
-    return '';
-  }
-  if (!selectedFilePath.value) {
-    return activeProject.value.diff;
-  }
-  return extractFileDiff(activeProject.value.diff, selectedFilePath.value);
+const activeDiffText = computed(() => expandedDiffPreview.value?.diff || activeProject.value?.diff || '');
+
+const currentDiffFiles = computed(() => {
+  const files = activeProject.value?.files || [];
+  return selectedFilePath.value ? files.filter((file) => file.path === selectedFilePath.value) : files;
 });
 
-const currentDiffHtml = computed(() => {
-  if (!currentDiff.value.trim()) {
-    return '';
-  }
-  return diffToHtml(currentDiff.value, {
-    drawFileList: false,
-    matching: 'lines',
-    outputFormat: diffViewMode.value
-  });
-});
+const currentDiffAdditions = computed(() => currentDiffFiles.value.reduce((sum, file) => sum + (file.additions || 0), 0));
+
+const currentDiffDeletions = computed(() => currentDiffFiles.value.reduce((sum, file) => sum + (file.deletions || 0), 0));
+
+const maxCurrentChangeSize = computed(() => Math.max(1, ...currentDiffFiles.value.map((file) => (file.additions || 0) + (file.deletions || 0))));
+
+const renderedDiffFiles = computed<RenderedDiffFile[]>(() =>
+  currentDiffFiles.value
+    .map((file) => {
+      const diff = extractFileDiffSections(activeDiffText.value, file.path).join('\n');
+      if (!diff.trim()) {
+        return undefined;
+      }
+      const changeSize = (file.additions || 0) + (file.deletions || 0);
+      return {
+        file,
+        diff,
+        html: diffToHtml(diff, {
+          drawFileList: false,
+          matching: 'lines',
+          outputFormat: diffViewMode.value
+        }),
+        firstChangedLine: findFirstChangedNewLine(diff),
+        changeSize,
+        heatPercent: Math.max(8, Math.round((changeSize / maxCurrentChangeSize.value) * 100))
+      };
+    })
+    .filter((item): item is RenderedDiffFile => Boolean(item))
+);
+
+const filePreviewLines = computed(() =>
+  (filePreview.value?.content || '').split('\n').map((text, index) => ({
+    number: index + 1,
+    text
+  }))
+);
 
 
 function toggleTreeDirectory(treeKind: 'changed' | 'untracked', directoryPath: string) {
@@ -416,6 +533,126 @@ async function stageSelectedUntrackedFiles() {
   }
 }
 
+function isDiffFileCollapsed(filePath: string): boolean {
+  return collapsedDiffFilePaths.value.includes(filePath);
+}
+
+function toggleDiffFile(filePath: string) {
+  collapsedDiffFilePaths.value = isDiffFileCollapsed(filePath)
+    ? collapsedDiffFilePaths.value.filter((item) => item !== filePath)
+    : [...new Set([...collapsedDiffFilePaths.value, filePath])];
+}
+
+function collapseAllDiffFiles() {
+  collapsedDiffFilePaths.value = [...new Set([...collapsedDiffFilePaths.value, ...renderedDiffFiles.value.map((item) => item.file.path)])];
+}
+
+function expandAllDiffFiles() {
+  const currentPaths = new Set(renderedDiffFiles.value.map((item) => item.file.path));
+  collapsedDiffFilePaths.value = collapsedDiffFilePaths.value.filter((filePath) => !currentPaths.has(filePath));
+}
+
+async function loadDiffContext() {
+  if (!props.requirementId || !activeProject.value) {
+    return;
+  }
+  if (diffContextLines.value === 3) {
+    expandedDiffPreview.value = undefined;
+    return;
+  }
+  isLoadingExpandedDiff.value = true;
+  try {
+    const preview = await apiClient.getGitDiffPreview(props.requirementId, {
+      projectPath: activeProject.value.project.path,
+      filePath: selectedFilePath.value || undefined,
+      contextLines: diffContextLines.value
+    });
+    expandedDiffPreview.value = preview;
+    if (preview.truncated) {
+      ElMessage.warning('扩展上下文后的 diff 内容过长，已截断展示');
+    }
+  } catch (error: any) {
+    ElMessage.error(error.message || '加载扩展上下文失败');
+  } finally {
+    isLoadingExpandedDiff.value = false;
+  }
+}
+
+async function handleDiffFileCommand(command: string, item: RenderedDiffFile) {
+  if (command === 'view') {
+    await openFilePreview(item);
+    return;
+  }
+  if (command === 'copy') {
+    await copyDiffFilePath(item.file.path);
+  }
+}
+
+async function copyDiffFilePath(filePath: string) {
+  try {
+    if (!navigator.clipboard?.writeText) {
+      throw new Error('当前环境不支持剪贴板写入');
+    }
+    await navigator.clipboard.writeText(filePath);
+    ElMessage.success('已复制文件路径');
+  } catch (error: any) {
+    ElMessage.error(error.message || '复制文件路径失败');
+  }
+}
+
+async function openFilePreview(item: RenderedDiffFile) {
+  if (!props.requirementId || !activeProject.value) {
+    return;
+  }
+  filePreviewVisible.value = true;
+  filePreviewLoading.value = true;
+  filePreviewError.value = '';
+  filePreview.value = undefined;
+  filePreviewTarget.value = item;
+  try {
+    filePreview.value = await apiClient.getGitChangedFilePreview(props.requirementId, {
+      projectPath: activeProject.value.project.path,
+      filePath: item.file.path,
+      focusLine: item.firstChangedLine
+    });
+    await nextTick();
+    scrollFilePreviewToFocus();
+  } catch (error: any) {
+    filePreviewError.value = error.message || '读取文件失败';
+  } finally {
+    filePreviewLoading.value = false;
+  }
+}
+
+function scrollFilePreviewToFocus() {
+  const focusLine = filePreview.value?.focusLine;
+  if (!focusLine || !filePreviewContentRef.value) {
+    return;
+  }
+  filePreviewContentRef.value.querySelector<HTMLElement>(`[data-line="${focusLine}"]`)?.scrollIntoView?.({ block: 'center' });
+}
+
+function resetDiffWorkbenchState() {
+  diffContextLines.value = 3;
+  expandedDiffPreview.value = undefined;
+  collapsedDiffFilePaths.value = [];
+}
+
+function pruneCollapsedDiffFiles() {
+  const validPaths = new Set(currentDiffFiles.value.map((file) => file.path));
+  collapsedDiffFilePaths.value = collapsedDiffFilePaths.value.filter((filePath) => validPaths.has(filePath));
+}
+
+function formatFileSize(size: number): string {
+  if (size >= 1024 * 1024) {
+    return `${(size / 1024 / 1024).toFixed(1)} MB`;
+  }
+  if (size >= 1024) {
+    return `${(size / 1024).toFixed(1)} KB`;
+  }
+  return `${size} B`;
+}
+
 function toggleDiffFullscreen() {
   isDiffFullscreen.value = !isDiffFullscreen.value;
 }
@@ -434,6 +671,7 @@ watch(
     selectedUntrackedFilePaths.value = [];
     collapsedChangedTreeDirectoryPaths.value = [];
     collapsedUntrackedTreeDirectoryPaths.value = [];
+    resetDiffWorkbenchState();
   },
   { immediate: true }
 );
@@ -443,10 +681,19 @@ watch(activeProjectPath, () => {
   selectedUntrackedFilePaths.value = [];
   collapsedChangedTreeDirectoryPaths.value = [];
   collapsedUntrackedTreeDirectoryPaths.value = [];
+  resetDiffWorkbenchState();
 });
 
 watch(allUntrackedFilePaths, () => {
   selectedUntrackedFilePaths.value = selectedUntrackedFilePaths.value.filter((filePath) => allUntrackedFilePaths.value.includes(filePath));
+});
+
+watch(selectedFilePath, () => {
+  resetDiffWorkbenchState();
+});
+
+watch(currentDiffFiles, () => {
+  pruneCollapsedDiffFiles();
 });
 
 onMounted(() => {
@@ -833,7 +1080,29 @@ onUnmounted(() => {
   gap: 8px;
 }
 
+.git-diff-total {
+  color: #60708f;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.git-context-select {
+  height: 28px;
+  padding: 0 8px;
+  color: #334155;
+  border: 1px solid #d8e0ec;
+  border-radius: 6px;
+  background: #ffffff;
+  font-size: 12px;
+}
+
+.git-diff-context-alert {
+  margin: 10px 12px 0;
+}
+
 .git-diff-html {
+  display: grid;
+  gap: 12px;
   padding: 12px;
 }
 
@@ -841,13 +1110,140 @@ onUnmounted(() => {
   flex: 1;
 }
 
+.git-diff-file-card {
+  overflow: hidden;
+  border: 1px solid #e5eaf3;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.git-diff-file-header {
+  display: grid;
+  grid-template-columns: auto 48px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #e5eaf3;
+  background: #f8fafc;
+}
+
+.git-diff-file-card.collapsed .git-diff-file-header {
+  border-bottom: 0;
+}
+
+.git-diff-file-toggle {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  color: #475569;
+  border: 1px solid #d8e0ec;
+  border-radius: 6px;
+  background: #ffffff;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.git-diff-file-heat {
+  display: inline-flex;
+  align-items: center;
+  width: 48px;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #edf2f7;
+}
+
+.git-diff-file-heat span {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #22c55e 0%, #0ea5e9 100%);
+}
+
+.git-diff-file-meta {
+  min-width: 0;
+}
+
+.git-diff-file-meta strong,
+.git-diff-file-meta p {
+  margin: 0;
+}
+
+.git-diff-file-meta strong {
+  display: block;
+  overflow-wrap: anywhere;
+  color: #1f2a44;
+  line-height: 1.4;
+}
+
+.git-diff-file-meta p {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: #60708f;
+  font-size: 12px;
+}
+
+.git-diff-file-menu {
+  font-weight: 700;
+}
+
+.git-diff-file-body {
+  overflow: auto;
+}
+
 .git-diff-html :deep(.d2h-file-header) {
-  border-radius: 8px 8px 0 0;
+  display: none;
 }
 
 .git-diff-html :deep(.d2h-file-wrapper) {
-  border-color: #e5eaf3;
+  margin-bottom: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.git-file-preview-title strong,
+.git-file-preview-title p {
+  margin: 0;
+}
+
+.git-file-preview-title p {
+  margin-top: 4px;
+  color: #60708f;
+  font-size: 12px;
+}
+
+.git-file-preview-body {
+  min-height: 320px;
+}
+
+.git-file-preview-code {
+  max-height: 70vh;
+  margin: 0;
+  padding: 12px 0 12px 56px;
+  overflow: auto;
+  border: 1px solid #e5eaf3;
   border-radius: 8px;
+  background: #0f172a;
+  color: #e5edf7;
+  font-family: Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre;
+}
+
+.git-file-preview-line {
+  padding: 0 12px;
+}
+
+.git-file-preview-line::marker {
+  color: #94a3b8;
+}
+
+.git-file-preview-line.focus {
+  background: #334155;
+  color: #ffffff;
 }
 
 @media (max-width: 960px) {
@@ -869,6 +1265,15 @@ onUnmounted(() => {
 
   .git-diff-actions {
     justify-content: flex-start;
+  }
+
+  .git-diff-file-header {
+    grid-template-columns: auto 42px minmax(0, 1fr);
+  }
+
+  .git-diff-file-menu {
+    grid-column: 3;
+    justify-self: flex-start;
   }
 }
 </style>

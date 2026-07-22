@@ -4,7 +4,7 @@ import { execSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child
 import type { AgentProvider, RequirementWorkflow, RunRecord, RunStatus } from '../../shared/workflow';
 import { serverConfig } from '../config';
 import { appendRunEvent } from './run-log';
-import { normalizeRequirementId } from './workspace';
+import { assertInsideWorkspace, normalizeRequirementId } from './workspace';
 import { normalizeProjectBasePaths, resolveWorkflowProjects } from './project-resolver';
 import { getPromptRuntimeDir, getRunRuntimeDir, getRunnerRuntimeRoot, getScriptRuntimeDir, resolveWorkspaceOrRuntimePath, toRuntimePathRef } from './runtime-paths';
 import { CodexUsageNdjsonParser, type CodexUsageEvent } from './codex-usage-parser';
@@ -21,6 +21,7 @@ import { recordCodexUsageEvents, retryTokenUsageOutbox } from './token-usage-rec
 const activeProcesses = new Map<string, ChildProcessWithoutNullStreams>();
 const cancelledRunIds = new Set<string>();
 const centerLeaseTimers = new Map<string, NodeJS.Timeout>();
+const TERMINAL_LAUNCH_GRACE_MS = 1200;
 
 type CommandContext = Record<string, string | string[]>;
 
@@ -425,16 +426,40 @@ async function launchTerminalScript(workspaceRoot: string, absoluteScriptPath: s
       stdio: 'ignore',
       detached: true
     });
-    child.on('error', reject);
+    let settled = false;
+    let timeout: NodeJS.Timeout;
+    const settle = (complete: () => void) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      complete();
+    };
+    const graceMs = terminalLaunchGraceMs();
+    timeout = setTimeout(() => {
+      settle(resolve);
+    }, graceMs);
+    child.on('error', (error) => {
+      settle(() => reject(error));
+    });
     child.on('close', (code) => {
       if (code === 0) {
-        resolve();
+        settle(resolve);
       } else {
-        reject(new Error(`打开本地终端失败，退出码 ${code}`));
+        settle(() => reject(new Error(`打开本地终端失败，退出码 ${code}`)));
       }
     });
     child.unref();
   });
+}
+
+function terminalLaunchGraceMs(): number {
+  const value = Number(process.env.AI_DELIVERY_TERMINAL_LAUNCH_GRACE_MS);
+  if (Number.isFinite(value) && value >= 0) {
+    return Math.min(value, 10_000);
+  }
+  return TERMINAL_LAUNCH_GRACE_MS;
 }
 
 export async function refreshTerminalRunStatuses(
@@ -443,7 +468,7 @@ export async function refreshTerminalRunStatuses(
   centerConfig?: CenterRunnerConfig
 ): Promise<{ workflow: RequirementWorkflow; changed: boolean }> {
   let changed = false;
-  const finalStatuses = new Set<RunStatus>(['SUCCEEDED', 'FAILED', 'CANCELLED']);
+  const finalStatuses = new Set<RunStatus>(['SUCCEEDED', 'COMPLETED', 'FAILED', 'CANCELLED']);
   for (const run of workflow.runs) {
     if (!isTerminalExecutionMode(run) || !run.terminalStatusPath) {
       continue;
@@ -476,10 +501,16 @@ export async function refreshTerminalRunStatuses(
     const absoluteStatusPath = resolveWorkspaceOrRuntimePath(workspaceRoot, run.terminalStatusPath);
     const raw = await fs.readFile(absoluteStatusPath, 'utf8').catch(() => '');
     if (!raw.trim()) {
+      if (await completeDesignTerminalRunFromArtifact(workspaceRoot, workflow, run, centerConfig)) {
+        changed = true;
+      }
       continue;
     }
     const status = JSON.parse(raw) as { status?: RunStatus; exitCode?: number; finishedAt?: string; transcriptPath?: string };
     if (!status.status || !finalStatuses.has(status.status)) {
+      if (await completeDesignTerminalRunFromArtifact(workspaceRoot, workflow, run, centerConfig)) {
+        changed = true;
+      }
       continue;
     }
     run.status = status.status;
@@ -513,6 +544,64 @@ export async function refreshTerminalRunStatuses(
     changed = true;
   }
   return { workflow, changed };
+}
+
+function technicalDesignArtifactPath(workflow: RequirementWorkflow): string {
+  const explicitPath = String(workflow.techDesignDocument || workflow.stages.TECH_DESIGN.artifactPath || '').trim();
+  if (explicitPath) {
+    return explicitPath;
+  }
+  return `docs/${normalizeRequirementId(workflow.requirementId)}/technical-design/design_review.md`;
+}
+
+async function completeDesignTerminalRunFromArtifact(
+  workspaceRoot: string,
+  workflow: RequirementWorkflow,
+  run: RunRecord,
+  centerConfig?: CenterRunnerConfig
+): Promise<boolean> {
+  if (run.actionType !== 'DESIGN_GENERATE' || run.status !== 'TERMINAL_OPENED') {
+    return false;
+  }
+  const startedAt = Date.parse(run.startedAt);
+  if (!Number.isFinite(startedAt)) {
+    return false;
+  }
+  const artifactPath = technicalDesignArtifactPath(workflow);
+  const absoluteArtifactPath = assertInsideWorkspace(workspaceRoot, artifactPath);
+  const stat = await fs.stat(absoluteArtifactPath).catch(() => null);
+  if (!stat?.isFile() || stat.size <= 0 || stat.mtimeMs <= startedAt) {
+    return false;
+  }
+  run.status = 'COMPLETED';
+  run.finishedAt = new Date().toISOString();
+  run.error = undefined;
+  const terminalLabel = terminalExecutionModeLabel(run);
+  await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
+    type: 'EXIT',
+    level: 'INFO',
+    message: `检测到${terminalLabel}已更新技术方案产物，自动完成运行并执行后处理`,
+    agentId: run.agentId,
+    data: {
+      artifactPath,
+      terminalStatusPath: run.terminalStatusPath,
+      terminalTranscriptPath: run.terminalTranscriptPath
+    }
+  });
+  if (run.centerJobId && centerConfig) {
+    try {
+      await finishCenterJobForRun(run, centerConfig);
+      run.centerSyncedAt = new Date().toISOString();
+    } catch (error: any) {
+      await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
+        type: 'WARN',
+        level: 'WARN',
+        message: `Center Run 状态同步失败：${error?.message || 'unknown error'}`,
+        agentId: run.agentId
+      });
+    }
+  }
+  return true;
 }
 
 export async function retryWorkflowCenterRunStatuses(

@@ -66,7 +66,7 @@ public class TechDesignAnnotationService {
 
     public List<TechDesignAnnotationVO> listConsumable(Long userId, Long requirementPk) {
         loadRequirement(userId, requirementPk);
-        return toVOList(consumableAnnotations(requirementPk));
+        return toVOList(consumableAnnotations(requirementPk, null));
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -243,15 +243,22 @@ public class TechDesignAnnotationService {
     @Transactional(rollbackFor = Exception.class)
     public List<TechDesignAnnotationVO> consume(Long userId, Long requirementPk, TechDesignAnnotationConsumeRequest request) {
         RequirementEntity requirement = loadRequirement(userId, requirementPk);
-        List<TechDesignAnnotationEntity> annotations = consumableAnnotations(requirementPk);
+        List<String> requestedAnnotationIds = request.getAnnotationIds();
+        if (requestedAnnotationIds != null && requestedAnnotationIds.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<TechDesignAnnotationEntity> annotations = consumableAnnotations(requirementPk, requestedAnnotationIds);
         if (annotations.isEmpty()) {
             return Collections.emptyList();
         }
         LocalDateTime now = LocalDateTime.now();
         for (TechDesignAnnotationEntity annotation : annotations) {
+            annotation.setStatus("RESOLVED");
+            annotation.setIncludeInNextGeneration(0);
             annotation.setConsumedAt(now);
             annotation.setConsumedRunId(request.getRunId());
             annotation.setUpdatedBy(userId);
+            annotation.setUpdatedAt(now);
             annotationMapper.updateById(annotation);
         }
         List<String> annotationIds = annotations.stream().map(TechDesignAnnotationEntity::getAnnotationUid).collect(Collectors.toList());
@@ -264,6 +271,7 @@ public class TechDesignAnnotationService {
                 reply.setConsumedAt(now);
                 reply.setConsumedRunId(request.getRunId());
                 reply.setUpdatedBy(userId);
+                reply.setUpdatedAt(now);
                 replyMapper.updateById(reply);
             }
         }
@@ -308,14 +316,18 @@ public class TechDesignAnnotationService {
         return entity;
     }
 
-    private List<TechDesignAnnotationEntity> consumableAnnotations(Long requirementPk) {
-        return annotationMapper.selectList(new LambdaQueryWrapper<TechDesignAnnotationEntity>()
+    private List<TechDesignAnnotationEntity> consumableAnnotations(Long requirementPk, List<String> annotationIds) {
+        LambdaQueryWrapper<TechDesignAnnotationEntity> wrapper = new LambdaQueryWrapper<TechDesignAnnotationEntity>()
             .eq(TechDesignAnnotationEntity::getRequirementPk, requirementPk)
             .isNull(TechDesignAnnotationEntity::getConsumedAt)
             .eq(TechDesignAnnotationEntity::getIncludeInNextGeneration, 1)
             .in(TechDesignAnnotationEntity::getStatus, Arrays.asList("OPEN", "CARRIED_FORWARD", "STALE"))
             .orderByAsc(TechDesignAnnotationEntity::getCreatedAt)
-            .orderByAsc(TechDesignAnnotationEntity::getId));
+            .orderByAsc(TechDesignAnnotationEntity::getId);
+        if (annotationIds != null) {
+            wrapper.in(TechDesignAnnotationEntity::getAnnotationUid, annotationIds);
+        }
+        return annotationMapper.selectList(wrapper);
     }
 
     private List<TechDesignAnnotationVO> listByRequirement(Long requirementPk, String versionId) {

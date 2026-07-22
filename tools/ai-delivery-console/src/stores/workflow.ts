@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ElMessage } from 'element-plus';
-import type { ActionInput, AgentProvider, RequirementInput, RequirementWorkflow, ReviewInput, RunEvent } from '@shared/workflow';
+import type { ActionInput, AgentProvider, RequirementInput, RequirementWorkflow, ReviewInput, RunEvent, SupplementInputsUpdate } from '@shared/workflow';
 import { apiClient, type DeleteTechDesignQuestionInput } from '@/api/client';
 import { getApiRuntimeConfig } from '@/api/runtime';
 import { dispatchTechDesignAnnotationChanged } from '@/services/annotation-realtime';
@@ -107,8 +107,14 @@ export const useWorkflowStore = defineStore('workflow', {
       const requirementId = this.current.requirementId;
       await apiClient.submitReview({
         ...input,
-        requirementId
+        requirementId,
+        requirementPk: this.current.id
       });
+      if (input.stage === 'IMPLEMENTATION' && input.implementationStep === 'CHANGE_INSPECTION' && input.decision === 'APPROVED') {
+        await apiClient.captureAiCodeCompletenessAiCommit(requirementId).catch((error: Error) => {
+          ElMessage.warning(`审核已保存，AI Commit 自动记录失败：${error.message || 'unknown error'}`);
+        });
+      }
       await this.loadRequirement(requirementId);
       await this.loadRequirements();
     },
@@ -144,9 +150,19 @@ export const useWorkflowStore = defineStore('workflow', {
         this.runEventSeqs[runId] = this.runEvents.length;
       };
       source.onerror = () => {
+        const shouldRefresh = this.activeRunId === runId;
+        const requirementId = shouldRefresh ? this.current?.requirementId : undefined;
         source.close();
-        if (this.runEventSource === source) {
+        if (this.runEventSource === source || shouldRefresh) {
           this.runEventSource = undefined;
+        }
+        if (shouldRefresh) {
+          this.activeRunId = undefined;
+        }
+        if (requirementId) {
+          void this.loadRequirement(requirementId)
+            .then(() => this.loadRequirements())
+            .catch(() => undefined);
         }
       };
     },
@@ -181,33 +197,43 @@ export const useWorkflowStore = defineStore('workflow', {
       await apiClient.cancelRun(this.current.requirementId, runId);
       await this.loadRequirement(this.current.requirementId);
     },
+    mergeWorkflowLocally(workflow: RequirementWorkflow) {
+      this.current = workflow;
+      this.rememberWorkflowEventIds([workflow]);
+      const index = this.requirements.findIndex((item) => item.requirementId === workflow.requirementId);
+      if (index >= 0) {
+        this.requirements.splice(index, 1, workflow);
+      }
+    },
+    async updateSupplementInputs(input: SupplementInputsUpdate) {
+      if (!this.current) {
+        return;
+      }
+      this.mergeWorkflowLocally(await apiClient.updateSupplementInputs(this.current.requirementId, input));
+    },
     async uploadPrdFiles(files: File[]) {
       if (!this.current) {
         return;
       }
-      this.current = await apiClient.uploadPrdFiles(this.current.requirementId, files);
-      await this.loadRequirements();
+      this.mergeWorkflowLocally(await apiClient.uploadPrdFiles(this.current.requirementId, files));
     },
     async deletePrdFile(fileId: string) {
       if (!this.current) {
         return;
       }
-      this.current = await apiClient.deletePrdFile(this.current.requirementId, fileId);
-      await this.loadRequirements();
+      this.mergeWorkflowLocally(await apiClient.deletePrdFile(this.current.requirementId, fileId));
     },
     async uploadTechDesignFiles(files: File[]) {
       if (!this.current) {
         return;
       }
-      this.current = await apiClient.uploadTechDesignFiles(this.current.requirementId, files);
-      await this.loadRequirements();
+      this.mergeWorkflowLocally(await apiClient.uploadTechDesignFiles(this.current.requirementId, files));
     },
     async deleteTechDesignFile(fileId: string) {
       if (!this.current) {
         return;
       }
-      this.current = await apiClient.deleteTechDesignFile(this.current.requirementId, fileId);
-      await this.loadRequirements();
+      this.mergeWorkflowLocally(await apiClient.deleteTechDesignFile(this.current.requirementId, fileId));
     },
     async deleteTechDesignQuestion(input: DeleteTechDesignQuestionInput) {
       if (!this.current) {

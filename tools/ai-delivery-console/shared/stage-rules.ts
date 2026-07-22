@@ -1,5 +1,9 @@
-import type { RequirementWorkflow, ReviewDecision, WorkflowStage } from './workflow';
-import { workflowStagesForWorkflow } from './workflow';
+import type { RequirementWorkflow, ReviewDecision, WorkflowStage, WorkflowStatus } from './workflow';
+import { areAllImplementationStepsApproved, workflowStagesForWorkflow } from './workflow';
+
+export function isStageComplete(status: WorkflowStatus): boolean {
+  return status === 'APPROVED' || status === 'SKIPPED';
+}
 
 export function nextStage(stage: WorkflowStage, workflow?: RequirementWorkflow): WorkflowStage | 'DONE' {
   const stages = workflowStagesForWorkflow(workflow);
@@ -16,7 +20,7 @@ export function previousStagesApproved(workflow: RequirementWorkflow, stage: Wor
   if (index < 0) {
     return false;
   }
-  return stages.slice(0, index).every((item) => workflow.stages[item].status === 'APPROVED');
+  return stages.slice(0, index).every((item) => isStageComplete(workflow.stages[item].status));
 }
 
 export function canEnterStage(workflow: RequirementWorkflow, stage: WorkflowStage): boolean {
@@ -37,12 +41,23 @@ export function canApproveStage(workflow: RequirementWorkflow, stage: WorkflowSt
   if (stage === 'CODE_REVIEW') {
     return !workflow.issues.some((issue) => issue.severity === 'BLOCKER' && issue.status === 'OPEN');
   }
+  if (stage === 'IMPLEMENTATION') {
+    return areAllImplementationStepsApproved(workflow.implementationSteps)
+      || Boolean(workflow.stages[stage].artifactPath || workflow.artifacts.some((artifact) => artifact.stage === stage && artifact.exists));
+  }
+  if (stage === 'RETROSPECTIVE') {
+    const hasArtifact = Boolean(workflow.stages[stage].artifactPath || workflow.artifacts.some((artifact) => artifact.stage === stage && artifact.exists));
+    const pendingCandidates = workflow.retrospective?.pendingCandidateCount || 0;
+    const unresolvedRisks = workflow.retrospective?.unresolvedRiskCount || 0;
+    const risksAccepted = unresolvedRisks === 0 || Boolean(workflow.retrospective?.riskAcceptedAt);
+    return hasArtifact && pendingCandidates === 0 && risksAccepted;
+  }
   return Boolean(workflow.stages[stage].artifactPath || workflow.artifacts.some((artifact) => artifact.stage === stage && artifact.exists));
 }
 
 export function deriveCurrentStage(workflow: RequirementWorkflow): WorkflowStage | 'DONE' {
   for (const stage of workflowStagesForWorkflow(workflow)) {
-    if (workflow.stages[stage].status !== 'APPROVED') {
+    if (!isStageComplete(workflow.stages[stage].status)) {
       return stage;
     }
   }

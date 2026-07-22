@@ -2,13 +2,28 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { URL } from 'node:url';
-import type { ActionInput, GitStageUntrackedInput, PrdSourceFile, RequirementInput, RequirementWorkflow, ReviewInput, RunRecord, TechDesignSourceFile, WorkflowStatus } from '../shared/workflow';
+import type {
+  ActionInput,
+  AiCodeCompletenessInput,
+  GitDiffQueryInput,
+  GitStageUntrackedInput,
+  PrdSourceFile,
+  RequirementInput,
+  RequirementWorkflow,
+  ReviewInput,
+  RunRecord,
+  SupplementBlock,
+  SupplementInputsUpdate,
+  TechDesignGenerationInputSnapshot,
+  TechDesignSourceFile,
+  WorkflowStatus
+} from '../shared/workflow';
 import { ensureImplementationSteps, isImplementationStep, stageForAction } from '../shared/workflow';
 import { normalizePrdClarification, WorkflowRepository } from './services/workflow-repository';
 import { scanRequirementArtifacts } from './services/workspace-scanner';
 import { WorkflowLock } from './services/workflow-lock';
 import { assertPrdClarificationReady, buildActionCommand, executeAction, validateActionInput } from './services/action-adapters';
-import { appendStageCommandLog, readRunEvents, readRunEventsWithTranscript, readTerminalTranscriptChunk, readTerminalTranscriptSize } from './services/run-log';
+import { appendRunEvent, appendStageCommandLog, readRunEvents, readRunEventsWithTranscript, readTerminalTranscriptChunk, readTerminalTranscriptSize } from './services/run-log';
 import { readArtifact, saveArtifact } from './services/markdown-service';
 import { applyReview, refreshCodeReviewIssues, returnToImplementation } from './services/review-service';
 import {
@@ -19,7 +34,15 @@ import {
   retryWorkflowCenterRunStatuses
 } from './services/agent-providers';
 import { normalizeOpenSpecChangeName, readOpenSpecSummary, updateOpenSpecTaskStatus } from './services/openspec-summary';
-import { readGitChanges, stageUntrackedFiles } from './services/git-changes';
+import { readGitChangedFilePreview, readGitChanges, readGitDiffPreview, stageUntrackedFiles } from './services/git-changes';
+import {
+  assertProjectsCleanAndPushed,
+  buildAiCodeCompletenessState,
+  calculateAiCodeCompleteness,
+  captureBaseCommits,
+  captureRemoteAiCommits,
+  mergeAiCommitCaptures
+} from './services/ai-code-completeness';
 import { buildArtifactGitSyncPlan, confirmArtifactGitSync, type ArtifactGitSyncConfirmInput, type ArtifactGitSyncPlanInput } from './services/artifact-git-sync';
 import { centerPublicRequest, centerRequest } from './services/center-client';
 import { readProjectHistory, listProjectsFromConfiguredPaths } from './services/project-history';
@@ -66,7 +89,13 @@ import {
 } from './services/tech-design-input-ledger';
 import { createTechDesignDraftSnapshot, diffTechDesignVersions, listTechDesignVersions, readTechDesignVersionContent } from './services/tech-design-versions';
 import { buildBootstrapImportPlan, importBootstrapPlan, type BootstrapImportConfig } from './services/bootstrap-importer';
-import { listCenterRequirementWorkflows, loadCachedCenterRequirementWorkflow, loadCenterRequirementWorkflow, mergeRequirementWorkflow } from './services/requirement-workflow-view';
+import {
+  listCenterRequirementWorkflows,
+  loadCachedCenterRequirementWorkflow,
+  loadCenterRequirementWorkflow,
+  mergeRequirementWorkflow,
+  upsertCenterRequirement
+} from './services/requirement-workflow-view';
 import {
   assertRequirementCollaborationWritable,
   assertRequirementWorkspaceWritable,
@@ -81,13 +110,35 @@ import {
   saveTechDesignSourceFileSnapshot,
   type UploadedPrdSourceFile
 } from './services/prd-source-files';
+import { listOpenSpecVisualContextCandidates } from './services/open-spec-visual-context';
 import {
   assertPreviewableArtifactPath,
   contentTypeForPath,
+  normalizeShareArtifactPath,
   resolvePublicAssetPath,
   resolveSharePathInWorkspace
 } from './services/artifact-share-paths';
 import { findArtifactShareRoot, findArtifactShareToken, rememberArtifactShareLocation } from './services/artifact-share-locations';
+import { MemoryRepository } from './services/memory-repository';
+import { extractMemoryCandidatesForDesignRun } from './services/memory-candidate-service';
+import { getRetrospectiveSummary, importRetrospectiveRunOutputs } from './services/retrospective-service';
+import {
+  confirmMemoryRecallForRun,
+  markMemoryRecallApplied,
+  prepareMemoryRecallForRun,
+  previewMemoryRecallForRun
+} from './services/memory-recall-service';
+import { prepareOpenSpecArtifactAction } from './services/open-spec-artifact-inputs';
+import { defaultMemorySearchConfig, mergeMemorySearchConfig } from './services/memory-search-config';
+import { rebuildMemoryEmbeddingIndex } from './services/memory-embedding-service';
+import type {
+  MemoryCandidateConfirmInput,
+  MemoryCandidateUpdateInput,
+  MemoryCardCreateInput,
+  MemoryCardUpdateInput,
+  MemoryRecallConfirmInput,
+  MemorySearchConfig
+} from '../shared/memory';
 
 interface ArtifactShareCreateInput {
   projectId?: number | string;
@@ -132,6 +183,76 @@ async function parseBody<T>(request: IncomingMessage): Promise<T> {
   return raw ? (JSON.parse(raw) as T) : ({} as T);
 }
 
+function hasBodyField<T extends object>(input: T, key: keyof T): boolean {
+  return Object.prototype.hasOwnProperty.call(input, key);
+}
+
+function normalizeSupplementBlocksInput(value: unknown): SupplementBlock[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const blocks: SupplementBlock[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object') {
+      continue;
+    }
+    const block = item as Record<string, unknown>;
+    const id = String(block.id || '').trim();
+    if (!id) {
+      continue;
+    }
+    if (block.type === 'PARAGRAPH') {
+      const text = String(block.text || '').trim();
+      if (text) {
+        blocks.push({ id, type: 'PARAGRAPH', text });
+      }
+      continue;
+    }
+    if (block.type === 'IMAGE' || block.type === 'FILE') {
+      blocks.push({
+        id,
+        type: block.type,
+        fileId: String(block.fileId || id).trim(),
+        name: String(block.name || '').trim(),
+        path: String(block.path || '').trim(),
+        size: Number(block.size || 0),
+        mimeType: typeof block.mimeType === 'string' ? block.mimeType : undefined,
+        uploadedAt: typeof block.uploadedAt === 'string' ? block.uploadedAt : undefined,
+        caption: typeof block.caption === 'string' ? block.caption.trim() : undefined,
+        status: block.status === 'UPLOADING' || block.status === 'FAILED' ? block.status : 'READY',
+        error: typeof block.error === 'string' ? block.error : undefined,
+        contextRole: block.contextRole === 'INLINE' || block.contextRole === 'ATTACHMENT'
+          ? block.contextRole
+          : /^pasted-/i.test(String(block.name || ''))
+            ? 'INLINE'
+            : 'ATTACHMENT'
+      });
+    }
+  }
+  return blocks;
+}
+
+function supplementBlockKeySet(value: unknown): Set<string> {
+  const keys = new Set<string>();
+  for (const block of normalizeSupplementBlocksInput(value)) {
+    keys.add(block.id);
+    if (block.type === 'IMAGE' || block.type === 'FILE') {
+      [block.fileId, block.path].filter(Boolean).forEach((key) => keys.add(String(key)));
+    }
+  }
+  return keys;
+}
+
+function supplementBlockConsumed(block: SupplementBlock, consumedKeys: Set<string>): boolean {
+  if (consumedKeys.has(block.id)) {
+    return true;
+  }
+  if (block.type === 'IMAGE' || block.type === 'FILE') {
+    return consumedKeys.has(block.fileId) || consumedKeys.has(block.path);
+  }
+  return false;
+}
+
 function splitBuffer(buffer: Buffer, delimiter: Buffer): Buffer[] {
   const parts: Buffer[] = [];
   let start = 0;
@@ -167,6 +288,61 @@ function designDocumentPath(workflow: RequirementWorkflow, params: Record<string
 
 function normalizeArtifactPath(filePath = ''): string {
   return filePath.trim().replace(/\\/g, '/');
+}
+
+function decodeArtifactViewPath(value = ''): string {
+  return value
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => decodeURIComponent(segment))
+    .join('/');
+}
+
+function decodeArtifactViewContext(value = ''): Partial<LocalRequestContext> {
+  try {
+    const parsed = JSON.parse(decodeURIComponent(value)) as Record<string, unknown>;
+    return {
+      projectId: typeof parsed.projectId === 'string' ? parsed.projectId : '',
+      clientSessionId: typeof parsed.clientSessionId === 'string' ? parsed.clientSessionId : '',
+      userId: typeof parsed.userId === 'string' ? parsed.userId : '',
+      centerBaseUrl: typeof parsed.centerBaseUrl === 'string' ? parsed.centerBaseUrl : ''
+    };
+  } catch {
+    return {};
+  }
+}
+
+const HTML_VIEW_EXTENSIONS = new Set([
+  '.html',
+  '.htm',
+  '.css',
+  '.js',
+  '.mjs',
+  '.map',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.ico',
+  '.webp',
+  '.svg',
+  '.pdf',
+  '.woff',
+  '.woff2',
+  '.ttf',
+  '.otf',
+  '.eot'
+]);
+
+function resolvePublicHtmlViewPath(requirementId: string, artifactPath: string, requestedPath: string): string {
+  const normalizedArtifactPath = assertPreviewableArtifactPath(requirementId, artifactPath);
+  const normalizedRequestedPath = normalizeShareArtifactPath(requestedPath);
+  const artifactDir = path.posix.dirname(normalizedArtifactPath);
+  const sameDirectory = normalizedRequestedPath === normalizedArtifactPath || normalizedRequestedPath.startsWith(`${artifactDir}/`);
+  if (!sameDirectory || !HTML_VIEW_EXTENSIONS.has(path.extname(normalizedRequestedPath).toLowerCase())) {
+    throw localServiceError('B70080', '分享产物路径不允许访问');
+  }
+  return normalizedRequestedPath;
 }
 
 function techDesignQuestionPathPrefix(requirementId: string): string {
@@ -205,19 +381,58 @@ function pendingTechDesignQuestionPaths(workflow: RequirementWorkflow, params: R
   return [...paths].sort((left, right) => left.localeCompare(right));
 }
 
+function uniqueNormalizedPaths(values: unknown[]): string[] {
+  return [...new Set(values.map((value) => normalizeArtifactPath(typeof value === 'string' ? value : '')).filter(Boolean))];
+}
+
+export function captureTechDesignInputSnapshot(
+  workflow: RequirementWorkflow,
+  params: Record<string, unknown>,
+  annotationIds: string[] = [],
+  excludedSourcePaths: string[] = []
+): TechDesignGenerationInputSnapshot {
+  const questionPaths = pendingTechDesignQuestionPaths(workflow, params);
+  const requestedSourceFiles = Array.isArray(params.sourceFiles) ? params.sourceFiles : [];
+  const sourceCandidates = requestedSourceFiles.length
+    ? requestedSourceFiles
+    : (workflow.techDesignSourceFiles || []).map((file) => file.path);
+  const questionPathSet = new Set(questionPaths);
+  const excludedPathSet = new Set(uniqueNormalizedPaths(excludedSourcePaths));
+  const sourceFilePaths = uniqueNormalizedPaths(sourceCandidates).filter(
+    (filePath) => !questionPathSet.has(filePath) && !excludedPathSet.has(filePath)
+  );
+  const clarification = typeof params.clarification === 'string'
+    ? params.clarification.trim()
+    : String(workflow.techDesignClarification || '').trim();
+  return {
+    questionPaths,
+    sourceFilePaths,
+    clarification: clarification || undefined,
+    annotationIds: [...new Set(annotationIds.map((id) => String(id || '').trim()).filter(Boolean))],
+    capturedAt: new Date().toISOString()
+  };
+}
+
 export async function consumeTechDesignInputsAfterRun(
   root: string,
   workflow: RequirementWorkflow,
   run: RunRecord,
   context?: LocalRequestContext
 ): Promise<RequirementWorkflow> {
-  if (run.actionType !== 'DESIGN_GENERATE' || !['SUCCEEDED', 'COMPLETED'].includes(run.status)) {
+  if (
+    run.actionType !== 'DESIGN_GENERATE'
+    || !['SUCCEEDED', 'COMPLETED'].includes(run.status)
+    || run.techDesignInputsConsumedAt
+  ) {
     return workflow;
   }
   const params = run.params || {};
-  const consumedQuestionPaths = pendingTechDesignQuestionPaths(workflow, params);
-  const consumedSourceFilePaths = (workflow.techDesignSourceFiles || []).map((file) => file.path).filter(Boolean);
-  const clarification = typeof params.clarification === 'string' ? params.clarification : workflow.techDesignClarification || '';
+  const snapshot = run.techDesignInputSnapshot;
+  const consumedQuestionPaths = snapshot?.questionPaths || pendingTechDesignQuestionPaths(workflow, params);
+  const consumedSourceFilePaths = snapshot?.sourceFilePaths
+    || (workflow.techDesignSourceFiles || []).map((file) => file.path).filter(Boolean);
+  const clarification = snapshot?.clarification
+    ?? (typeof params.clarification === 'string' ? params.clarification : workflow.techDesignClarification || '');
   const ledger = await consumeTechDesignInputLedger(root, workflow.requirementId, {
     questionPaths: consumedQuestionPaths,
     sourceFilePaths: consumedSourceFilePaths,
@@ -225,17 +440,106 @@ export async function consumeTechDesignInputsAfterRun(
     runId: run.id
   });
   if (context && centerTechDesignAnnotationsEnabled(context, workflow)) {
-    await consumeCenterTechDesignAnnotationsAndSnapshot(root, context, workflow, run.id);
+    await consumeCenterTechDesignAnnotationsAndSnapshot(root, context, workflow, run.id, snapshot?.annotationIds);
   } else {
-    await consumeTechDesignAnnotations(root, workflow.requirementId, run.id);
+    await consumeTechDesignAnnotations(root, workflow.requirementId, run.id, snapshot?.annotationIds);
   }
+  run.techDesignInputsConsumedAt = new Date().toISOString();
   const ledgerQuestionPaths = consumedQuestionPathsFromLedger(ledger);
+  const consumedSourcePathSet = new Set(consumedSourceFilePaths.map(normalizeArtifactPath));
+  const currentClarification = String(workflow.techDesignClarification || '').trim();
+  const consumedClarification = String(clarification || '').trim();
+  const shouldKeepClarification = Boolean(snapshot && currentClarification !== consumedClarification);
+  const consumedSupplementBlockKeys = supplementBlockKeySet(params.supplementBlocks);
+  const nextTechDesignSupplementBlocks = snapshot
+    ? (workflow.techDesignSupplementBlocks || []).filter((block) => {
+        if (block.type === 'PARAGRAPH') {
+          return shouldKeepClarification;
+        }
+        if (supplementBlockConsumed(block, consumedSupplementBlockKeys)) {
+          return false;
+        }
+        return !consumedSourcePathSet.has(normalizeArtifactPath(block.path));
+      })
+    : [];
   return {
     ...workflow,
-    techDesignClarification: '',
-    techDesignSourceFiles: [],
+    techDesignClarification: shouldKeepClarification
+      ? workflow.techDesignClarification
+      : '',
+    techDesignSupplementBlocks: nextTechDesignSupplementBlocks,
+    techDesignSourceFiles: snapshot
+      ? (workflow.techDesignSourceFiles || []).filter((file) => !consumedSourcePathSet.has(normalizeArtifactPath(file.path)))
+      : [],
     techDesignConsumedQuestionPaths: [...new Set([...(workflow.techDesignConsumedQuestionPaths || []), ...ledgerQuestionPaths])]
   };
+}
+
+export async function finalizeSuccessfulTechDesignRuns(
+  root: string,
+  workflow: RequirementWorkflow,
+  context?: LocalRequestContext
+): Promise<{ workflow: RequirementWorkflow; changed: boolean }> {
+  let nextWorkflow = workflow;
+  let changed = false;
+  for (const run of workflow.runs) {
+    if (
+      run.actionType !== 'DESIGN_GENERATE'
+      || !run.techDesignInputSnapshot
+      || run.techDesignInputsConsumedAt
+      || !['SUCCEEDED', 'COMPLETED'].includes(run.status)
+    ) {
+      continue;
+    }
+    nextWorkflow = await consumeTechDesignInputsAfterRun(root, nextWorkflow, run, context);
+    changed = true;
+  }
+  return { workflow: nextWorkflow, changed };
+}
+
+export async function finalizeSuccessfulTechDesignMemoryFeedback(
+  root: string,
+  workflow: RequirementWorkflow,
+  context?: LocalRequestContext
+): Promise<void> {
+  for (const run of workflow.runs) {
+    if (
+      run.actionType !== 'DESIGN_GENERATE'
+      || !run.techDesignInputSnapshot
+      || !['SUCCEEDED', 'COMPLETED'].includes(run.status)
+    ) {
+      continue;
+    }
+    await markMemoryRecallApplied(root, workflow, run, context?.projectId ? String(context.projectId) : undefined);
+  }
+}
+
+export async function finalizeSuccessfulRetrospectiveRuns(
+  root: string,
+  workflow: RequirementWorkflow,
+  context?: LocalRequestContext
+): Promise<{ workflow: RequirementWorkflow; changed: boolean; parseError?: string }> {
+  let nextWorkflow = workflow;
+  let changed = false;
+  let parseError: string | undefined;
+  for (const run of workflow.runs) {
+    if (run.actionType !== 'RETROSPECTIVE_GENERATE' || !['SUCCEEDED', 'COMPLETED'].includes(run.status)) {
+      continue;
+    }
+    const before = JSON.stringify({
+      retrospective: nextWorkflow.retrospective,
+      stage: nextWorkflow.stages.RETROSPECTIVE
+    });
+    const result = await importRetrospectiveRunOutputs(root, nextWorkflow, run, context?.projectId ? String(context.projectId) : undefined);
+    nextWorkflow = result.workflow;
+    parseError = parseError || result.parseError;
+    const after = JSON.stringify({
+      retrospective: nextWorkflow.retrospective,
+      stage: nextWorkflow.stages.RETROSPECTIVE
+    });
+    changed = changed || before !== after || result.importedCandidateCount > 0;
+  }
+  return { workflow: nextWorkflow, changed, parseError };
 }
 
 function implementationStatusForRun(run: RunRecord): WorkflowStatus {
@@ -248,7 +552,7 @@ function implementationStatusForRun(run: RunRecord): WorkflowStatus {
   return 'IN_PROGRESS';
 }
 
-function applyImplementationRun(workflow: RequirementWorkflow, run: RunRecord): RequirementWorkflow {
+export function applyImplementationRun(workflow: RequirementWorkflow, run: RunRecord): RequirementWorkflow {
   if (!isImplementationStep(run.implementationStep)) {
     return workflow;
   }
@@ -258,6 +562,33 @@ function applyImplementationRun(workflow: RequirementWorkflow, run: RunRecord): 
     status: implementationStatusForRun(run),
     runId: run.id
   };
+  if (run.actionType === 'OPENSPEC_FF' && ['SUCCEEDED', 'COMPLETED'].includes(run.status)) {
+    const invalidationComment = 'OpenSpec 工件已基于新技术方案版本重新生成，需重新审核后继续实施';
+    if (implementationSteps.APPLY.status !== 'NOT_STARTED') {
+      implementationSteps.APPLY = {
+        ...implementationSteps.APPLY,
+        status: 'DRAFT',
+        comment: invalidationComment,
+        approvedAt: undefined,
+        rejectedAt: undefined
+      };
+    }
+    if (implementationSteps.CHANGE_INSPECTION.status !== 'NOT_STARTED') {
+      implementationSteps.CHANGE_INSPECTION = {
+        ...implementationSteps.CHANGE_INSPECTION,
+        status: 'NOT_STARTED',
+        comment: invalidationComment,
+        approvedAt: undefined,
+        rejectedAt: undefined
+      };
+    }
+  }
+  const implementationStageStatus =
+    run.actionType === 'OPENSPEC_FF' && ['SUCCEEDED', 'COMPLETED'].includes(run.status)
+      ? 'IN_PROGRESS'
+      : workflow.stages.IMPLEMENTATION.status === 'APPROVED'
+        ? 'APPROVED'
+        : 'IN_PROGRESS';
   return {
     ...workflow,
     implementationSteps,
@@ -265,7 +596,7 @@ function applyImplementationRun(workflow: RequirementWorkflow, run: RunRecord): 
       ...workflow.stages,
       IMPLEMENTATION: {
         ...workflow.stages.IMPLEMENTATION,
-        status: workflow.stages.IMPLEMENTATION.status === 'APPROVED' ? 'APPROVED' : 'IN_PROGRESS',
+        status: implementationStageStatus,
         runId: run.id
       }
     }
@@ -276,12 +607,20 @@ export function applyPrdClarificationRun(workflow: RequirementWorkflow, run: Run
   if (run.actionType !== 'PRD_CLARIFY' || !['SUCCEEDED', 'COMPLETED'].includes(run.status)) {
     return workflow;
   }
+  const sources = Array.isArray(run.params?.sources)
+    ? run.params.sources.map((item) => String(item).trim().replace(/\\/g, '/')).filter(Boolean)
+    : [];
+  const consumed = new Set(sources);
   const artifactPath =
     workflow.artifacts.find((artifact) => artifact.stage === 'PRD' && artifact.exists && artifact.kind !== 'directory')?.path ||
     workflow.stages.PRD.artifactPath ||
     `docs/${workflow.requirementId}/prd/analysis.md`;
   return {
     ...workflow,
+    prdClarification: '',
+    prdClarificationBlocks: [],
+    prdSourceFiles: (workflow.prdSourceFiles || []).filter((file) => !consumed.has(String(file.path || '').replace(/\\/g, '/'))),
+    sources: (workflow.sources || []).filter((source) => !consumed.has(String(source || '').replace(/\\/g, '/'))),
     currentStage: 'PRD',
     status: 'IN_PROGRESS',
     stages: {
@@ -293,6 +632,40 @@ export function applyPrdClarificationRun(workflow: RequirementWorkflow, run: Run
         runId: run.id
       }
     }
+  };
+}
+
+export function consumePrdAnalyzeInputsAfterRun(workflow: RequirementWorkflow, run: RunRecord): RequirementWorkflow {
+  if (run.actionType !== 'PRD_ANALYZE' || !['SUCCEEDED', 'COMPLETED'].includes(run.status)) {
+    return workflow;
+  }
+  const sources = Array.isArray(run.params?.sources)
+    ? run.params.sources.map((item) => String(item).trim().replace(/\\/g, '/')).filter(Boolean)
+    : [];
+  const consumed = new Set(sources);
+  return {
+    ...workflow,
+    prdClarification: '',
+    prdSupplementBlocks: [],
+    prdSourceFiles: (workflow.prdSourceFiles || []).filter((file) => !consumed.has(String(file.path || '').replace(/\\/g, '/'))),
+    sources: (workflow.sources || []).filter((source) => !consumed.has(String(source || '').replace(/\\/g, '/')))
+  };
+}
+
+export function consumeOpenSpecArtifactInputsAfterRun(workflow: RequirementWorkflow, run: RunRecord): RequirementWorkflow {
+  if (run.actionType !== 'OPENSPEC_FF' || !['SUCCEEDED', 'COMPLETED'].includes(run.status)) {
+    return workflow;
+  }
+  const sourceFiles = Array.isArray(run.params?.sourceFiles)
+    ? run.params.sourceFiles.map((item) => String(item).trim().replace(/\\/g, '/')).filter(Boolean)
+    : [];
+  const consumed = new Set(sourceFiles);
+  return {
+    ...workflow,
+    openSpecArtifactAdjustment: '',
+    openSpecSupplementBlocks: [],
+    openSpecVisualContextPaths: [],
+    techDesignSourceFiles: (workflow.techDesignSourceFiles || []).filter((file) => !consumed.has(String(file.path || '').replace(/\\/g, '/')))
   };
 }
 
@@ -400,8 +773,14 @@ function statusForError(error: any): number {
   if (badRequestCodes.has(code || '')) {
     return 400;
   }
+  if (['B71002', 'B71003', 'B71004'].includes(code || '')) {
+    return 400;
+  }
   if (conflictCodes.has(code || '')) {
     return 409;
+  }
+  if (code === 'B71001') {
+    return 404;
   }
     return 500;
 }
@@ -505,6 +884,27 @@ export function createRouter(workspaceRoot: string) {
       ...workflow,
       artifacts
     });
+  }
+
+  async function refreshArtifacts(
+    root: string,
+    workflow: RequirementWorkflow
+  ): Promise<RequirementWorkflow> {
+    const artifacts = await scanRequirementArtifacts(
+      root,
+      workflow.requirementId,
+      workflow.branchName,
+      workflow.stages.IMPLEMENTATION.changeName,
+      workflow.requirementType
+    );
+    return {
+      ...workflow,
+      artifacts
+    };
+  }
+
+  function shouldRefreshArtifactsAfterRun(run?: RunRecord): boolean {
+    return Boolean(run && ['SUCCEEDED', 'COMPLETED'].includes(run.status));
   }
 
   function scheduleArtifactIndexRefresh(
@@ -695,6 +1095,161 @@ export function createRouter(workspaceRoot: string) {
         return;
       }
 
+      if (request.method === 'GET' && pathname === '/api/ai-delivery/memory/cards') {
+        const { root } = await resolveWorkflowStore(requestContext);
+        const repository = new MemoryRepository(root);
+        const status = url.searchParams.getAll('status');
+        send(response, 200, {
+          data: await repository.listCards({
+            projectId: url.searchParams.get('projectId') || requestContext.projectId,
+            status: (status.length ? status : url.searchParams.get('status')) as any,
+            type: url.searchParams.get('type') as any,
+            keyword: url.searchParams.get('keyword') || '',
+            module: url.searchParams.get('module') || '',
+            stage: url.searchParams.get('stage') as any,
+            page: Number(url.searchParams.get('page') || 1),
+            pageSize: Number(url.searchParams.get('pageSize') || 50)
+          })
+        });
+        return;
+      }
+
+      if (request.method === 'POST' && pathname === '/api/ai-delivery/memory/cards') {
+        const { root } = await resolveWorkflowStore(requestContext, true);
+        const input = await parseBody<MemoryCardCreateInput>(request);
+        send(response, 200, {
+          data: await new MemoryRepository(root).createManualCard({
+            ...input,
+            projectId: input.projectId || requestContext.projectId
+          })
+        });
+        return;
+      }
+
+      const memoryCardMatch = match(pathname, /^\/api\/ai-delivery\/memory\/cards\/([^/]+)$/);
+      if (request.method === 'GET' && memoryCardMatch) {
+        const { root } = await resolveWorkflowStore(requestContext);
+        send(response, 200, { data: await new MemoryRepository(root).getCard(decodeURIComponent(memoryCardMatch[1])) });
+        return;
+      }
+
+      if (request.method === 'POST' && memoryCardMatch) {
+        const { root } = await resolveWorkflowStore(requestContext, true);
+        const input = await parseBody<MemoryCardUpdateInput>(request);
+        send(response, 200, { data: await new MemoryRepository(root).updateCard(decodeURIComponent(memoryCardMatch[1]), input) });
+        return;
+      }
+
+      const memoryCardRevisionsMatch = match(pathname, /^\/api\/ai-delivery\/memory\/cards\/([^/]+)\/revisions$/);
+      if (request.method === 'GET' && memoryCardRevisionsMatch) {
+        const { root } = await resolveWorkflowStore(requestContext);
+        send(response, 200, { data: await new MemoryRepository(root).listCardRevisions(decodeURIComponent(memoryCardRevisionsMatch[1])) });
+        return;
+      }
+
+      if (request.method === 'GET' && pathname === '/api/ai-delivery/memory/candidates') {
+        const { root } = await resolveWorkflowStore(requestContext);
+        const repository = new MemoryRepository(root);
+        const status = url.searchParams.getAll('status');
+        send(response, 200, {
+          data: await repository.listCandidates({
+            projectId: url.searchParams.get('projectId') || requestContext.projectId,
+            requirementId: url.searchParams.get('requirementId') || undefined,
+            status: (status.length ? status : url.searchParams.get('status')) as any,
+            keyword: url.searchParams.get('keyword') || '',
+            page: Number(url.searchParams.get('page') || 1),
+            pageSize: Number(url.searchParams.get('pageSize') || 50)
+          })
+        });
+        return;
+      }
+
+      if (request.method === 'POST' && pathname === '/api/ai-delivery/memory/candidates/extract') {
+        const input = await parseBody<{ requirementId: string; runId?: string }>(request);
+        const { root, workflow } = await loadMergedWorkflow(requestContext, input.requirementId, true);
+        if (!workflow) {
+          send(response, 404, { message: '需求不存在' });
+          return;
+        }
+        const run = input.runId
+          ? workflow.runs.find((item) => item.id === input.runId)
+          : workflow.runs.find((item) => item.actionType === 'DESIGN_GENERATE' && ['SUCCEEDED', 'COMPLETED'].includes(item.status));
+        if (!run) {
+          send(response, 400, { message: '未找到可提炼候选经验的技术方案生成记录' });
+          return;
+        }
+        send(response, 200, { data: await extractMemoryCandidatesForDesignRun(root, workflow, run, requestContext.projectId) });
+        return;
+      }
+
+      const memoryCandidateUpdateMatch = match(pathname, /^\/api\/ai-delivery\/memory\/candidates\/([^/]+)$/);
+      if (request.method === 'POST' && memoryCandidateUpdateMatch) {
+        const { root } = await resolveWorkflowStore(requestContext, true);
+        const input = await parseBody<MemoryCandidateUpdateInput>(request);
+        send(response, 200, { data: await new MemoryRepository(root).updateCandidate(decodeURIComponent(memoryCandidateUpdateMatch[1]), input) });
+        return;
+      }
+
+      const memoryCandidateConfirmMatch = match(pathname, /^\/api\/ai-delivery\/memory\/candidates\/([^/]+)\/confirm$/);
+      if (request.method === 'POST' && memoryCandidateConfirmMatch) {
+        const { root } = await resolveWorkflowStore(requestContext, true);
+        const input = await parseBody<MemoryCandidateConfirmInput>(request);
+        send(response, 200, { data: await new MemoryRepository(root).confirmCandidate(decodeURIComponent(memoryCandidateConfirmMatch[1]), input) });
+        return;
+      }
+
+      const memoryCandidateIgnoreMatch = match(pathname, /^\/api\/ai-delivery\/memory\/candidates\/([^/]+)\/ignore$/);
+      if (request.method === 'POST' && memoryCandidateIgnoreMatch) {
+        const { root } = await resolveWorkflowStore(requestContext, true);
+        const input = await parseBody<{ reason?: string }>(request);
+        send(response, 200, { data: await new MemoryRepository(root).updateCandidateStatus(decodeURIComponent(memoryCandidateIgnoreMatch[1]), 'IGNORED', input.reason) });
+        return;
+      }
+
+      const memoryCandidateStatusMatch = match(pathname, /^\/api\/ai-delivery\/memory\/candidates\/([^/]+)\/status$/);
+      if (request.method === 'POST' && memoryCandidateStatusMatch) {
+        const { root } = await resolveWorkflowStore(requestContext, true);
+        const input = await parseBody<{ status: any; reason?: string }>(request);
+        send(response, 200, { data: await new MemoryRepository(root).updateCandidateStatus(decodeURIComponent(memoryCandidateStatusMatch[1]), input.status, input.reason) });
+        return;
+      }
+
+      if (request.method === 'GET' && pathname === '/api/ai-delivery/memory/recalls') {
+        const { root } = await resolveWorkflowStore(requestContext);
+        send(response, 200, {
+          data: await new MemoryRepository(root).listRecallRecords({
+            projectId: url.searchParams.get('projectId') || requestContext.projectId,
+            requirementId: url.searchParams.get('requirementId') || undefined,
+            memoryId: url.searchParams.get('memoryId') || undefined,
+            page: Number(url.searchParams.get('page') || 1),
+            pageSize: Number(url.searchParams.get('pageSize') || 50)
+          })
+        });
+        return;
+      }
+
+      if (request.method === 'GET' && pathname === '/api/ai-delivery/memory/search-config') {
+        send(response, 200, { data: defaultMemorySearchConfig() });
+        return;
+      }
+
+      if (request.method === 'POST' && pathname === '/api/ai-delivery/memory/search-config') {
+        const input = await parseBody<Partial<MemorySearchConfig>>(request);
+        send(response, 200, { data: mergeMemorySearchConfig(input) });
+        return;
+      }
+
+      if (request.method === 'POST' && pathname === '/api/ai-delivery/memory/embeddings/rebuild') {
+        const input = await parseBody<{ config?: Partial<MemorySearchConfig> }>(request);
+        const { root } = await resolveWorkflowStore(requestContext, true);
+        const repository = new MemoryRepository(root);
+        const cards = await repository.listAllCards({ projectId: requestContext.projectId });
+        send(response, 200, {
+          data: await rebuildMemoryEmbeddingIndex(root, cards, mergeMemorySearchConfig(input.config || {}))
+        });
+        return;
+      }
+
       if (request.method === 'GET' && pathname === '/api/ai-delivery/requirements') {
         const { root, repository } = await resolveWorkflowStore(requestContext);
         let workflows: RequirementWorkflow[];
@@ -707,12 +1262,24 @@ export function createRouter(workspaceRoot: string) {
               return merged;
             }
             const refreshed = await refreshTerminalRunStatuses(root, merged, centerRunnerConfig(requestContext));
-            await retryWorkflowTokenUsageOutboxes(root, refreshed.workflow, centerRunnerConfig(requestContext));
-            await retryWorkflowCenterRunStatuses(refreshed.workflow, centerRunnerConfig(requestContext));
-            return saveWithArtifacts(root, repository, refreshed.workflow);
+            const finalized = await finalizeSuccessfulTechDesignRuns(root, refreshed.workflow, requestContext);
+            await finalizeSuccessfulTechDesignMemoryFeedback(root, finalized.workflow, requestContext);
+            const retrospectiveFinalized = await finalizeSuccessfulRetrospectiveRuns(root, finalized.workflow, requestContext);
+            await retryWorkflowTokenUsageOutboxes(root, retrospectiveFinalized.workflow, centerRunnerConfig(requestContext));
+            await retryWorkflowCenterRunStatuses(retrospectiveFinalized.workflow, centerRunnerConfig(requestContext));
+            return saveWithArtifacts(root, repository, retrospectiveFinalized.workflow);
           }));
         } catch {
-          workflows = await Promise.all((await repository.list()).map((workflow) => mergeTechDesignInputLedgerIntoWorkflow(root, workflow)));
+          workflows = await Promise.all((await repository.list()).map(async (workflow) => {
+            const merged = await mergeTechDesignInputLedgerIntoWorkflow(root, workflow);
+            const refreshed = await refreshTerminalRunStatuses(root, merged, centerRunnerConfig(requestContext));
+            const finalized = await finalizeSuccessfulTechDesignRuns(root, refreshed.workflow, requestContext);
+            await finalizeSuccessfulTechDesignMemoryFeedback(root, finalized.workflow, requestContext);
+            const retrospectiveFinalized = await finalizeSuccessfulRetrospectiveRuns(root, finalized.workflow, requestContext);
+            return refreshed.changed || finalized.changed || retrospectiveFinalized.changed
+              ? saveWithArtifacts(root, repository, retrospectiveFinalized.workflow)
+              : retrospectiveFinalized.workflow;
+          }));
         }
         send(response, 200, { data: workflows });
         return;
@@ -722,7 +1289,13 @@ export function createRouter(workspaceRoot: string) {
         const input = await parseBody<RequirementInput>(request);
         const projectPaths = input.projects?.length ? await loadCurrentProjectPaths(requestContext, true) : [];
         const { root, repository } = await resolveWorkflowStore(requestContext);
-        let workflow = await repository.upsert(input, projectPaths);
+        const centerWorkflow = requestContext.projectId
+          ? await upsertCenterRequirement(requestContext, input)
+          : undefined;
+        let workflow = await repository.upsert({
+          ...input,
+          id: centerWorkflow?.id ?? input.id
+        }, projectPaths);
         workflow = await saveWithArtifacts(root, repository, workflow);
         await reportRequirementWorkspaceState(requestContext, workflow).catch(() => undefined);
         send(response, 200, { data: workflow });
@@ -743,15 +1316,87 @@ export function createRouter(workspaceRoot: string) {
         }
         workflow = await mergeTechDesignInputLedgerIntoWorkflow(store.root, workflow);
         const refreshed = await refreshTerminalRunStatuses(store.root, workflow, centerRunnerConfig(requestContext));
-        workflow = refreshed.workflow;
+        const finalized = await finalizeSuccessfulTechDesignRuns(store.root, refreshed.workflow, requestContext);
+        await finalizeSuccessfulTechDesignMemoryFeedback(store.root, finalized.workflow, requestContext);
+        const retrospectiveFinalized = await finalizeSuccessfulRetrospectiveRuns(store.root, finalized.workflow, requestContext);
+        workflow = retrospectiveFinalized.workflow;
         const outboxChanged = await retryWorkflowTokenUsageOutboxes(store.root, workflow, centerRunnerConfig(requestContext));
         const centerStatusChanged = await retryWorkflowCenterRunStatuses(workflow, centerRunnerConfig(requestContext));
-        if (refreshed.changed || outboxChanged || centerStatusChanged) {
+        if (refreshed.changed || finalized.changed || retrospectiveFinalized.changed || outboxChanged || centerStatusChanged) {
           workflow = await store.repository.save(workflow);
         }
         send(response, 200, { data: workflow });
         scheduleArtifactIndexRefresh(store.root, store.repository, workflow);
         scheduleRequirementWorkspaceStateReport(requestContext, workflow);
+        return;
+      }
+
+      const visualContextCandidatesMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/openspec-visual-context-candidates$/);
+      if (request.method === 'GET' && visualContextCandidatesMatch) {
+        const requirementId = visualContextCandidatesMatch[1];
+        const { root } = await resolveWorkflowStore(requestContext);
+        const workflow = (await loadMergedWorkflow(requestContext, requirementId)).workflow;
+        if (!workflow) {
+          send(response, 404, { message: '需求不存在' });
+          return;
+        }
+        send(response, 200, { data: { candidates: await listOpenSpecVisualContextCandidates(root, workflow) } });
+        return;
+      }
+
+      const supplementInputsMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/supplement-inputs$/);
+      if ((request.method === 'POST' || request.method === 'PATCH') && supplementInputsMatch) {
+        const requirementId = supplementInputsMatch[1];
+        const input = await parseBody<SupplementInputsUpdate>(request);
+        const { root, repository } = await resolveWorkflowStore(requestContext);
+        const lock = new WorkflowLock(root, requirementId);
+        await lock.acquire();
+        try {
+          let workflow = (await loadMergedWorkflow(requestContext, requirementId)).workflow;
+          if (!workflow) {
+            send(response, 404, { message: '需求不存在' });
+            return;
+          }
+          await assertCollaborationWritableWorkflow(requestContext, workflow);
+          const nextWorkflow: RequirementWorkflow = {
+            ...workflow,
+            prdClarification: hasBodyField(input, 'prdClarification') ? input.prdClarification || '' : workflow.prdClarification,
+            prdSupplementBlocks: hasBodyField(input, 'prdSupplementBlocks')
+              ? normalizeSupplementBlocksInput(input.prdSupplementBlocks)
+              : workflow.prdSupplementBlocks || [],
+            prdClarificationBlocks: hasBodyField(input, 'prdClarificationBlocks')
+              ? normalizeSupplementBlocksInput(input.prdClarificationBlocks)
+              : workflow.prdClarificationBlocks || [],
+            techDesignClarification: hasBodyField(input, 'techDesignClarification') ? input.techDesignClarification || '' : workflow.techDesignClarification,
+            techDesignSupplementBlocks: hasBodyField(input, 'techDesignSupplementBlocks')
+              ? normalizeSupplementBlocksInput(input.techDesignSupplementBlocks)
+              : workflow.techDesignSupplementBlocks || [],
+            openSpecArtifactAdjustment: hasBodyField(input, 'openSpecArtifactAdjustment')
+              ? input.openSpecArtifactAdjustment || ''
+              : workflow.openSpecArtifactAdjustment,
+            openSpecSupplementBlocks: hasBodyField(input, 'openSpecSupplementBlocks')
+              ? normalizeSupplementBlocksInput(input.openSpecSupplementBlocks)
+              : workflow.openSpecSupplementBlocks || [],
+            openSpecVisualContextPaths: hasBodyField(input, 'openSpecVisualContextPaths')
+              ? uniqueNormalizedPaths(input.openSpecVisualContextPaths || [])
+              : workflow.openSpecVisualContextPaths || []
+          };
+          workflow = await repository.save(nextWorkflow);
+          send(response, 200, { data: workflow });
+        } finally {
+          await lock.release();
+        }
+        return;
+      }
+
+      const retrospectiveMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/retrospective$/);
+      if (request.method === 'GET' && retrospectiveMatch) {
+        const { root, workflow } = await loadMergedWorkflow(requestContext, retrospectiveMatch[1], true);
+        if (!workflow) {
+          send(response, 404, { message: '需求不存在' });
+          return;
+        }
+        send(response, 200, { data: await getRetrospectiveSummary(root, workflow, requestContext.projectId ? String(requestContext.projectId) : undefined) });
         return;
       }
 
@@ -792,6 +1437,38 @@ export function createRouter(workspaceRoot: string) {
         return;
       }
 
+      const gitDiffPreviewMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/git-changes\/diff$/);
+      if (request.method === 'GET' && gitDiffPreviewMatch) {
+        const { root, workflow } = await loadMergedWorkflow(requestContext, gitDiffPreviewMatch[1]);
+        if (!workflow) {
+          send(response, 404, { message: '需求不存在' });
+          return;
+        }
+        const input: GitDiffQueryInput = {
+          projectPath: url.searchParams.get('projectPath') || '',
+          filePath: url.searchParams.get('filePath') || undefined,
+          contextLines: Number(url.searchParams.get('contextLines') || 3)
+        };
+        send(response, 200, { data: await readGitDiffPreview(root, workflow.projects || [], input, await loadCurrentProjectPaths(requestContext, true)) });
+        return;
+      }
+
+      const gitFilePreviewMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/git-changes\/file$/);
+      if (request.method === 'GET' && gitFilePreviewMatch) {
+        const { root, workflow } = await loadMergedWorkflow(requestContext, gitFilePreviewMatch[1]);
+        if (!workflow) {
+          send(response, 404, { message: '需求不存在' });
+          return;
+        }
+        const input: GitDiffQueryInput = {
+          projectPath: url.searchParams.get('projectPath') || '',
+          filePath: url.searchParams.get('filePath') || undefined,
+          focusLine: Number(url.searchParams.get('focusLine') || 0) || undefined
+        };
+        send(response, 200, { data: await readGitChangedFilePreview(root, workflow.projects || [], input, await loadCurrentProjectPaths(requestContext, true)) });
+        return;
+      }
+
       const gitChangesMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/git-changes$/);
       if (request.method === 'GET' && gitChangesMatch) {
         const { root, workflow } = await loadMergedWorkflow(requestContext, gitChangesMatch[1]);
@@ -800,6 +1477,71 @@ export function createRouter(workspaceRoot: string) {
           return;
         }
         send(response, 200, { data: await readGitChanges(root, workflow.projects || [], workflow.branchName, await loadCurrentProjectPaths(requestContext, true)) });
+        return;
+      }
+
+      const aiCompletenessMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/ai-completeness$/);
+      if (request.method === 'GET' && aiCompletenessMatch) {
+        const { workflow } = await loadMergedWorkflow(requestContext, aiCompletenessMatch[1]);
+        if (!workflow) {
+          send(response, 404, { message: '需求不存在' });
+          return;
+        }
+        send(response, 200, { data: await buildAiCodeCompletenessState(workflow) });
+        return;
+      }
+
+      const aiCompletenessCalculateMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/ai-completeness\/calculate$/);
+      if (request.method === 'POST' && aiCompletenessCalculateMatch) {
+        const requirementId = aiCompletenessCalculateMatch[1];
+        const input = await parseBody<AiCodeCompletenessInput>(request);
+        const { root, repository } = await resolveWorkflowStore(requestContext, true);
+        const lock = new WorkflowLock(root, requirementId);
+        await lock.acquire();
+        try {
+          let workflow = (await loadMergedWorkflow(requestContext, requirementId, true)).workflow;
+          if (!workflow) {
+            send(response, 404, { message: '需求不存在' });
+            return;
+          }
+          await assertWritableWorkflow(requestContext, workflow);
+          const projectPaths = workflow.projects?.length ? await loadCurrentProjectPaths(requestContext, true) : [];
+          const { state, result } = await calculateAiCodeCompleteness(root, workflow, input, projectPaths);
+          workflow = {
+            ...workflow,
+            aiCodeCompleteness: state
+          };
+          workflow = await saveWithArtifacts(root, repository, workflow);
+          send(response, 200, { data: { result, workflow } });
+        } finally {
+          await lock.release();
+        }
+        return;
+      }
+
+      const aiCompletenessCaptureMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/ai-completeness\/capture-ai-commit$/);
+      if (request.method === 'POST' && aiCompletenessCaptureMatch) {
+        const requirementId = aiCompletenessCaptureMatch[1];
+        const { root, repository } = await resolveWorkflowStore(requestContext, true);
+        const lock = new WorkflowLock(root, requirementId);
+        await lock.acquire();
+        try {
+          let workflow = (await loadMergedWorkflow(requestContext, requirementId, true)).workflow;
+          if (!workflow) {
+            send(response, 404, { message: '需求不存在' });
+            return;
+          }
+          await assertWritableWorkflow(requestContext, workflow);
+          const projectPaths = workflow.projects?.length ? await loadCurrentProjectPaths(requestContext, true) : [];
+          workflow = {
+            ...workflow,
+            aiCodeCompleteness: await captureRemoteAiCommits(root, workflow, projectPaths)
+          };
+          workflow = await repository.save(workflow);
+          send(response, 200, { data: workflow });
+        } finally {
+          await lock.release();
+        }
         return;
       }
 
@@ -973,10 +1715,10 @@ export function createRouter(workspaceRoot: string) {
             send(response, 404, { message: '需求不存在' });
             return;
           }
-          await assertWritableWorkflow(requestContext, workflow);
+//          await assertWritableWorkflow(requestContext, workflow);
           const nextWorkflow = await deleteTechDesignQuestionRecord(root, workflow, input);
           workflow = await saveWithArtifacts(root, repository, nextWorkflow);
-          await reportRequirementWorkspaceState(requestContext, workflow).catch(() => undefined);
+//          await reportRequirementWorkspaceState(requestContext, workflow).catch(() => undefined);
           send(response, 200, { data: workflow });
         } finally {
           await lock.release();
@@ -1241,6 +1983,82 @@ export function createRouter(workspaceRoot: string) {
         return;
       }
 
+      const requirementMemoryRecallMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/memory\/recall$/);
+      if (request.method === 'POST' && requirementMemoryRecallMatch) {
+        const requirementId = requirementMemoryRecallMatch[1];
+        const input = await parseBody<{ actionType?: ActionInput['actionType']; runId?: string; stage?: any }>(request);
+        const { root, workflow } = await loadMergedWorkflow(requestContext, requirementId, true);
+        if (!workflow) {
+          send(response, 404, { message: '需求不存在' });
+          return;
+        }
+        const runId = input.runId || `manual-${Date.now()}`;
+        send(response, 200, {
+          data: await prepareMemoryRecallForRun(root, workflow, {
+            projectId: requestContext.projectId,
+            actionType: input.actionType || 'DESIGN_GENERATE',
+            stage: input.stage || workflow.currentStage,
+            runId
+          })
+        });
+        return;
+      }
+
+      const requirementMemoryRecallPreviewMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/memory\/recall-preview$/);
+      if (request.method === 'POST' && requirementMemoryRecallPreviewMatch) {
+        const requirementId = requirementMemoryRecallPreviewMatch[1];
+        const input = await parseBody<{
+          actionType?: ActionInput['actionType'];
+          stage?: any;
+          sourceFilePaths?: string[];
+          clarification?: string;
+          runIntent?: string;
+        }>(request);
+        const { root, workflow } = await loadMergedWorkflow(requestContext, requirementId, true);
+        if (!workflow) {
+          send(response, 404, { message: '需求不存在' });
+          return;
+        }
+        send(response, 200, {
+          data: await previewMemoryRecallForRun(root, workflow, {
+            projectId: requestContext.projectId,
+            actionType: input.actionType || 'DESIGN_GENERATE',
+            stage: input.stage || workflow.currentStage,
+            sourceFilePaths: Array.isArray(input.sourceFilePaths) ? input.sourceFilePaths : [],
+            clarification: typeof input.clarification === 'string' ? input.clarification : '',
+            runIntent: typeof input.runIntent === 'string' ? input.runIntent : ''
+          })
+        });
+        return;
+      }
+
+      const requirementMemoryRecallConfirmMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/memory\/recall-confirm$/);
+      if (request.method === 'POST' && requirementMemoryRecallConfirmMatch) {
+        const requirementId = requirementMemoryRecallConfirmMatch[1];
+        const input = await parseBody<MemoryRecallConfirmInput>(request);
+        const { root, workflow } = await loadMergedWorkflow(requestContext, requirementId, true);
+        if (!workflow) {
+          send(response, 404, { message: '需求不存在' });
+          return;
+        }
+        send(response, 200, {
+          data: await confirmMemoryRecallForRun(root, workflow, {
+            projectId: requestContext.projectId,
+            actionType: input.actionType || 'DESIGN_GENERATE',
+            stage: input.stage || workflow.currentStage,
+            runId: input.runId || `manual-${Date.now()}`,
+            previewId: input.previewId,
+            selectedMemoryIds: input.selectedMemoryIds || [],
+            dismissed: input.dismissed || [],
+            force: input.force,
+            sourceFilePaths: Array.isArray(input.sourceFilePaths) ? input.sourceFilePaths : [],
+            clarification: typeof input.clarification === 'string' ? input.clarification : '',
+            runIntent: typeof input.runIntent === 'string' ? input.runIntent : ''
+          })
+        });
+        return;
+      }
+
       const actionMatch = match(pathname, /^\/api\/ai-delivery\/requirements\/([^/]+)\/actions$/);
       if (request.method === 'POST' && actionMatch) {
         const requirementId = actionMatch[1];
@@ -1268,15 +2086,27 @@ export function createRouter(workspaceRoot: string) {
             workflow = {
               ...workflow,
               sources,
-              prdClarification: normalizePrdClarification(typeof params.description === 'string' ? params.description : workflow.prdClarification)
+              prdClarification: normalizePrdClarification(typeof params.description === 'string' ? params.description : workflow.prdClarification),
+              prdSupplementBlocks: Array.isArray(params.supplementBlocks)
+                ? normalizeSupplementBlocksInput(params.supplementBlocks)
+                : workflow.prdSupplementBlocks || []
             };
           }
           if (action.actionType === 'PRD_CLARIFY') {
             await assertPrdClarificationReady(root, workflow, action);
             const params = action.params || {};
+            const sources = Array.isArray(params.sources)
+              ? params.sources.map((item) => String(item).trim()).filter(Boolean)
+              : Array.isArray(params.sourceFiles)
+                ? params.sourceFiles.map((item) => String(item).trim()).filter(Boolean)
+                : [];
             workflow = {
               ...workflow,
-              prdClarification: normalizePrdClarification(typeof params.description === 'string' ? params.description : '')
+              sources: [...new Set([...(workflow.sources || []), ...sources])],
+              prdClarification: normalizePrdClarification(typeof params.description === 'string' ? params.description : ''),
+              prdClarificationBlocks: Array.isArray(params.supplementBlocks)
+                ? normalizeSupplementBlocksInput(params.supplementBlocks)
+                : workflow.prdClarificationBlocks || []
             };
           }
           if (action.actionType === 'DESIGN_GENERATE') {
@@ -1284,22 +2114,32 @@ export function createRouter(workspaceRoot: string) {
             const documentPath = designDocumentPath(workflow, params);
             await createTechDesignDraftSnapshot(root, workflow.requirementId).catch(() => undefined);
             const preparedAnnotations = await prepareCenterTechDesignAnnotationInput(root, requestContext, workflow);
+            const preparedAnnotationPath = preparedAnnotations?.sourceFilePath || '';
+            const inputSnapshot = captureTechDesignInputSnapshot(
+              workflow,
+              params,
+              (preparedAnnotations?.annotations || []).map((annotation) => annotation.id),
+              preparedAnnotationPath ? [preparedAnnotationPath] : []
+            );
+            const nextParams = { ...params };
             if (preparedAnnotations?.sourceFilePath) {
               const sourceFiles = Array.isArray(params.sourceFiles)
                 ? params.sourceFiles.map((item) => String(item).trim()).filter(Boolean)
                 : [];
-              effectiveAction = {
-                ...action,
-                params: {
-                  ...params,
-                  sourceFiles: [...sourceFiles, preparedAnnotations.sourceFilePath]
-                }
-              };
+              nextParams.sourceFiles = [...sourceFiles, preparedAnnotations.sourceFilePath];
             }
+            effectiveAction = {
+              ...action,
+              params: nextParams,
+              techDesignInputSnapshot: inputSnapshot
+            };
             workflow = {
               ...workflow,
               techDesignDocument: documentPath,
-              techDesignClarification: typeof params.clarification === 'string' ? params.clarification : workflow.techDesignClarification
+              techDesignClarification: typeof params.clarification === 'string' ? params.clarification : workflow.techDesignClarification,
+              techDesignSupplementBlocks: Array.isArray(params.supplementBlocks)
+                ? normalizeSupplementBlocksInput(params.supplementBlocks)
+                : workflow.techDesignSupplementBlocks || []
             };
           }
           if (['OPENSPEC_STATUS', 'OPENSPEC_NEW_CHANGE', 'OPENSPEC_FF', 'OPENSPEC_APPLY', 'OPENSPEC_VERIFY', 'OPENSPEC_ARCHIVE'].includes(action.actionType)) {
@@ -1316,7 +2156,23 @@ export function createRouter(workspaceRoot: string) {
               }
             };
           }
+          if (action.actionType === 'OPENSPEC_FF') {
+            const params = action.params || {};
+            workflow = {
+              ...workflow,
+              openSpecArtifactAdjustment: typeof params.artifactAdjustment === 'string' ? params.artifactAdjustment : workflow.openSpecArtifactAdjustment,
+              openSpecSupplementBlocks: Array.isArray(params.supplementBlocks)
+                ? normalizeSupplementBlocksInput(params.supplementBlocks)
+                : workflow.openSpecSupplementBlocks || []
+            };
+          }
           const projectPaths = workflow.projects?.length ? await loadCurrentProjectPaths(requestContext, true) : [];
+          if (effectiveAction.actionType === 'OPENSPEC_APPLY') {
+            workflow = {
+              ...workflow,
+              aiCodeCompleteness: await captureBaseCommits(root, workflow, projectPaths)
+            };
+          }
           const run = await executeAction(root, workflow, effectiveAction, async (updatedRun) => {
             const latest = await repository.load(requirementId);
             if (!latest) {
@@ -1328,10 +2184,41 @@ export function createRouter(workspaceRoot: string) {
             } else {
               latest.runs.unshift(updatedRun);
             }
-            await repository.save(latest);
+            let updatedWorkflow = applyImplementationRun(latest, updatedRun);
+            updatedWorkflow = consumePrdAnalyzeInputsAfterRun(updatedWorkflow, updatedRun);
+            updatedWorkflow = applyPrdClarificationRun(updatedWorkflow, updatedRun);
+            updatedWorkflow = consumeOpenSpecArtifactInputsAfterRun(updatedWorkflow, updatedRun);
+            if (['SUCCEEDED', 'COMPLETED'].includes(updatedRun.status)) {
+              try {
+                updatedWorkflow = (await finalizeSuccessfulTechDesignRuns(root, updatedWorkflow, requestContext)).workflow;
+                await markMemoryRecallApplied(root, updatedWorkflow, updatedRun, requestContext.projectId);
+                const retrospectiveResult = await importRetrospectiveRunOutputs(root, updatedWorkflow, updatedRun, requestContext.projectId);
+                updatedWorkflow = retrospectiveResult.workflow;
+                if (retrospectiveResult.parseError) {
+                  await appendRunEvent(root, requirementId, updatedRun.id, {
+                    type: 'WARN',
+                    level: 'WARN',
+                    message: retrospectiveResult.parseError,
+                    agentId: updatedRun.agentId
+                  });
+                }
+              } catch (error: any) {
+                await appendRunEvent(root, requirementId, updatedRun.id, {
+                  type: 'WARN',
+                  level: 'WARN',
+                  message: `动作成功后的产物整理失败，将在刷新时重试：${error?.message || 'unknown error'}`,
+                  agentId: updatedRun.agentId
+                });
+              }
+            }
+            if (shouldRefreshArtifactsAfterRun(updatedRun)) {
+              updatedWorkflow = await refreshArtifacts(root, updatedWorkflow);
+            }
+            await repository.save(updatedWorkflow);
           }, {
             projectPaths,
-            centerConfig: centerRunnerConfig(requestContext)
+            centerConfig: centerRunnerConfig(requestContext),
+            projectId: requestContext.projectId
           });
           
           const stage = run.stage || stageForAction(effectiveAction.actionType);
@@ -1352,7 +2239,22 @@ export function createRouter(workspaceRoot: string) {
           }
           workflow.runs.unshift(run);
           workflow = applyImplementationRun(workflow, run);
+          workflow = consumePrdAnalyzeInputsAfterRun(workflow, run);
           workflow = await consumeTechDesignInputsAfterRun(root, workflow, run, requestContext);
+          await markMemoryRecallApplied(root, workflow, run, requestContext.projectId);
+          const retrospectiveResult = await importRetrospectiveRunOutputs(root, workflow, run, requestContext.projectId);
+          workflow = retrospectiveResult.workflow;
+          if (retrospectiveResult.parseError) {
+            await appendRunEvent(root, requirementId, run.id, {
+              type: 'WARN',
+              level: 'WARN',
+              message: retrospectiveResult.parseError,
+              agentId: run.agentId
+            });
+          }
+          if (shouldRefreshArtifactsAfterRun(run)) {
+            workflow = await refreshArtifacts(root, workflow);
+          }
           if (effectiveAction.actionType === 'REFRESH_ARTIFACTS') {
             workflow.artifacts = await scanRequirementArtifacts(
               root,
@@ -1363,7 +2265,7 @@ export function createRouter(workspaceRoot: string) {
             );
           }
           // PRD分析、技术方案生成等可能产生产物的操作，执行完成后自动刷新产物索引
-          if (['PRD_ANALYZE', 'PRD_CLARIFY', 'DESIGN_GENERATE', 'DESIGN_QUESTION', 'OPENSPEC_NEW_CHANGE', 'OPENSPEC_ARCHIVE'].includes(effectiveAction.actionType)) {
+          if (['PRD_ANALYZE', 'PRD_CLARIFY', 'DESIGN_GENERATE', 'DESIGN_QUESTION', 'OPENSPEC_NEW_CHANGE', 'OPENSPEC_ARCHIVE', 'RETROSPECTIVE_GENERATE'].includes(effectiveAction.actionType)) {
             workflow.artifacts = await scanRequirementArtifacts(
               root,
               workflow.requirementId,
@@ -1373,9 +2275,11 @@ export function createRouter(workspaceRoot: string) {
             );
           }
           workflow = applyPrdClarificationRun(workflow, run);
+          workflow = consumeOpenSpecArtifactInputsAfterRun(workflow, run);
           if (effectiveAction.actionType === 'RETURN_TO_IMPLEMENTATION') {
             const issues = await refreshCodeReviewIssues(root, workflow);
             workflow = returnToImplementation(workflow, issues);
+            await new MemoryRepository(root).markRetrospectiveCandidatesPendingVerify(workflow.requirementId, '代码评审打回实施，复盘需重新确认');
           }
           workflow = await repository.save(workflow);
           await reportRequirementWorkspaceState(requestContext, workflow).catch(() => undefined);
@@ -1419,7 +2323,10 @@ export function createRouter(workspaceRoot: string) {
             }
           };
         }
-        send(response, 200, { data: { commandText: buildActionCommand(workflow, action) } });
+        const effectiveAction = action.actionType === 'OPENSPEC_FF'
+          ? await prepareOpenSpecArtifactAction(root, workflow, action)
+          : action;
+        send(response, 200, { data: { commandText: buildActionCommand(workflow, effectiveAction) } });
         return;
       }
 
@@ -1456,11 +2363,19 @@ export function createRouter(workspaceRoot: string) {
           let workflow = await repository.load(requirementId);
           if (workflow) {
             const refreshed = await refreshTerminalRunStatuses(root, workflow, centerRunnerConfig(requestContext));
-            const outboxChanged = await retryWorkflowTokenUsageOutboxes(root, refreshed.workflow, centerRunnerConfig(requestContext));
-            const centerStatusChanged = await retryWorkflowCenterRunStatuses(refreshed.workflow, centerRunnerConfig(requestContext));
-            workflow = refreshed.changed || outboxChanged || centerStatusChanged
-              ? await repository.save(refreshed.workflow)
-              : refreshed.workflow;
+            const finalized = await finalizeSuccessfulTechDesignRuns(root, refreshed.workflow, requestContext);
+            await finalizeSuccessfulTechDesignMemoryFeedback(root, finalized.workflow, requestContext);
+            const retrospectiveFinalized = await finalizeSuccessfulRetrospectiveRuns(root, finalized.workflow, requestContext);
+            const outboxChanged = await retryWorkflowTokenUsageOutboxes(root, retrospectiveFinalized.workflow, centerRunnerConfig(requestContext));
+            const centerStatusChanged = await retryWorkflowCenterRunStatuses(retrospectiveFinalized.workflow, centerRunnerConfig(requestContext));
+            const currentRun = retrospectiveFinalized.workflow.runs.find((item) => item.id === runStreamMatch[1]);
+            const artifactsChanged = shouldRefreshArtifactsAfterRun(currentRun);
+            const workflowToSave = artifactsChanged
+              ? await refreshArtifacts(root, retrospectiveFinalized.workflow)
+              : retrospectiveFinalized.workflow;
+            workflow = refreshed.changed || finalized.changed || retrospectiveFinalized.changed || outboxChanged || centerStatusChanged || artifactsChanged
+              ? await repository.save(workflowToSave)
+              : workflowToSave;
           }
           const run = workflow?.runs.find((item) => item.id === runStreamMatch[1]);
           const events = await readRunEvents(root, requirementId, runStreamMatch[1]);
@@ -1814,7 +2729,48 @@ export function createRouter(workspaceRoot: string) {
         return;
       }
 
+      const publicViewMatch = match(pathname, /^\/api\/ai-delivery\/public-artifact-shares\/([^/]+)\/view\/(.+)$/);
+      if (request.method === 'GET' && publicViewMatch) {
+        const token = decodeURIComponent(publicViewMatch[1]);
+        const requestedPath = decodeArtifactViewPath(publicViewMatch[2]);
+        const share = await resolvePublicShare(requestContext, token);
+        const artifactPath = assertPreviewableArtifactPath(share.requirementId, share.artifactPath);
+        const artifactRoot = await resolvePublicArtifactRoot(requestContext, { ...share, artifactPath });
+        const normalizedPath = resolvePublicHtmlViewPath(share.requirementId, artifactPath, requestedPath);
+        const resolvedPath = resolveSharePathInWorkspace(artifactRoot, normalizedPath);
+        const fileBuffer = await fs.readFile(resolvedPath.absolutePath);
+        response.writeHead(200, {
+          'Content-Type': contentTypeForPath(normalizedPath),
+          'Cache-Control': 'public, max-age=3600',
+          'Access-Control-Allow-Origin': '*'
+        });
+        response.end(fileBuffer);
+        return;
+      }
+
       // 读取图片等二进制文件
+      const artifactViewMatch = match(pathname, /^\/api\/artifacts\/view\/context\/([^/]+)\/(.+)$/);
+      if (request.method === 'GET' && artifactViewMatch) {
+        const viewContext = decodeArtifactViewContext(artifactViewMatch[1]);
+        const filePath = decodeArtifactViewPath(artifactViewMatch[2]);
+        try {
+          const artifactRoot = await resolveArtifactRoot({ ...requestContext, ...viewContext }, true);
+          const absolutePath = resolveSharePathInWorkspace(artifactRoot, filePath).absolutePath;
+          const fileBuffer = await fs.readFile(absolutePath);
+          response.writeHead(200, {
+            'Content-Type': contentTypeForPath(filePath),
+            'Cache-Control': 'public, max-age=3600',
+            'Access-Control-Allow-Origin': '*'
+          });
+          response.end(fileBuffer);
+        } catch (error: any) {
+          const denied = error.code === 'B70065' || error.code === 'B70080' || String(error.message || '').includes('路径不在工作区内');
+          response.writeHead(denied ? 403 : 404, { 'Content-Type': 'application/json' });
+          response.end(JSON.stringify({ message: error.code === 'ENOENT' ? '文件不存在' : error.message }));
+        }
+        return;
+      }
+
       if (request.method === 'GET' && pathname === '/api/artifacts/read') {
         const filePath = url.searchParams.get('path');
         if (!filePath) {
@@ -1870,6 +2826,29 @@ export function createRouter(workspaceRoot: string) {
             return;
           }
           await assertWritableWorkflow(requestContext, workflow);
+          if (input.stage === 'RETROSPECTIVE') {
+            const retrospective = await getRetrospectiveSummary(root, workflow, requestContext.projectId ? String(requestContext.projectId) : undefined);
+            workflow = {
+              ...workflow,
+              retrospective: {
+                ...(workflow.retrospective || {}),
+                summaryPath: retrospective.summaryPath,
+                evidencePath: retrospective.evidencePath,
+                candidateCount: retrospective.candidateCount,
+                pendingCandidateCount: retrospective.pendingCandidateCount,
+                recallFeedbackCount: retrospective.recallFeedbackCount,
+                unresolvedRiskCount: retrospective.unresolvedRiskCount
+              }
+            };
+          }
+          if (input.stage === 'IMPLEMENTATION' && input.implementationStep === 'CHANGE_INSPECTION' && input.decision === 'APPROVED') {
+            const projectPaths = workflow.projects?.length ? await loadCurrentProjectPaths(requestContext, true) : [];
+            const aiCommits = await assertProjectsCleanAndPushed(root, workflow.projects || [], workflow.branchName, projectPaths);
+            workflow = {
+              ...workflow,
+              aiCodeCompleteness: mergeAiCommitCaptures(workflow, aiCommits)
+            };
+          }
           workflow = await applyReview(root, workflow, input);
           if (input.stage === 'CODE_REVIEW') {
             workflow.issues = await refreshCodeReviewIssues(root, workflow);

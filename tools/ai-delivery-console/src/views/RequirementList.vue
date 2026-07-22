@@ -76,6 +76,11 @@
           <el-tag :class="stageTagClass(row.currentStage)" effect="plain">{{ stageText(row.currentStage) }}</el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="AI 保留度" width="140">
+        <template #default="{ row }">
+          <el-tag :type="aiCompletenessTagType(row)" effect="plain">{{ aiCompletenessText(row) }}</el-tag>
+        </template>
+      </el-table-column>
       <el-table-column label="最近运行" min-width="180">
         <template #default="{ row }">
           <span :class="{ muted: !row.runs[0] }">{{ recentRunText(row.runs[0]) }}</span>
@@ -99,10 +104,13 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="190" fixed="right">
+      <el-table-column label="操作" width="310" fixed="right">
         <template #default="{ row }">
           <el-button :icon="View" size="small" :loading="openingRequirementId === row.requirementId" @click="openDetail(row.requirementId)">查看</el-button>
           <el-button :icon="Edit" size="small" @click="openEditDialog(row)">编辑</el-button>
+          <el-button :icon="DataAnalysis" size="small" :loading="aiCompletenessOpeningId === row.requirementId" @click="openAiCompletenessDialog(row)">
+            计算AI保留度
+          </el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -166,14 +174,78 @@
       <el-button type="primary" :icon="DocumentAdd" :loading="savingRequirement" @click="submit">保存</el-button>
     </template>
   </el-dialog>
+
+  <el-dialog v-model="aiCompletenessDialogVisible" title="AI 代码完整度计算" width="800px">
+    <div v-loading="aiCompletenessLoading" class="ai-completeness-dialog">
+      <div class="ai-completeness-head">
+        <div>
+          <strong>{{ aiCompletenessWorkflow?.requirementId || '-' }} · {{ aiCompletenessWorkflow?.title || '-' }}</strong>
+          <p class="muted">维护各工程实施前和 AI 生成提交，最终提交由系统自动取目标远程分支最新提交。</p>
+        </div>
+        <el-tag v-if="aiCompletenessWorkflow" :type="aiCompletenessTagType(aiCompletenessWorkflow)" effect="plain">
+          {{ aiCompletenessText(aiCompletenessWorkflow) }}
+        </el-tag>
+      </div>
+      <el-alert
+        v-if="!aiCompletenessProjects.length"
+        type="warning"
+        show-icon
+        title="当前需求未配置涉及工程，无法计算 AI 保留度"
+      />
+      <el-alert
+        v-else-if="!aiCompletenessWorkflow?.branchName"
+        type="warning"
+        show-icon
+        title="当前需求未配置目标远程分支，无法自动获取最终提交"
+      />
+      <el-table v-else :data="aiCompletenessProjects" class="ai-completeness-table">
+        <el-table-column prop="projectName" label="工程" width="150" />
+        <el-table-column label="目标远程分支" min-width="170">
+          <template #default>
+            <span>{{ aiCompletenessWorkflow?.branchName || '-' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="baseCommit" min-width="190">
+          <template #default="{ row }">
+            <el-input v-model="row.baseCommit" placeholder="实施前提交" clearable />
+          </template>
+        </el-table-column>
+        <el-table-column label="aiCommit" min-width="190">
+          <template #default="{ row }">
+            <el-input v-model="row.aiCommit" placeholder="AI 生成提交" clearable />
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
+    <template #footer>
+      <el-button @click="aiCompletenessDialogVisible = false">取消</el-button>
+      <el-button
+        type="primary"
+        :icon="DataAnalysis"
+        :loading="aiCompletenessCalculating"
+        :disabled="!aiCompletenessProjects.length || !aiCompletenessWorkflow?.branchName"
+        @click="calculateAiCompleteness"
+      >
+        计算
+      </el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { DocumentAdd, Edit, Plus, Search, View } from '@element-plus/icons-vue';
+import { DataAnalysis, DocumentAdd, Edit, Plus, Search, View } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
-import type { RequirementInput, RequirementTokenUsageSummary, RequirementType, RequirementWorkflow, RunRecord, WorkflowProject } from '@shared/workflow';
+import type {
+  AiCodeCompletenessProjectCommit,
+  RequirementInput,
+  RequirementTokenUsageSummary,
+  RequirementType,
+  RequirementWorkflow,
+  RunRecord,
+  WorkflowProject
+} from '@shared/workflow';
 import { emptyRequirementTokenUsage } from '@shared/workflow';
 import { actionTypeLabels, defaultBranchName, requirementTypeLabels, shouldSyncBranchName, stageLabels, statusLabels } from '@shared/workflow';
 import { useWorkflowStore } from '@/stores/workflow';
@@ -201,6 +273,12 @@ const workspaceSubdirs = ref<{ parentName: string; parentPath: string; children:
 const editingWorkflow = ref<RequirementWorkflow>();
 const savingRequirement = ref(false);
 const openingRequirementId = ref('');
+const aiCompletenessOpeningId = ref('');
+const aiCompletenessDialogVisible = ref(false);
+const aiCompletenessLoading = ref(false);
+const aiCompletenessCalculating = ref(false);
+const aiCompletenessWorkflow = ref<RequirementWorkflow>();
+const aiCompletenessProjects = ref<AiCodeCompletenessProjectCommit[]>([]);
 const projectRepoState = ref<ProjectRepoStateVO | undefined>();
 const tokenUsageByRequirement = ref<Map<string, RequirementTokenUsageSummary>>(new Map());
 const isEditingWorkflow = computed(() => Boolean(editingWorkflow.value));
@@ -243,7 +321,7 @@ const requirementTypeOptions = computed(() =>
     label: requirementTypeLabels[value]
   }))
 );
-const stageOrder: RequirementWorkflow['currentStage'][] = ['PRD', 'TECH_DESIGN', 'IMPLEMENTATION', 'CODE_REVIEW', 'DONE'];
+const stageOrder: RequirementWorkflow['currentStage'][] = ['PRD', 'TECH_DESIGN', 'IMPLEMENTATION', 'CODE_REVIEW', 'RETROSPECTIVE', 'DONE'];
 const stageFilterOptions = computed(() => {
   const stages = new Set(store.requirements.map((workflow) => workflow.currentStage));
   return stageOrder
@@ -394,6 +472,42 @@ function formatTokenCount(value?: number) {
     return `${(count / 1000).toFixed(1)}K`;
   }
   return String(count);
+}
+
+function formatPercent(value?: number) {
+  return typeof value === 'number' && Number.isFinite(value) ? `${value.toFixed(1)}%` : undefined;
+}
+
+function aiCompletenessText(workflow: RequirementWorkflow) {
+  const state = workflow.aiCodeCompleteness;
+  const calculated = formatPercent(state?.summary?.completenessRate);
+  if (calculated) {
+    return calculated;
+  }
+  if (state?.status === 'FAILED') {
+    return '校验失败';
+  }
+  if (!workflow.branchName) {
+    return '分支缺失';
+  }
+  if (state?.projects?.some((project) => !project.baseCommit || !project.aiCommit)) {
+    return 'commit 缺失';
+  }
+  return '待计算';
+}
+
+function aiCompletenessTagType(workflow: RequirementWorkflow): 'success' | 'info' | 'warning' | 'danger' {
+  const state = workflow.aiCodeCompleteness;
+  if (state?.summary?.completenessRate !== undefined) {
+    return 'success';
+  }
+  if (state?.status === 'FAILED') {
+    return 'danger';
+  }
+  if (!workflow.branchName || state?.projects?.some((project) => !project.baseCommit || !project.aiCommit)) {
+    return 'warning';
+  }
+  return 'info';
 }
 
 function repoStatusText(status: ProjectRepoSyncStatus): string {
@@ -596,6 +710,68 @@ async function openDetail(requirementId: string) {
   }
 }
 
+function replaceWorkflowInList(workflow: RequirementWorkflow) {
+  const index = store.requirements.findIndex((item) => item.requirementId === workflow.requirementId);
+  if (index >= 0) {
+    store.requirements[index] = workflow;
+  }
+}
+
+async function openAiCompletenessDialog(workflow: RequirementWorkflow) {
+  aiCompletenessOpeningId.value = workflow.requirementId;
+  aiCompletenessWorkflow.value = workflow;
+  aiCompletenessDialogVisible.value = true;
+  aiCompletenessLoading.value = true;
+  try {
+    const state = await apiClient.getAiCodeCompleteness(workflow.requirementId);
+    aiCompletenessWorkflow.value = {
+      ...workflow,
+      aiCodeCompleteness: state
+    };
+    aiCompletenessProjects.value = (state.projects.length ? state.projects : workflow.projects || []).map((project) => ({
+      projectName: 'projectName' in project ? project.projectName : project.name,
+      projectPath: 'projectPath' in project ? project.projectPath : project.path,
+      branch: 'branch' in project ? project.branch : undefined,
+      baseCommit: 'baseCommit' in project ? project.baseCommit : undefined,
+      aiCommit: 'aiCommit' in project ? project.aiCommit : undefined,
+      finalCommit: 'finalCommit' in project ? project.finalCommit : undefined,
+      source: 'source' in project ? project.source : undefined,
+      updatedAt: 'updatedAt' in project ? project.updatedAt : undefined
+    }));
+  } catch (error: any) {
+    ElMessage.error(error.message || '读取 AI 保留度信息失败');
+    aiCompletenessDialogVisible.value = false;
+  } finally {
+    aiCompletenessLoading.value = false;
+    aiCompletenessOpeningId.value = '';
+  }
+}
+
+async function calculateAiCompleteness() {
+  if (!aiCompletenessWorkflow.value) {
+    return;
+  }
+  aiCompletenessCalculating.value = true;
+  try {
+    const { workflow } = await apiClient.calculateAiCodeCompleteness(aiCompletenessWorkflow.value.requirementId, {
+      projects: aiCompletenessProjects.value.map((project) => ({
+        projectPath: project.projectPath,
+        projectName: project.projectName,
+        baseCommit: project.baseCommit,
+        aiCommit: project.aiCommit
+      }))
+    });
+    aiCompletenessWorkflow.value = workflow;
+    replaceWorkflowInList(workflow);
+    aiCompletenessDialogVisible.value = false;
+    ElMessage.success('AI 保留度已计算');
+  } catch (error: any) {
+    ElMessage.error(error.message || 'AI 保留度计算失败');
+  } finally {
+    aiCompletenessCalculating.value = false;
+  }
+}
+
 onMounted(async () => {
   await Promise.all([store.loadRequirements(), loadProjectHistory(), loadRepoReadiness()]);
   await loadTokenUsageSummaries();
@@ -616,6 +792,28 @@ onMounted(async () => {
 
 .repo-readiness-alert {
   margin: 0 16px 12px;
+}
+
+.ai-completeness-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 180px;
+}
+
+.ai-completeness-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.ai-completeness-head p {
+  margin: 6px 0 0;
+}
+
+.ai-completeness-table :deep(.el-input__wrapper) {
+  width: 100%;
 }
 
 .token-cell {
@@ -762,6 +960,12 @@ onMounted(async () => {
   --stage-tag-bg: #fff1f2;
   --stage-tag-border: #fecdd3;
   --stage-tag-color: #be123c;
+}
+
+.stage-tag--RETROSPECTIVE {
+  --stage-tag-bg: #fdf4ff;
+  --stage-tag-border: #f5d0fe;
+  --stage-tag-color: #a21caf;
 }
 
 .stage-tag--DONE {

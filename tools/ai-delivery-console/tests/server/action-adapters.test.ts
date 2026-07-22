@@ -4,7 +4,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { describe, expect, it, vi } from 'vitest';
-import type { AgentProvider, RequirementWorkflow, RunRecord } from '../../shared/workflow';
+import type { AgentProvider, ArtifactRef, RequirementWorkflow, RunRecord } from '../../shared/workflow';
 import { createEmptyStages } from '../../shared/workflow';
 import {
   assertPrdClarificationReady,
@@ -23,6 +23,7 @@ import {
 } from '../../server/services/agent-providers';
 import { readRunEvents } from '../../server/services/run-log';
 import { resolveWorkspaceOrRuntimePath } from '../../server/services/runtime-paths';
+import { createTechDesignDraftSnapshot } from '../../server/services/tech-design-versions';
 import { serverConfig } from '../../server/config';
 
 const exec = promisify(execFile);
@@ -48,6 +49,29 @@ function workflow(): RequirementWorkflow {
     reviews: [],
     issues: []
   };
+}
+
+function openSpecArtifact(id: string, pathValue: string, overrides: Partial<ArtifactRef> = {}): ArtifactRef {
+  return {
+    id,
+    stage: 'IMPLEMENTATION',
+    label: id,
+    path: pathValue,
+    kind: pathValue.endsWith('.md') ? 'markdown' : 'directory',
+    exists: true,
+    ...overrides
+  };
+}
+
+function completeOpenSpecArtifacts(overrides: Partial<ArtifactRef>[] = []): ArtifactRef[] {
+  const base = [
+    openSpecArtifact('openspec-change', 'openspec/changes/req-172014'),
+    openSpecArtifact('openspec-proposal', 'openspec/changes/req-172014/proposal.md'),
+    openSpecArtifact('openspec-design', 'openspec/changes/req-172014/design.md'),
+    openSpecArtifact('openspec-tasks', 'openspec/changes/req-172014/tasks.md'),
+    openSpecArtifact('openspec-spec-1', 'openspec/changes/req-172014/specs/main/spec.md')
+  ];
+  return base.map((artifact, index) => ({ ...artifact, ...(overrides[index] || {}) }));
 }
 
 function runRecord(id: string): RunRecord {
@@ -182,7 +206,7 @@ describe('action-adapters', () => {
     }
   });
 
-  it('生成 PRD 澄清命令时不携带来源参数', () => {
+  it('生成 PRD 澄清命令时携带 workflow 来源参数', () => {
     const item = {
       ...workflow(),
       sources: ['https://prd.example.com/doc'],
@@ -204,7 +228,149 @@ describe('action-adapters', () => {
           description: '补充异常场景'
         }
       })
-    ).toBe('/coding-prd-analyzer id=172014 c=补充异常场景');
+    ).toBe('/coding-prd-analyzer id=172014 c=补充异常场景 https://prd.example.com/doc');
+  });
+
+  it('生成 PRD 澄清命令时优先携带本次 sources 或 sourceFiles', () => {
+    const item = {
+      ...workflow(),
+      sources: ['https://prd.example.com/old']
+    };
+
+    expect(
+      internalForTests.buildSkillCommand(item, {
+        actionType: 'PRD_CLARIFY',
+        params: {
+          description: '补充异常场景',
+          sources: ['docs/172014/prd/files/new-source.png']
+        }
+      })
+    ).toBe('/coding-prd-analyzer id=172014 c=补充异常场景 docs/172014/prd/files/new-source.png');
+
+    expect(
+      internalForTests.buildSkillCommand(item, {
+        actionType: 'PRD_CLARIFY',
+        params: {
+          description: '补充异常场景',
+          sourceFiles: ['docs/172014/prd/files/from-source-files.md']
+        }
+      })
+    ).toBe('/coding-prd-analyzer id=172014 c=补充异常场景 docs/172014/prd/files/from-source-files.md');
+  });
+
+  it('执行 PRD 生成时将长补充输入写入快照并用短引用生成命令', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-prd-supplement-snapshot-'));
+    const longText = '复制活动编辑保存创建新的活动置顶后查看数据情况：\n'.repeat(20);
+
+    const run = await executeAction(root, workflow(), {
+      actionType: 'PRD_ANALYZE',
+      params: {
+        description: longText,
+        supplementBlocks: [
+          { id: 'paragraph-1', type: 'PARAGRAPH', text: longText },
+          {
+            id: 'image-1',
+            type: 'IMAGE',
+            fileId: 'file-1',
+            name: 'pasted.png',
+            path: 'docs/172014/prd/files/pasted.png',
+            size: 107500,
+            caption: '接口返回截图'
+          }
+        ],
+        sources: ['https://prd.example.com/doc'],
+        agentId: 'missing-agent'
+      }
+    });
+
+    expect(run.status).toBe('WAITING_FOR_AGENT');
+    const snapshotPath = String(run.params.supplementInputPath);
+    expect(snapshotPath).toMatch(/^docs\/172014\/prd\/inputs\/supplements\/\d{14}-prd_analyze-run-.+\.md$/);
+    expect(run.params.description).toBe(`补充输入见 ${snapshotPath}`);
+    expect(run.params.sources).toEqual(['https://prd.example.com/doc']);
+    expect(run.commandText).toContain(`c=补充输入见 ${snapshotPath}`);
+    expect(run.commandText).not.toContain('复制活动编辑保存创建新的活动置顶后查看数据情况');
+
+    const snapshotContent = await fs.readFile(path.join(root, snapshotPath), 'utf8');
+    expect(snapshotContent).toContain('运行 ID:');
+    expect(snapshotContent).toContain('动作: PRD_ANALYZE');
+    expect(snapshotContent).toContain('复制活动编辑保存创建新的活动置顶后查看数据情况');
+    expect(snapshotContent).toContain('![接口返回截图](docs/172014/prd/files/pasted.png)');
+    expect(snapshotContent).toContain('附件清单');
+  });
+
+  it('执行技术方案生成时将长补充说明从 commandText 中替换为快照路径', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-design-supplement-snapshot-'));
+    const longText = '请按照最新答疑刷新技术方案，并重点说明保存接口的幂等逻辑。'.repeat(18);
+
+    const run = await executeAction(root, workflow(), {
+      actionType: 'DESIGN_GENERATE',
+      params: {
+        clarification: longText,
+        sourceFiles: ['docs/172014/technical-design/files/source.png'],
+        supplementBlocks: [
+          { id: 'paragraph-1', type: 'PARAGRAPH', text: longText },
+          {
+            id: 'file-1',
+            type: 'FILE',
+            fileId: 'file-1',
+            name: '接口日志.txt',
+            path: 'docs/172014/technical-design/files/api-log.txt',
+            size: 2048,
+            caption: '失败请求日志'
+          }
+        ],
+        agentId: 'missing-agent'
+      }
+    });
+
+    expect(run.status).toBe('WAITING_FOR_AGENT');
+    const snapshotPath = String(run.params.supplementInputPath);
+    expect(snapshotPath).toMatch(/^docs\/172014\/technical-design\/inputs\/supplements\/\d{14}-design_generate-run-.+\.md$/);
+    expect(run.params.clarification).toBe(`补充输入见 ${snapshotPath}`);
+    expect(run.params.sourceFiles).toEqual(['docs/172014/technical-design/files/source.png']);
+    expect(run.commandText).toContain(snapshotPath);
+    expect(run.commandText).not.toContain('请按照最新答疑刷新技术方案');
+
+    const snapshotContent = await fs.readFile(path.join(root, snapshotPath), 'utf8');
+    expect(snapshotContent).toContain('动作: DESIGN_GENERATE');
+    expect(snapshotContent).toContain(longText);
+    expect(snapshotContent).toContain('[补充文件: 接口日志.txt](docs/172014/technical-design/files/api-log.txt)');
+    expect(snapshotContent).toContain('说明: 失败请求日志');
+  });
+
+  it('执行技术方案生成时内联图片只留在快照中，不重复进入 d 参数', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-design-inline-snapshot-'));
+    const inlineImagePath = 'docs/172014/technical-design/files/pasted-20260717090000-1.png';
+
+    const run = await executeAction(root, workflow(), {
+      actionType: 'DESIGN_GENERATE',
+      params: {
+        clarification: '补充截图上下文',
+        sourceFiles: [],
+        supplementBlocks: [
+          { id: 'paragraph-1', type: 'PARAGRAPH', text: '补充截图上下文' },
+          {
+            id: 'image-1',
+            type: 'IMAGE',
+            fileId: 'file-1',
+            name: 'pasted-20260717090000-1.png',
+            path: inlineImagePath,
+            size: 1024,
+            caption: '截图上下文',
+            contextRole: 'INLINE'
+          }
+        ],
+        agentId: 'missing-agent'
+      }
+    });
+
+    const snapshotPath = String(run.params.supplementInputPath);
+    expect(run.status).toBe('WAITING_FOR_AGENT');
+    expect(run.commandText).toContain(`c=补充输入见 ${snapshotPath}`);
+    expect(run.commandText).not.toContain(inlineImagePath);
+    const snapshotContent = await fs.readFile(path.join(root, snapshotPath), 'utf8');
+    expect(snapshotContent).toContain(`![截图上下文](${inlineImagePath})`);
   });
 
   it('PRD 澄清校验要求普通需求、非空描述和已存在 PRD 文档', async () => {
@@ -522,7 +688,7 @@ describe('action-adapters', () => {
 
     const command = internalForTests.buildSkillCommand(item, { actionType: 'DESIGN_GENERATE', params: {} });
 
-    expect(command).toBe('/coding-design d=邀请好友积分异常,后台配置为 1，实际奖励 10,docs/172014/technical-design/files/source-1.png r=172014');
+    expect(command).toBe('/coding-defect-design d=邀请好友积分异常,后台配置为 1，实际奖励 10,docs/172014/technical-design/files/source-1.png r=172014');
     expect(command).not.toContain('/prd/');
   });
 
@@ -558,7 +724,7 @@ describe('action-adapters', () => {
     const command = internalForTests.buildSkillCommand(item, { actionType: 'DESIGN_GENERATE', params: {} });
 
     expect(command).toBe(
-      '/coding-design d=邀请好友积分异常,后台配置为 1，实际奖励 10,docs/172014/technical-design/design_review.md,docs/172014/technical-design/files/source-1.png r=172014'
+      '/coding-defect-design d=邀请好友积分异常,后台配置为 1，实际奖励 10,docs/172014/technical-design/design_review.md,docs/172014/technical-design/files/source-1.png r=172014'
     );
     expect(command).not.toContain('/prd/');
   });
@@ -611,18 +777,89 @@ describe('action-adapters', () => {
     const command = internalForTests.buildSkillCommand(item, { actionType: 'DESIGN_GENERATE', params: {} });
 
     expect(command).toBe(
-      '/coding-design d=邀请好友积分异常,后台配置为 1，实际奖励 10,docs/172014/technical-design/design_review.md,docs/172014/technical-design/questions.md,docs/172014/technical-design/files/source-1.png r=172014'
+      '/coding-defect-design d=邀请好友积分异常,后台配置为 1，实际奖励 10,docs/172014/technical-design/design_review.md,docs/172014/technical-design/questions.md,docs/172014/technical-design/files/source-1.png r=172014'
     );
     expect(command).not.toContain('/prd/');
   });
 
-  it('普通需求 OpenSpec 快速生成命令保留 PRD 文档和 PRD 文件目录', () => {
+  it('普通需求 OpenSpec 快速生成命令不再默认携带 PRD 文件目录', () => {
     expect(internalForTests.buildSkillCommand(workflow(), { actionType: 'OPENSPEC_FF', params: {} })).toBe(
-      '/openspec-ff-change req-172014 d=docs/172014/prd/analysis.md,docs/172014/technical-design/design_review.md,docs/172014/prd/files'
+      '/openspec-ff-change req-172014 d=docs/172014/prd/analysis.md,docs/172014/technical-design/design_review.md'
     );
   });
 
-  it('缺陷 OpenSpec 快速生成命令不自动携带 PRD 文档和 PRD 文件目录', () => {
+  it('普通需求 OpenSpec 快速生成命令只携带显式选择的视觉上下文', () => {
+    const command = internalForTests.buildSkillCommand(workflow(), {
+      actionType: 'OPENSPEC_FF',
+      params: {
+        visualContextFiles: ['docs/172014/prd/files/menu.png'],
+        openSpecVisualContextPath: 'docs/172014/implementation/artifact-review/inputs/visual-context.md'
+      }
+    });
+
+    expect(command).toBe(
+      '/openspec-ff-change req-172014 d=docs/172014/prd/analysis.md,docs/172014/technical-design/design_review.md,docs/172014/implementation/artifact-review/inputs/visual-context.md,docs/172014/prd/files/menu.png'
+    );
+    expect(command).not.toContain('docs/172014/prd/files,');
+  });
+
+  it('普通需求 OpenSpec 快速生成命令携带技术方案版本上下文路径', () => {
+    const command = internalForTests.buildSkillCommand(workflow(), {
+      actionType: 'OPENSPEC_FF',
+      params: {
+        openSpecArtifactContextPath: 'docs/172014/implementation/artifact-review/inputs/context.md'
+      }
+    });
+
+    expect(command).toBe(
+      '/openspec-ff-change req-172014 d=docs/172014/prd/analysis.md,docs/172014/technical-design/design_review.md,docs/172014/implementation/artifact-review/inputs/context.md'
+    );
+  });
+
+  it('已有完整 OpenSpec 工件时使用增量修订技能更新工件', () => {
+    const item = {
+      ...workflow(),
+      artifacts: completeOpenSpecArtifacts()
+    };
+
+    expect(internalForTests.hasCompleteOpenSpecArtifacts(item)).toBe(true);
+    expect(internalForTests.openSpecArtifactSkillName(item)).toBe('coding-openspec-amend');
+    expect(internalForTests.buildSkillCommand(item, { actionType: 'OPENSPEC_FF', params: {} })).toBe(
+      '/coding-openspec-amend req-172014 d=docs/172014/prd/analysis.md,docs/172014/technical-design/design_review.md'
+    );
+  });
+
+  it('归档 OpenSpec 工件不判定为可增量修订', () => {
+    const item = {
+      ...workflow(),
+      artifacts: completeOpenSpecArtifacts([
+        {
+          label: 'OpenSpec Change（已归档）',
+          path: 'openspec/changes/archive/2026-07-14-req-172014'
+        }
+      ])
+    };
+
+    expect(internalForTests.hasCompleteOpenSpecArtifacts(item)).toBe(false);
+    expect(internalForTests.openSpecArtifactSkillName(item)).toBe('openspec-ff-change');
+  });
+
+  it('执行 OpenSpec 工件动作已有完整工件时 commandText 使用增量修订技能', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-openspec-amend-command-'));
+    const run = await executeAction(root, { ...workflow(), artifacts: completeOpenSpecArtifacts() }, {
+      actionType: 'OPENSPEC_FF',
+      params: {
+        agentId: 'missing-agent'
+      }
+    });
+
+    expect(run.status).toBe('WAITING_FOR_AGENT');
+    expect(run.commandText).toBe(
+      '/coding-openspec-amend req-172014 d=docs/172014/prd/analysis.md,docs/172014/technical-design/design_review.md'
+    );
+  });
+
+  it('缺陷 OpenSpec 快速生成命令不自动携带 PRD 文档、PRD 文件目录和技术方案附件', () => {
     const item = {
       ...workflow(),
       requirementType: 'DEFECT' as const,
@@ -641,8 +878,227 @@ describe('action-adapters', () => {
 
     const command = internalForTests.buildSkillCommand(item, { actionType: 'OPENSPEC_FF', params: {} });
 
-    expect(command).toBe('/openspec-ff-change req-172014 d=docs/172014/technical-design/design_review.md,docs/172014/technical-design/files/source-1.png');
+    expect(command).toBe('/openspec-ff-change req-172014 d=docs/172014/technical-design/design_review.md');
     expect(command).not.toContain('/prd/');
+    expect(command).not.toContain('docs/172014/technical-design/files/source-1.png');
+  });
+
+  it('缺陷 OpenSpec 快速生成命令携带技术方案版本上下文但不自动携带附件', () => {
+    const item = {
+      ...workflow(),
+      requirementType: 'DEFECT' as const,
+      currentStage: 'TECH_DESIGN' as const,
+      stages: createEmptyStages('DEFECT'),
+      techDesignSourceFiles: [
+        {
+          id: 'source-1',
+          name: '配置截图.png',
+          path: 'docs/172014/technical-design/files/source-1.png',
+          size: 100,
+          uploadedAt: new Date().toISOString()
+        }
+      ]
+    };
+
+    const command = internalForTests.buildSkillCommand(item, {
+      actionType: 'OPENSPEC_FF',
+      params: {
+        openSpecArtifactContextPath: 'docs/172014/implementation/artifact-review/inputs/context.md'
+      }
+    });
+
+    expect(command).toBe(
+      '/openspec-ff-change req-172014 d=docs/172014/technical-design/design_review.md,docs/172014/implementation/artifact-review/inputs/context.md'
+    );
+    expect(command).not.toContain('/prd/');
+    expect(command).not.toContain('docs/172014/technical-design/files/source-1.png');
+  });
+
+  it('缺陷 OpenSpec 快速生成命令只携带显式视觉上下文和补充文件', () => {
+    const item = {
+      ...workflow(),
+      requirementType: 'DEFECT' as const,
+      currentStage: 'TECH_DESIGN' as const,
+      stages: createEmptyStages('DEFECT'),
+      techDesignSourceFiles: [
+        {
+          id: 'source-1',
+          name: '未选择截图.png',
+          path: 'docs/172014/technical-design/files/unselected.png',
+          size: 100,
+          uploadedAt: new Date().toISOString()
+        }
+      ]
+    };
+
+    const command = internalForTests.buildSkillCommand(item, {
+      actionType: 'OPENSPEC_FF',
+      params: {
+        openSpecVisualContextPath: 'docs/172014/implementation/artifact-review/inputs/visual-context.md',
+        visualContextFiles: ['docs/172014/technical-design/files/selected.png'],
+        sourceFiles: ['docs/172014/technical-design/files/manual.md']
+      }
+    });
+
+    expect(command).toBe(
+      '/openspec-ff-change req-172014 d=docs/172014/technical-design/design_review.md,docs/172014/implementation/artifact-review/inputs/visual-context.md,docs/172014/technical-design/files/selected.png,docs/172014/technical-design/files/manual.md'
+    );
+    expect(command).not.toContain('/prd/');
+    expect(command).not.toContain('docs/172014/technical-design/files/unselected.png');
+  });
+
+  it('首次 OpenSpec 快速生成有补充说明时不生成技术方案版本上下文', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-openspec-first-ff-'));
+    const designPath = path.join(root, 'docs', '172014', 'technical-design', 'design_review.md');
+    await fs.mkdir(path.dirname(designPath), { recursive: true });
+    await fs.writeFile(designPath, '# 技术方案\n\n最新方案\n', 'utf8');
+
+    const run = await executeAction(root, workflow(), {
+      actionType: 'OPENSPEC_FF',
+      params: {
+        changeName: 'req-172014',
+        documentPath: 'docs/172014/technical-design/design_review.md',
+        artifactAdjustment: '首次生成按最新技术方案出完整工件',
+        supplementBlocks: [{ id: 'paragraph-1', type: 'PARAGRAPH', text: '首次生成按最新技术方案出完整工件' }],
+        agentId: 'missing-agent'
+      }
+    });
+
+    const supplementPath = String(run.params.supplementInputPath);
+    expect(run.status).toBe('WAITING_FOR_AGENT');
+    expect(run.openSpecArtifactInputSnapshot).toBeUndefined();
+    expect(run.params).not.toHaveProperty('baseTechDesignVersionId');
+    expect(run.params).not.toHaveProperty('targetTechDesignVersionId');
+    expect(run.params).not.toHaveProperty('openSpecArtifactContextPath');
+    expect(supplementPath).toMatch(/^docs\/172014\/implementation\/artifact-review\/inputs\/supplements\/\d{14}-openspec_ff-run-.+\.md$/);
+    expect(run.commandText).toContain(supplementPath);
+  });
+
+  it('执行 OpenSpec 快速生成时冻结 current 目标版本并记录输入快照', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-openspec-input-'));
+    const designPath = path.join(root, 'docs', '172014', 'technical-design', 'design_review.md');
+    await fs.mkdir(path.dirname(designPath), { recursive: true });
+    await fs.writeFile(designPath, '# 技术方案\n\n旧方案\n', 'utf8');
+    const base = await createTechDesignDraftSnapshot(root, '172014');
+    expect(base).toBeDefined();
+    if (!base) {
+      throw new Error('未生成技术方案基线快照');
+    }
+    const baseVersion = base;
+    await fs.writeFile(designPath, '# 技术方案\n\n新方案\n', 'utf8');
+
+    const run = await executeAction(root, workflow(), {
+      actionType: 'OPENSPEC_FF',
+      params: {
+        changeName: 'req-172014',
+        documentPath: 'docs/172014/technical-design/design_review.md',
+        sourceFiles: ['docs/172014/technical-design/files/change-screen.png'],
+        baseTechDesignVersionId: baseVersion.id,
+        targetTechDesignVersionId: 'current',
+        artifactAdjustment: '仅增量更新 tasks',
+        supplementBlocks: [
+          { id: 'paragraph-1', type: 'PARAGRAPH', text: '仅增量更新 tasks' },
+          {
+            id: 'image-1',
+            type: 'IMAGE',
+            fileId: 'file-1',
+            name: 'change-screen.png',
+            path: 'docs/172014/technical-design/files/change-screen.png',
+            size: 1024,
+            caption: '工件调整截图'
+          }
+        ],
+        agentId: 'missing-agent'
+      }
+    });
+
+    expect(run.status).toBe('WAITING_FOR_AGENT');
+    expect(run.params.baseTechDesignVersionId).toBe(baseVersion.id);
+    expect(String(run.params.targetTechDesignVersionId)).toMatch(/^snapshot:/);
+    expect(run.openSpecArtifactInputSnapshot).toEqual(
+      expect.objectContaining({
+        baseTechDesignVersionId: baseVersion.id,
+        adjustment: '仅增量更新 tasks'
+      })
+    );
+    expect(run.openSpecArtifactInputSnapshot?.targetTechDesignVersionId).toMatch(/^snapshot:/);
+    const contextPath = String(run.params.openSpecArtifactContextPath);
+    expect(contextPath).toMatch(/^docs\/172014\/implementation\/artifact-review\/inputs\/.+-tech-design-version-context\.md$/);
+    const supplementPath = String(run.params.supplementInputPath);
+    expect(supplementPath).toMatch(/^docs\/172014\/implementation\/artifact-review\/inputs\/supplements\/\d{14}-openspec_ff-run-.+\.md$/);
+    expect(run.params.artifactAdjustment).toBe(`补充输入见 ${supplementPath}`);
+    expect(run.params.sourceFiles).toEqual(['docs/172014/technical-design/files/change-screen.png']);
+    expect(run.commandText).toContain(contextPath);
+    expect(run.commandText).not.toContain(supplementPath);
+    const contextContent = await fs.readFile(path.join(root, contextPath), 'utf8');
+    expect(contextContent).toContain('仅增量更新 tasks');
+    expect(contextContent).toContain('新方案');
+    const supplementContent = await fs.readFile(path.join(root, supplementPath), 'utf8');
+    expect(supplementContent).toContain('动作: OPENSPEC_FF');
+    expect(supplementContent).toContain('![工件调整截图](docs/172014/technical-design/files/change-screen.png)');
+  });
+
+  it('OpenSpec 快速生成在版本一致但有调整说明时仍生成输入快照', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-openspec-same-version-'));
+    const designPath = path.join(root, 'docs', '172014', 'technical-design', 'design_review.md');
+    await fs.mkdir(path.dirname(designPath), { recursive: true });
+    await fs.writeFile(designPath, '# 技术方案\n\n同版调整\n', 'utf8');
+    const snapshot = await createTechDesignDraftSnapshot(root, '172014');
+    expect(snapshot).toBeDefined();
+    if (!snapshot) {
+      throw new Error('未生成技术方案快照');
+    }
+    const versionId = snapshot.id;
+
+    const run = await executeAction(root, workflow(), {
+      actionType: 'OPENSPEC_FF',
+      params: {
+        changeName: 'req-172014',
+        documentPath: 'docs/172014/technical-design/design_review.md',
+        baseTechDesignVersionId: versionId,
+        targetTechDesignVersionId: versionId,
+        artifactAdjustment: '只更新 proposal 非目标说明',
+        agentId: 'missing-agent'
+      }
+    });
+
+    expect(run.status).toBe('WAITING_FOR_AGENT');
+    expect(run.openSpecArtifactInputSnapshot).toEqual(
+      expect.objectContaining({
+        baseTechDesignVersionId: versionId,
+        targetTechDesignVersionId: versionId,
+        adjustment: '只更新 proposal 非目标说明'
+      })
+    );
+    const contextContent = await fs.readFile(path.join(root, String(run.params.openSpecArtifactContextPath)), 'utf8');
+    expect(contextContent).toContain('两个技术方案版本正文无差异');
+    expect(contextContent).toContain('只更新 proposal 非目标说明');
+  });
+
+  it('OpenSpec 快速生成在版本一致且无调整说明时阻止运行', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-openspec-same-version-'));
+    const designPath = path.join(root, 'docs', '172014', 'technical-design', 'design_review.md');
+    await fs.mkdir(path.dirname(designPath), { recursive: true });
+    await fs.writeFile(designPath, '# 技术方案\n\n同版调整\n', 'utf8');
+    const snapshot = await createTechDesignDraftSnapshot(root, '172014');
+    expect(snapshot).toBeDefined();
+    if (!snapshot) {
+      throw new Error('未生成技术方案快照');
+    }
+    const versionId = snapshot.id;
+
+    await expect(
+      executeAction(root, workflow(), {
+        actionType: 'OPENSPEC_FF',
+        params: {
+          changeName: 'req-172014',
+          documentPath: 'docs/172014/technical-design/design_review.md',
+          baseTechDesignVersionId: versionId,
+          targetTechDesignVersionId: versionId,
+          agentId: 'missing-agent'
+        }
+      })
+    ).rejects.toThrow('技术方案基线版本和目标版本一致');
   });
 
   it('生成 commit 模式代码评审命令并包含需求号、工程范围、分支和外部文档', () => {
@@ -1043,6 +1499,36 @@ describe('agent-providers', () => {
     expect(refreshed.workflow.runs[0].executionMode).toBe('INTERACTIVE_TERMINAL');
     expect(refreshed.workflow.runs[0].status).toBe('SUCCEEDED');
     expect(events.some((event) => event.type === 'EXIT' && event.message.includes('交互终端 Agent'))).toBe(true);
+  });
+
+  it('交互终端已更新技术方案产物但未写成功状态时自动补偿完成', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-terminal-artifact-'));
+    const item = {
+      ...workflow(),
+      techDesignDocument: 'docs/172014/technical-design/design_review.md'
+    };
+    const run: RunRecord = {
+      ...runRecord('run-interactive-artifact-finished'),
+      actionType: 'DESIGN_GENERATE',
+      stage: 'TECH_DESIGN',
+      status: 'TERMINAL_OPENED',
+      startedAt: '2026-05-22T00:00:00.000Z',
+      executionMode: 'INTERACTIVE_TERMINAL',
+      terminalStatusPath: '.ai-delivery-runtime/requirements/172014/runs/run-interactive-artifact-finished.terminal-status.json',
+      terminalTranscriptPath: '.ai-delivery-runtime/requirements/172014/runs/run-interactive-artifact-finished.terminal.log'
+    };
+    item.runs.push(run);
+    const designPath = path.join(root, item.techDesignDocument);
+    await fs.mkdir(path.dirname(designPath), { recursive: true });
+    await fs.writeFile(designPath, '# 技术方案\n\n交互终端已更新产物。', 'utf8');
+    await fs.utimes(designPath, new Date('2026-05-22T00:00:05.000Z'), new Date('2026-05-22T00:00:05.000Z'));
+
+    const refreshed = await refreshTerminalRunStatuses(root, item);
+    const events = await readRunEvents(root, '172014', run.id);
+
+    expect(refreshed.changed).toBe(true);
+    expect(refreshed.workflow.runs[0].status).toBe('COMPLETED');
+    expect(events.some((event) => event.type === 'EXIT' && event.message.includes('自动完成运行并执行后处理'))).toBe(true);
   });
 
   it('可以取消正在运行的 Agent', async () => {

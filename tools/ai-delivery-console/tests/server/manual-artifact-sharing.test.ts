@@ -34,5 +34,6 @@ describe('manual-artifact-sharing', () => {
 
     expect(isShareableControlledArtifact(current, 'docs/172014/reports/implementation-report.md')).toBe(true);
     expect(isShareableControlledArtifact(current, 'docs/172014/reports/run-20260610085925-588899.log')).toBe(false);
+    expect(isShareableControlledArtifact(current, 'docs/172014/reports/run-20260629033308-ef7f42.md')).toBe(false);
   });
 });

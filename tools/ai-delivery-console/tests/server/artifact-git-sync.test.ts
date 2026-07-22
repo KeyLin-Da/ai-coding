@@ -9,7 +9,7 @@ import { promisify } from 'node:util';
 import type { RequirementWorkflow } from '../../shared/workflow';
 import { createRouter } from '../../server/router';
 import { assertControlledArtifactPath, buildArtifactGitSyncPlan, confirmArtifactGitSync } from '../../server/services/artifact-git-sync';
-import { cloneProjectRepository, inspectProjectRepository, readLocalRepoState, readProjectRepositoryStatus, syncProjectRepository } from '../../server/services/project-repository';
+import { cloneProjectRepository, commitAndPushProjectRepository, inspectProjectRepository, readLocalRepoState, readProjectRepositoryStatus, syncProjectRepository } from '../../server/services/project-repository';
 
 const exec = promisify(execFile);
 
@@ -92,6 +92,7 @@ describe('artifact-git-sync', () => {
     expect(assertControlledArtifactPath(current, 'docs/172014/reports/implementation-report.md')).toBe('docs/172014/reports/implementation-report.md');
     expect(() => assertControlledArtifactPath(current, 'docs/172014/workflow/runs/run-1.jsonl')).toThrow('不在受控产物路径内');
     expect(() => assertControlledArtifactPath(current, 'docs/172014/reports/run-20260610085925-588899.log')).toThrow('不在受控产物路径内');
+    expect(() => assertControlledArtifactPath(current, 'docs/172014/reports/run-20260629033308-ef7f42.md')).toThrow('不在受控产物路径内');
   });
 
   it('拒绝绝对路径、目录逃逸和其他需求路径', () => {
@@ -537,17 +538,21 @@ describe('artifact-git-sync', () => {
       await fs.mkdir(path.join(repoPath, 'docs', '172014', 'reports'), { recursive: true });
       await fs.writeFile(path.join(repoPath, 'docs', '172014', 'reports', 'manual.md'), '# manual\nnew artifact\n', 'utf8');
       await fs.writeFile(path.join(repoPath, 'docs', '172014', 'reports', 'run-20260610085925-588899.log'), 'runtime log\n', 'utf8');
+      await fs.writeFile(path.join(repoPath, 'docs', '172014', 'reports', 'run-20260629033308-ef7f42.md'), '# runtime report\n', 'utf8');
       await fs.writeFile(path.join(repoPath, 'docs', '172014', 'technical-design', 'design_review.md'), 'design old\nstaged but not selected\n', 'utf8');
       await git(repoPath, ['add', 'docs/172014/technical-design/design_review.md']);
 
       const plan = await buildArtifactGitSyncPlan(context, workflow(), { stage: 'TECH_DESIGN', syncType: 'PUBLIC_SYNC' });
       const reportFile = plan.files.find((file) => file.path === 'docs/172014/reports/manual.md');
       const runLogFile = plan.files.find((file) => file.path === 'docs/172014/reports/run-20260610085925-588899.log');
+      const runMarkdownFile = plan.files.find((file) => file.path === 'docs/172014/reports/run-20260629033308-ef7f42.md');
       expect(reportFile?.status).toBe('??');
       expect(runLogFile).toBeUndefined();
+      expect(runMarkdownFile).toBeUndefined();
       expect(plan.diff).toContain('new file mode 100644');
       expect(plan.diff).toContain('+# manual');
       expect(plan.diff).not.toContain('runtime log');
+      expect(plan.diff).not.toContain('runtime report');
 
       const result = await confirmArtifactGitSync(context, workflow(), {
         stage: 'TECH_DESIGN',
@@ -973,6 +978,50 @@ describe('artifact-git-sync', () => {
       expect(body.data.bootstrap.codingSkills.synced).toBe(1);
       expect(body.data.state.syncStatus).toBe('DIRTY');
       expect(await fs.readFile(path.join(repoPath, '.codex', 'skills', 'coding-design', 'SKILL.md'), 'utf8')).toBe('# source skill\n');
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('提交项目仓时本地未暂存变更不会先 rebase 阻断', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-repo-dirty-commit-'));
+    const sourceRepo = path.join(tempDir, 'source');
+    const remoteRepo = path.join(tempDir, 'remote.git');
+    const deliveryRoot = path.join(tempDir, 'delivery');
+    await fs.mkdir(path.join(sourceRepo, 'docs'), { recursive: true });
+    await fs.writeFile(path.join(sourceRepo, 'docs', 'README.md'), 'init\n', 'utf8');
+    await git(sourceRepo, ['init']);
+    await git(sourceRepo, ['config', 'user.email', 'test@example.com']);
+    await git(sourceRepo, ['config', 'user.name', 'Test']);
+    await git(sourceRepo, ['add', '.']);
+    await git(sourceRepo, ['commit', '-m', 'init']);
+    await git(sourceRepo, ['branch', '-M', 'master']);
+    await git(tempDir, ['clone', '--bare', sourceRepo, remoteRepo]);
+    await fs.mkdir(path.join(deliveryRoot, '.ai-delivery', 'keys'), { recursive: true });
+    await fs.writeFile(path.join(deliveryRoot, '.ai-delivery', 'keys', 'fp'), 'not-used-for-local-remote', 'utf8');
+
+    const fetchImpl = projectRepoFetchImpl(deliveryRoot, remoteRepo);
+    const context = {
+      centerBaseUrl: 'http://center.local',
+      userId: '1',
+      clientSessionId: '9',
+      projectId: '1',
+      fetchImpl
+    } as any;
+
+    try {
+      await cloneProjectRepository(context);
+      const repoPath = path.join(deliveryRoot, 'demo');
+      await git(repoPath, ['config', 'user.email', 'test@example.com']);
+      await git(repoPath, ['config', 'user.name', 'Test']);
+      await fs.writeFile(path.join(repoPath, 'docs', 'LOCAL.md'), 'local artifact\n', 'utf8');
+
+      const state = await commitAndPushProjectRepository(context, { message: 'sync local artifacts' });
+
+      const verifyRepo = path.join(tempDir, 'verify');
+      await git(tempDir, ['clone', remoteRepo, verifyRepo]);
+      expect(await fs.readFile(path.join(verifyRepo, 'docs', 'LOCAL.md'), 'utf8')).toBe('local artifact\n');
+      expect(state.syncStatus).toBe('READY');
     } finally {
       await fs.rm(tempDir, { recursive: true, force: true });
     }

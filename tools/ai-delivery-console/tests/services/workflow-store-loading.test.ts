@@ -9,7 +9,10 @@ vi.mock('@/api/client', () => ({
     listAgents: vi.fn(),
     listRequirements: vi.fn(),
     getRequirement: vi.fn(),
-    submitReview: vi.fn()
+    submitReview: vi.fn(),
+    captureAiCodeCompletenessAiCommit: vi.fn(),
+    updateSupplementInputs: vi.fn(),
+    uploadTechDesignFiles: vi.fn()
   }
 }));
 
@@ -133,6 +136,7 @@ describe('workflow store loading', () => {
       implementationStep: 'CHANGE_INSPECTION',
       decision: 'APPROVED'
     });
+    vi.mocked(apiClient.captureAiCodeCompletenessAiCommit).mockResolvedValue(current);
     vi.mocked(apiClient.getRequirement).mockResolvedValue(refreshed);
     vi.mocked(apiClient.listRequirements).mockResolvedValue([refreshed]);
 
@@ -145,14 +149,71 @@ describe('workflow store loading', () => {
 
     expect(apiClient.submitReview).toHaveBeenCalledWith({
       requirementId: '172014',
+      requirementPk: '172014',
       stage: 'IMPLEMENTATION',
       implementationStep: 'CHANGE_INSPECTION',
       decision: 'APPROVED',
       comment: '子步骤通过'
     });
+    expect(apiClient.captureAiCodeCompletenessAiCommit).toHaveBeenCalledWith('172014');
     expect(apiClient.getRequirement).toHaveBeenCalledWith('172014');
     expect(apiClient.listRequirements).toHaveBeenCalledTimes(1);
     expect(store.current?.title).toBe('刷新后的需求');
     expect(store.current).not.toHaveProperty('requirementPk');
+  });
+
+  it('保存补充输入后局部合并当前需求和列表，不重新加载需求列表', async () => {
+    const store = useWorkflowStore();
+    const current = workflow('172014', 7);
+    const other = workflow('172015', 8);
+    const updated = {
+      ...current,
+      title: '已更新补充输入',
+      techDesignClarification: '补充上下文',
+      lastEventId: 15
+    };
+    store.current = current;
+    store.requirements = [current, other];
+    vi.mocked(apiClient.updateSupplementInputs).mockResolvedValue(updated);
+
+    await store.updateSupplementInputs({ techDesignClarification: '补充上下文' });
+
+    expect(apiClient.updateSupplementInputs).toHaveBeenCalledWith('172014', { techDesignClarification: '补充上下文' });
+    expect(apiClient.listRequirements).not.toHaveBeenCalled();
+    expect(store.current).toEqual(updated);
+    expect(store.requirements).toEqual([updated, other]);
+    expect(store.lastEventId).toBe(15);
+  });
+
+  it('上传技术方案补充材料后局部合并当前需求和列表，不重新加载需求列表', async () => {
+    const store = useWorkflowStore();
+    const current = workflow('172014', 7);
+    const other = workflow('172015', 8);
+    const file = new File(['# design'], 'supplement.md', { type: 'text/markdown' });
+    const updated = {
+      ...current,
+      techDesignSourceFiles: [
+        {
+          id: 'file-1',
+          name: 'supplement.md',
+          path: 'docs/172014/technical-design/file/supplement.md',
+          size: 8,
+          mimeType: 'text/markdown',
+          uploadedAt: '2026-07-16T00:00:00.000Z'
+        }
+      ],
+      lastEventId: 16
+    };
+    store.current = current;
+    store.requirements = [current, other];
+    vi.mocked(apiClient.uploadTechDesignFiles).mockResolvedValue(updated);
+
+    await store.uploadTechDesignFiles([file]);
+
+    expect(apiClient.uploadTechDesignFiles).toHaveBeenCalledWith('172014', [file]);
+    expect(apiClient.listRequirements).not.toHaveBeenCalled();
+    expect(store.current).toEqual(updated);
+    expect(store.requirements).toEqual([updated, other]);
+    expect(store.lastEventId).toBe(16);
   });
 });

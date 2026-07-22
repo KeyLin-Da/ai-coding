@@ -25,7 +25,7 @@ function workflow(): RequirementWorkflow {
 }
 
 describe('StageTimeline', () => {
-  it('展示四阶段和阶段状态', () => {
+  it('展示五阶段和阶段状态', () => {
     const wrapper = mount(StageTimeline, {
       props: {
         workflow: workflow(),
@@ -63,8 +63,26 @@ describe('StageTimeline', () => {
     });
 
     expect(wrapper.text()).not.toContain('PRD');
-    expect(wrapper.findAll('button')).toHaveLength(3);
+    expect(wrapper.findAll('button')).toHaveLength(4);
     expect(wrapper.find('.step-index').text()).toBe('1');
     expect(wrapper.find('button').text()).toContain('技术方案');
+  });
+
+  it('旧 workflow 缺少新增阶段状态时仍可渲染为未开始', () => {
+    const item = workflow();
+    const legacyStages = { ...item.stages };
+    delete (legacyStages as Partial<typeof legacyStages>).RETROSPECTIVE;
+    const wrapper = mount(StageTimeline, {
+      props: {
+        workflow: {
+          ...item,
+          stages: legacyStages as RequirementWorkflow['stages']
+        },
+        modelValue: 'TECH_DESIGN'
+      }
+    });
+
+    expect(wrapper.text()).toContain('交付复盘');
+    expect(wrapper.text()).toContain('未开始');
   });
 });

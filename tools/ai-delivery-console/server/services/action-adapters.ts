@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import type { ActionInput, ExecutionMode, RunEvent, RunRecord, RunStatus } from '../../shared/workflow';
 import { implementationStepForAction, stageForAction } from '../../shared/workflow';
 import type { RequirementWorkflow } from '../../shared/workflow';
+import type { MemoryRecallActionInput } from '../../shared/memory';
 import { createRunId, appendRunEvent } from './run-log';
 import { assertInsideWorkspace, normalizeRequirementId } from './workspace';
 import {
@@ -22,6 +23,10 @@ import { normalizePrdClarification } from './workflow-repository';
 import { hasStagedTrackedChanges, readGitChanges } from './git-changes';
 import { buildArtifactPublishEvents, captureControlledArtifactSnapshot } from './manual-artifact-sharing';
 import { resolveWorkspaceOrRuntimePath } from './runtime-paths';
+import { confirmMemoryRecallForRun } from './memory-recall-service';
+import { prepareOpenSpecArtifactAction } from './open-spec-artifact-inputs';
+import { prepareOpenSpecVisualContextAction } from './open-spec-visual-context';
+import { prepareSupplementInputSnapshotAction } from './supplement-input-snapshots';
 
 const cliActionMap: Partial<Record<ActionInput['actionType'], string[]>> = {
   OPENSPEC_STATUS: ['openspec', 'status'],
@@ -49,6 +54,13 @@ function executionMode(params: Record<string, unknown>): ExecutionMode {
     return params.executionMode;
   }
   return 'BACKGROUND';
+}
+
+function memoryRecallActionInput(action: ActionInput): MemoryRecallActionInput | undefined {
+  const topLevel = action.memoryRecall;
+  const nested = action.params?.memoryRecall;
+  const value = topLevel || (typeof nested === 'object' && nested ? nested as MemoryRecallActionInput : undefined);
+  return value && typeof value === 'object' ? value : undefined;
 }
 
 function prdDescription(workflow: RequirementWorkflow, params: Record<string, unknown>): string {
@@ -105,8 +117,7 @@ function openSpecPrdDocumentPath(workflow: RequirementWorkflow, params: Record<s
   if (explicitPath) {
     return explicitPath;
   }
-  const artifactPath = workflow.artifacts.find((artifact) => artifact.stage === 'PRD' && artifact.exists && artifact.kind !== 'directory')?.path;
-  return artifactPath || workflow.stages.PRD.artifactPath || `docs/${workflow.requirementId}/prd/analysis.md`;
+  return prdDocumentPath(workflow, params);
 }
 
 function slugText(value: string): string {
@@ -244,19 +255,48 @@ function designQuestionInputParam(workflow: RequirementWorkflow, params: Record<
   if (workflow.requirementType === 'DEFECT') {
     return technicalDesignDocumentPath(workflow, params);
   }
-  return uniqueNonEmpty([openSpecPrdDocumentPath(workflow, params), technicalDesignDocumentPath(workflow, params)]).join(',');
+  return uniqueNonEmpty([prdDocumentPath(workflow, params), technicalDesignDocumentPath(workflow, params)]).join(',');
 }
 
 function openSpecInputParam(workflow: RequirementWorkflow, params: Record<string, unknown>): string {
-  const requirementId = normalizeRequirementId(workflow.requirementId);
+  const versionContextPath = asString(params.openSpecArtifactContextPath);
+  const supplementInputPath = versionContextPath ? '' : asString(params.supplementInputPath);
   if (workflow.requirementType === 'DEFECT') {
-    return uniqueNonEmpty([technicalDesignDocumentPath(workflow, params), ...techDesignSourcePaths(workflow, params)]).join(',');
+    return uniqueNonEmpty([
+      technicalDesignDocumentPath(workflow, params),
+      versionContextPath,
+      asString(params.openSpecVisualContextPath),
+      supplementInputPath,
+      ...asStringArray(params.visualContextFiles),
+      ...asStringArray(params.sourceFiles)
+    ]).join(',');
   }
-  return [
+  return uniqueNonEmpty([
     openSpecPrdDocumentPath(workflow, params),
     technicalDesignDocumentPath(workflow, params),
-    `docs/${requirementId}/prd/files`
-  ].filter(Boolean).join(',');
+    versionContextPath,
+    asString(params.openSpecVisualContextPath),
+    supplementInputPath,
+    ...asStringArray(params.visualContextFiles),
+    ...asStringArray(params.sourceFiles)
+  ]).join(',');
+}
+
+function hasCompleteOpenSpecArtifacts(workflow: RequirementWorkflow): boolean {
+  const artifacts = workflow.artifacts || [];
+  const changeArtifact = artifacts.find((artifact) => artifact.id === 'openspec-change');
+  const changePath = (changeArtifact?.path || '').replace(/\\/g, '/');
+  if (changeArtifact?.label.includes('已归档') || changePath.includes('/archive/')) {
+    return false;
+  }
+  const existingArtifactIds = new Set(artifacts.filter((artifact) => artifact.exists).map((artifact) => artifact.id));
+  const hasRequiredArtifacts = ['openspec-proposal', 'openspec-design', 'openspec-tasks'].every((id) => existingArtifactIds.has(id));
+  const hasSpec = artifacts.some((artifact) => artifact.exists && artifact.id.startsWith('openspec-spec-'));
+  return hasRequiredArtifacts && hasSpec;
+}
+
+function openSpecArtifactSkillName(workflow: RequirementWorkflow): 'openspec-ff-change' | 'coding-openspec-amend' {
+  return hasCompleteOpenSpecArtifacts(workflow) ? 'coding-openspec-amend' : 'openspec-ff-change';
 }
 
 function projectParam(workflow: RequirementWorkflow): string {
@@ -267,10 +307,16 @@ function reviewModeParam(params: Record<string, unknown>): 'commit' | 'staged' {
   return params.reviewMode === 'staged' ? 'staged' : 'commit';
 }
 
+function retrospectiveScopeParam(params: Record<string, unknown>): string {
+  const scope = asString(params.scope || params.evidenceScope, 'auto');
+  return scope || 'auto';
+}
+
 function buildSkillCommand(workflow: RequirementWorkflow, action: ActionInput): string {
   const params = action.params || {};
   const requirementId = workflow.requirementId;
-  const sources = Array.isArray(params.sources) ? params.sources.join(',') : workflow.sources.join(',');
+  const sourceValues = Array.isArray(params.sources) ? params.sources : Array.isArray(params.sourceFiles) ? params.sourceFiles : workflow.sources;
+  const sources = sourceValues.map((item) => String(item).trim()).filter(Boolean).join(',');
   const description = normalizePrdClarification(asString(params.description)) || '';
   const prdClarification = prdDescription(workflow, params);
   const moduleName = asString(params.moduleName);
@@ -286,9 +332,11 @@ function buildSkillCommand(workflow: RequirementWorkflow, action: ActionInput): 
     case 'PRD_ANALYZE':
       return `/coding-prd-analyzer id=${requirementId}${prdClarification ? ` c=${prdClarification}` : ''}${sources ? ` ${sources}` : ''}`;
     case 'PRD_CLARIFY':
-      return `/coding-prd-analyzer id=${requirementId} c=${description || '<clarification>'}`;
-    case 'DESIGN_GENERATE':
-      return `/coding-design d=${designInputParam(workflow, params)} r=${requirementId}${projects ? ` p=${projects}` : ''}${clarification ? ` c=${clarification}` : ''}`;
+      return `/coding-prd-analyzer id=${requirementId} c=${description || '<clarification>'}${sources ? ` ${sources}` : ''}`;
+    case 'DESIGN_GENERATE': {
+      const designSkill = workflow.requirementType === 'DEFECT' ? 'coding-defect-design' : 'coding-design';
+      return `/${designSkill} d=${designInputParam(workflow, params)} r=${requirementId}${projects ? ` p=${projects}` : ''}${clarification ? ` c=${clarification}` : ''}`;
+    }
     case 'DESIGN_QUESTION':
       return `/coding-design-question r=${requirementId} q=${question} d=${designQuestionInputParam(workflow, params)}${projects ? ` p=${projects}` : ''} o=${outputPath}`;
     case 'JUNIT_GENERATE':
@@ -303,8 +351,18 @@ function buildSkillCommand(workflow: RequirementWorkflow, action: ActionInput): 
       ]
         .filter(Boolean)
         .join(' ');
+    case 'RETROSPECTIVE_GENERATE':
+      return [
+        `/coding-retrospective r=${requirementId}`,
+        projects ? `p=${projects}` : '',
+        branchName ? `b=${branchName}` : '',
+        clarification ? `c=${clarification}` : '',
+        `s=${retrospectiveScopeParam(params)}`
+      ]
+        .filter(Boolean)
+        .join(' ');
     case 'OPENSPEC_FF':
-      return `/openspec-ff-change ${changeName} d=${openSpecInputParam(workflow, params)}`;
+      return `/${openSpecArtifactSkillName(workflow)} ${changeName} d=${openSpecInputParam(workflow, params)}`;
     case 'OPENSPEC_APPLY':
       return `/openspec-apply-change ${changeName}`;
     case 'OPENSPEC_VERIFY':
@@ -348,7 +406,8 @@ function isAgentAction(actionType: ActionInput['actionType']): boolean {
     'OPENSPEC_VERIFY',
     'OPENSPEC_ARCHIVE',
     'JUNIT_GENERATE',
-    'CODE_REVIEW'
+    'CODE_REVIEW',
+    'RETROSPECTIVE_GENERATE'
   ].includes(actionType);
 }
 
@@ -436,7 +495,7 @@ function runCli(
 export function validateActionInput(workspaceRoot: string, action: ActionInput, options: { skipPathValidation?: boolean } = {}): void {
   const params = action.params || {};
   if (!options.skipPathValidation) {
-    for (const key of ['documentPath', 'prdDocumentPath', 'designDocumentPath', 'artifactPath', 'outputPath']) {
+    for (const key of ['documentPath', 'prdDocumentPath', 'designDocumentPath', 'artifactPath', 'outputPath', 'openSpecArtifactContextPath']) {
       const value = params[key];
       if (typeof value === 'string' && value.trim()) {
         assertInsideWorkspace(workspaceRoot, value);
@@ -444,6 +503,9 @@ export function validateActionInput(workspaceRoot: string, action: ActionInput, 
     }
     for (const value of asStringArray(params.sourceFiles)) {
       resolveWorkspaceOrRuntimePath(workspaceRoot, value);
+    }
+    for (const value of asStringArray(params.visualContextFiles)) {
+      assertInsideWorkspace(workspaceRoot, value);
     }
   }
   const allowed = new Set<ActionInput['actionType']>([
@@ -460,6 +522,7 @@ export function validateActionInput(workspaceRoot: string, action: ActionInput, 
     'OPENSPEC_ARCHIVE',
     'JUNIT_GENERATE',
     'CODE_REVIEW',
+    'RETROSPECTIVE_GENERATE',
     'RETURN_TO_IMPLEMENTATION',
     'REFRESH_ARTIFACTS'
   ]);
@@ -473,9 +536,9 @@ export async function executeAction(
   workflow: RequirementWorkflow,
   action: ActionInput,
   onRunUpdate: (run: RunRecord) => Promise<void> = async () => undefined,
-  options: { projectPaths?: string[]; centerConfig?: CenterRunnerConfig } = {}
+  options: { projectPaths?: string[]; centerConfig?: CenterRunnerConfig; projectId?: string } = {}
 ): Promise<RunRecord> {
-  const normalizedAction =
+  let normalizedAction =
     action.actionType === 'DESIGN_QUESTION' && !asString(action.params?.outputPath)
       ? {
           ...action,
@@ -499,8 +562,18 @@ export async function executeAction(
     status: 'RUNNING',
     startedAt,
     params,
-    executionMode: executionMode(params)
+    executionMode: executionMode(params),
+    techDesignInputSnapshot: normalizedAction.techDesignInputSnapshot,
+    openSpecArtifactInputSnapshot: normalizedAction.openSpecArtifactInputSnapshot
   };
+  if (normalizedAction.actionType === 'OPENSPEC_FF') {
+    normalizedAction = await prepareOpenSpecArtifactAction(workspaceRoot, workflow, normalizedAction);
+    const visualContext = await prepareOpenSpecVisualContextAction(workspaceRoot, workflow, normalizedAction, startedAt);
+    normalizedAction = visualContext.action;
+    run.params = normalizedAction.params || {};
+    run.openSpecArtifactInputSnapshot = normalizedAction.openSpecArtifactInputSnapshot;
+    run.openSpecVisualContextSnapshot = visualContext.snapshot;
+  }
   const artifactSnapshot = await captureControlledArtifactSnapshot(workspaceRoot, workflow);
 
   async function appendChangedArtifactEvents(updatedRun: RunRecord): Promise<void> {
@@ -570,6 +643,71 @@ export async function executeAction(
   const projectPaths = options.projectPaths || [];
   if (!(await ensureStagedReviewHasChanges(workspaceRoot, workflow, params, run, projectPaths))) {
     return run;
+  }
+
+  if (normalizedAction.actionType === 'DESIGN_GENERATE') {
+    const memoryRecall = memoryRecallActionInput(normalizedAction);
+    if (memoryRecall?.enabled) {
+      try {
+        const recall = await confirmMemoryRecallForRun(workspaceRoot, workflow, {
+          projectId: options.projectId,
+          actionType: normalizedAction.actionType,
+          stage: run.stage,
+          runId: run.id,
+          previewId: memoryRecall.previewId,
+          selectedMemoryIds: memoryRecall.selectedMemoryIds || [],
+          dismissed: memoryRecall.dismissed || [],
+          force: memoryRecall.force,
+          sourceFilePaths: asStringArray(normalizedAction.params?.sourceFiles),
+          clarification: asString(normalizedAction.params?.clarification),
+          runIntent: '生成技术方案'
+        });
+        if (recall.recallPath) {
+          const sourceFiles = asStringArray(normalizedAction.params?.sourceFiles);
+          normalizedAction = {
+            ...normalizedAction,
+            params: {
+              ...(normalizedAction.params || {}),
+              sourceFiles: uniqueNonEmpty([...sourceFiles, recall.recallPath])
+            }
+          };
+          run.params = normalizedAction.params || {};
+          await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
+            type: 'INFO',
+            level: 'INFO',
+            message: `已召回项目记忆: ${recall.recallPath}`,
+            data: { recallPath: recall.recallPath, memoryCount: recall.records.length }
+          });
+        }
+      } catch (error: any) {
+        await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
+          type: 'WARN',
+          level: 'WARN',
+          message: `项目记忆召回确认失败，已跳过本次反哺：${error?.message || 'unknown error'}`
+        });
+      }
+    } else if (memoryRecall?.enabled === false) {
+      await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
+        type: 'INFO',
+        level: 'INFO',
+        message: '用户未启用项目记忆召回，本次生成不注入项目记忆'
+      });
+    }
+  }
+
+  const supplementSnapshot = await prepareSupplementInputSnapshotAction(workspaceRoot, workflow, normalizedAction, {
+    runId: run.id,
+    capturedAt: startedAt
+  });
+  normalizedAction = supplementSnapshot.action;
+  run.params = normalizedAction.params || {};
+  if (supplementSnapshot.snapshotPath) {
+    await appendRunEvent(workspaceRoot, workflow.requirementId, run.id, {
+      type: 'INFO',
+      level: 'INFO',
+      message: `已生成补充输入快照: ${supplementSnapshot.snapshotPath}`,
+      data: { supplementInputPath: supplementSnapshot.snapshotPath }
+    });
   }
 
   const commandText = buildSkillCommand(workflow, normalizedAction);
@@ -675,6 +813,8 @@ export async function executeAction(
 
 export const internalForTests = {
   buildSkillCommand,
+  hasCompleteOpenSpecArtifacts,
+  openSpecArtifactSkillName,
   existingTechDesignQuestionPaths,
   isTechnicalDesignQuestionPath,
   isAgentAction,

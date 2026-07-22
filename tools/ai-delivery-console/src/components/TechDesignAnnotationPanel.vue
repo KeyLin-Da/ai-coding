@@ -7,9 +7,15 @@
         <el-button :icon="Fold" size="small" circle title="收起批注" @click="$emit('collapse')" />
       </span>
     </div>
-    <div class="annotation-list">
+    <div ref="annotationListRef" class="annotation-list">
       <el-empty v-if="!annotations.length" description="当前版本暂无批注" />
-      <article v-for="annotation in annotations" :key="annotation.id" class="annotation-item">
+      <article
+        v-for="annotation in annotations"
+        :key="annotation.id"
+        class="annotation-item"
+        :class="{ 'annotation-item--flash': flashingAnnotationId === annotation.id }"
+        :data-annotation-id="annotation.id"
+      >
         <div class="annotation-item-header">
           <el-tag size="small" :type="tagType(annotation)" effect="light">{{ statusText(annotation) }}</el-tag>
           <small>{{ versionText(annotation) }}</small>
@@ -37,7 +43,7 @@
           <el-checkbox
             v-if="!readonly && !annotation.consumedAt"
             :model-value="annotation.includeInNextGeneration"
-            :disabled="annotation.status === 'RESOLVED'"
+            :disabled="isResolved(annotation)"
             @change="(value) => $emit('toggle-include', annotation, value === true)"
           >
             纳入生成
@@ -49,7 +55,7 @@
             <el-button v-if="canReply(annotation)" size="small" title="回复批注" @click="$emit('reply', annotation)">回复</el-button>
             <el-button :icon="Aim" size="small" circle title="定位批注" @click="$emit('locate', annotation)" />
             <el-button
-              v-if="!readonly && annotation.status !== 'RESOLVED'"
+              v-if="!readonly && !isResolved(annotation)"
               :icon="Check"
               size="small"
               circle
@@ -65,6 +71,7 @@
 </template>
 
 <script setup lang="ts">
+import { nextTick, onUnmounted, ref } from 'vue';
 import { Aim, Check, Delete, Fold } from '@element-plus/icons-vue';
 import type { TechDesignAnnotation, TechDesignAnnotationReply, TechDesignAnnotationStatus } from '@shared/workflow';
 
@@ -94,9 +101,44 @@ defineEmits<{
   (event: 'collapse'): void;
 }>();
 
+const annotationListRef = ref<HTMLElement>();
+const flashingAnnotationId = ref('');
+let flashTimer: ReturnType<typeof setTimeout> | undefined;
+
+function focusAnnotation(annotationId: string): void {
+  const item = Array.from(annotationListRef.value?.querySelectorAll<HTMLElement>('[data-annotation-id]') || []).find(
+    (element) => element.dataset.annotationId === annotationId
+  );
+  if (!item) {
+    return;
+  }
+  item.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  flashingAnnotationId.value = annotationId;
+  if (flashTimer) {
+    clearTimeout(flashTimer);
+  }
+  flashTimer = setTimeout(() => {
+    if (flashingAnnotationId.value === annotationId) {
+      flashingAnnotationId.value = '';
+    }
+  }, 1400);
+}
+
+defineExpose({
+  focusAnnotation: (annotationId: string) => {
+    void nextTick().then(() => focusAnnotation(annotationId));
+  }
+});
+
+onUnmounted(() => {
+  if (flashTimer) {
+    clearTimeout(flashTimer);
+  }
+});
+
 function statusText(annotation: TechDesignAnnotation): string {
-  if (annotation.status !== 'RESOLVED' && annotation.consumedAt) {
-    return '已处理待确认';
+  if (isResolved(annotation)) {
+    return '已解决';
   }
   const labels: Record<TechDesignAnnotationStatus, string> = {
     OPEN: '未解决',
@@ -108,11 +150,14 @@ function statusText(annotation: TechDesignAnnotation): string {
 }
 
 function tagType(annotation: TechDesignAnnotation): 'primary' | 'success' | 'warning' | 'info' {
-  if (annotation.status === 'RESOLVED') return 'success';
-  if (annotation.consumedAt) return 'primary';
+  if (isResolved(annotation)) return 'success';
   if (annotation.status === 'STALE') return 'warning';
   if (annotation.status === 'CARRIED_FORWARD') return 'primary';
   return 'info';
+}
+
+function isResolved(annotation: TechDesignAnnotation): boolean {
+  return annotation.status === 'RESOLVED' || Boolean(annotation.consumedAt);
 }
 
 function versionText(annotation: TechDesignAnnotation): string {
@@ -132,7 +177,7 @@ function canDelete(annotation: TechDesignAnnotation): boolean {
 }
 
 function canReply(annotation: TechDesignAnnotation): boolean {
-  return annotation.status !== 'RESOLVED' && (!props.readonly || props.replyableAnnotationIds.includes(annotation.id));
+  return !isResolved(annotation) && (!props.readonly || props.replyableAnnotationIds.includes(annotation.id));
 }
 
 function canDeleteReply(reply: TechDesignAnnotationReply): boolean {
@@ -189,8 +234,18 @@ function timeText(value?: string): string {
 }
 
 .annotation-item {
-  padding: 12px 0;
+  margin: 0 -8px;
+  padding: 12px 8px;
   border-bottom: 1px solid #edf0f5;
+  border-radius: 6px;
+  transition:
+    background-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.annotation-item--flash {
+  background: #fff7c2;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.28), 0 8px 22px rgba(245, 158, 11, 0.16);
 }
 
 .annotation-item-header,

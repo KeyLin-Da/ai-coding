@@ -11,6 +11,15 @@ import {
 
 const TERMINAL_TRANSCRIPT_MAX_BYTES = 256 * 1024;
 
+export function stripTerminalControlSequences(text: string): string {
+  return text
+    .replace(/\x1B\][^\x07]*(?:\x07|\x1B\\)/g, '')
+    .replace(/[\x1B\x9B]\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/\x1B[@-Z\\-_]/g, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n');
+}
+
 export function createRunId(): string {
   return createId('run');
 }
@@ -132,7 +141,7 @@ export async function readTerminalTranscriptChunk(
     const file = await fs.open(absoluteTranscriptPath, 'r');
     try {
       const result = await file.read(buffer, 0, readLength, readStart);
-      const text = buffer.subarray(0, result.bytesRead).toString('utf8');
+      const text = stripTerminalControlSequences(buffer.subarray(0, result.bytesRead).toString('utf8'));
       const prefix = readStart > safeOffset ? `[AI Delivery] Transcript 过长，仅显示最新 ${maxBytes} bytes。\n` : '';
       return {
         nextOffset: stat.size,

@@ -43,9 +43,37 @@ export function artifactReadUrl(filePath: string, projectId?: string | number): 
   return resolveRunnerApiUrl(`/api/artifacts/read?${params.toString()}`);
 }
 
+function encodePathSegments(filePath: string): string {
+  return String(filePath || '')
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+}
+
+function encodeViewContext(projectId?: string | number): string {
+  const runtime = getApiRuntimeConfig();
+  return encodeURIComponent(
+    JSON.stringify({
+      projectId: projectId ? String(projectId) : runtime.projectId,
+      clientSessionId: runtime.clientSessionId,
+      userId: runtime.userId,
+      centerBaseUrl: runtime.centerBaseUrl
+    })
+  );
+}
+
+export function artifactViewUrl(filePath: string, projectId?: string | number): string {
+  return resolveRunnerApiUrl(`/api/artifacts/view/context/${encodeViewContext(projectId)}/${encodePathSegments(filePath)}`);
+}
+
 export function publicArtifactAssetUrl(token: string, filePath: string): string {
   const params = new URLSearchParams({ path: filePath });
   return resolveRunnerApiUrl(`/api/ai-delivery/public-artifact-shares/${encodeURIComponent(token)}/assets?${params.toString()}`);
+}
+
+export function publicArtifactViewUrl(token: string, filePath: string): string {
+  return resolveRunnerApiUrl(`/api/ai-delivery/public-artifact-shares/${encodeURIComponent(token)}/view/${encodePathSegments(filePath)}`);
 }
 
 export function resolveMarkdownAssetPath(markdownPath: string, src: string): string {

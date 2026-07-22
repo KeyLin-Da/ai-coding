@@ -1,6 +1,13 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { setApiRuntimeConfig } from '../../src/api/runtime';
-import { artifactReadUrl, publicArtifactAssetUrl, resolveMarkdownAssetPath, rewriteMarkdownImageSources } from '../../src/utils/markdown-assets';
+import {
+  artifactReadUrl,
+  artifactViewUrl,
+  publicArtifactAssetUrl,
+  publicArtifactViewUrl,
+  resolveMarkdownAssetPath,
+  rewriteMarkdownImageSources
+} from '../../src/utils/markdown-assets';
 
 describe('markdown-assets', () => {
   beforeEach(() => {
@@ -68,6 +75,27 @@ describe('markdown-assets', () => {
     );
   });
 
+  it('HTML 目录型产物使用带上下文的 path-style 预览 URL', () => {
+    setApiRuntimeConfig({
+      centerBaseUrl: 'http://center.example.com',
+      userId: '1',
+      projectId: '5',
+      clientSessionId: '16'
+    });
+
+    const url = artifactViewUrl('docs/141846/junit/index.html', 42);
+
+    expect(url).toContain('/runner-api/api/artifacts/view/context/');
+    expect(url).toContain('/docs/141846/junit/index.html');
+    const encodedContext = url.match(/\/context\/([^/]+)\//)?.[1] || '';
+    expect(JSON.parse(decodeURIComponent(encodedContext))).toMatchObject({
+      projectId: '42',
+      userId: '1',
+      clientSessionId: '16',
+      centerBaseUrl: 'http://center.example.com'
+    });
+  });
+
   it('公开分享图片地址改写到公开 assets 接口', () => {
     const html = '<img src="files/screen.png" alt="screen">';
     const rewritten = rewriteMarkdownImageSources(
@@ -78,6 +106,12 @@ describe('markdown-assets', () => {
 
     expect(rewritten).toContain(
       'src="/runner-api/api/ai-delivery/public-artifact-shares/share-token/assets?path=docs%2F141846%2Fprd%2Ffiles%2Fscreen.png"'
+    );
+  });
+
+  it('公开 HTML 目录型产物使用 token path-style 预览 URL', () => {
+    expect(publicArtifactViewUrl('share-token', 'docs/141846/junit/index.html')).toBe(
+      '/runner-api/api/ai-delivery/public-artifact-shares/share-token/view/docs/141846/junit/index.html'
     );
   });
 });

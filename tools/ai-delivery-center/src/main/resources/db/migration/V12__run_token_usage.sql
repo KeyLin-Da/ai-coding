@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS ad_run_token_usage (
     job_id BIGINT NULL COMMENT '任务ID，关联 ad_job.id',
     client_session_id BIGINT NULL COMMENT '执行客户端会话ID，关联 ad_client_session.id',
     agent_id VARCHAR(64) NULL COMMENT '执行使用的 Agent Provider ID',
-    stage VARCHAR(32) NULL COMMENT '流程阶段：PRD、TECH_DESIGN、IMPLEMENTATION、CODE_REVIEW',
+    stage VARCHAR(32) NULL COMMENT '流程阶段：PRD、TECH_DESIGN、IMPLEMENTATION、CODE_REVIEW、RETROSPECTIVE',
     implementation_step VARCHAR(64) NULL COMMENT '实施阶段细分步骤',
     model VARCHAR(128) NULL COMMENT '模型名称，未知时为空',
     source_event_type VARCHAR(64) NOT NULL COMMENT '来源事件类型，如 turn.completed',

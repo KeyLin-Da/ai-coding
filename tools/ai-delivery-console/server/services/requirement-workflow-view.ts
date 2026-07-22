@@ -1,5 +1,6 @@
 import type {
   ImplementationStep,
+  RequirementInput,
   RequirementType,
   RequirementWorkflow,
   ReviewDecision,
@@ -150,7 +151,7 @@ function hasIncompleteImplementationApproval(
   reviews: ReviewRecord[],
   currentStage: WorkflowStage | 'DONE'
 ): boolean {
-  if (currentStage === 'CODE_REVIEW' || currentStage === 'DONE') {
+  if (currentStage === 'CODE_REVIEW' || currentStage === 'RETROSPECTIVE' || currentStage === 'DONE') {
     return false;
   }
   return (
@@ -249,9 +250,16 @@ export function mergeRequirementWorkflow(centerWorkflow: RequirementWorkflow, lo
     jobStatus: centerWorkflow.jobStatus,
     lastEventId: centerWorkflow.lastEventId
   };
+  const derivedCurrentStage = deriveCurrentStage(merged);
+  const currentStage = centerWorkflow.currentStage === 'DONE' && derivedCurrentStage !== 'DONE'
+    ? derivedCurrentStage
+    : centerWorkflow.currentStage === 'DONE'
+      ? 'DONE'
+      : derivedCurrentStage;
   return {
     ...merged,
-    currentStage: centerWorkflow.currentStage === 'DONE' ? 'DONE' : deriveCurrentStage(merged)
+    currentStage,
+    status: currentStage === 'DONE' ? 'DONE' : merged.status === 'DONE' ? 'IN_PROGRESS' : merged.status
   };
 }
 
@@ -278,6 +286,28 @@ export async function loadCenterRequirementWorkflow(context: LocalRequestContext
     }
     throw error;
   }
+}
+
+export async function upsertCenterRequirement(
+  context: LocalRequestContext,
+  input: RequirementInput
+): Promise<RequirementWorkflow> {
+  const projectId = requireProjectId(context);
+  const payload = await centerRequest<CenterRequirementPayload>(context, '/api/ai-delivery/requirements', {
+    method: 'POST',
+    body: JSON.stringify({
+      projectId: Number(projectId),
+      requirementId: input.requirementId,
+      title: input.title || input.requirementId,
+      requirementType: input.requirementType || 'REQUIREMENT',
+      branchName: input.branchName,
+      projectNames: (input.projects || [])
+        .map((project) => String(project.name || '').trim())
+        .filter(Boolean)
+    })
+  });
+  centerRequirementCache.delete(centerRequirementCacheKey(context, input.requirementId));
+  return centerRequirementToWorkflow(payload);
 }
 
 export async function loadCachedCenterRequirementWorkflow(

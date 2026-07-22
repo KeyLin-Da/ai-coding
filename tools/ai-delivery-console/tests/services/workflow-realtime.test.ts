@@ -226,4 +226,27 @@ describe('workflow realtime hints', () => {
     expect(ensureRealtimeClient).not.toHaveBeenCalled();
     expect(store.runEventSource).toBeTruthy();
   });
+
+  it('本地 Runner 日志流结束后刷新当前需求和列表', async () => {
+    const store = useWorkflowStore();
+    store.current = workflow();
+    const source = {
+      close: vi.fn(),
+      onmessage: undefined as ((event: MessageEvent) => void) | undefined,
+      onerror: undefined as (() => void) | undefined
+    } as unknown as EventSource;
+    vi.spyOn(apiClient, 'openRunEventStream').mockReturnValue(source);
+    const loadRequirement = vi.spyOn(store, 'loadRequirement').mockResolvedValue(undefined);
+    const loadRequirements = vi.spyOn(store, 'loadRequirements').mockResolvedValue(undefined);
+
+    store.streamRunEvents('run-20260617110658-10d25f');
+    source.onerror?.();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(source.close).toHaveBeenCalled();
+    expect(store.runEventSource).toBeUndefined();
+    expect(store.activeRunId).toBeUndefined();
+    expect(loadRequirement).toHaveBeenCalledWith('172014');
+    expect(loadRequirements).toHaveBeenCalledTimes(1);
+  });
 });

@@ -140,19 +140,33 @@ export function flattenTreeRows<T extends GitTreeFileLike>(
 }
 
 export function extractFileDiff(diff: string, filePath: string): string {
-  const sections = diff
-    .split(/^diff --git /gm)
-    .filter(Boolean)
-    .map((section) => `diff --git ${section}`);
-  return sections.find((section) => section.includes(` b/${filePath}`) || section.includes(` a/${filePath}`) || section.includes(filePath)) || '';
+  return extractFileDiffSections(diff, filePath)[0] || '';
 }
 
 export function extractFilesDiff(diff: string, filePaths: string[]): string {
   if (!filePaths.length) {
     return '';
   }
-  const byPath = filePaths.map((filePath) => extractFileDiff(diff, filePath)).filter(Boolean);
+  const byPath = filePaths.flatMap((filePath) => extractFileDiffSections(diff, filePath)).filter(Boolean);
   return [...new Set(byPath)].join('\n');
+}
+
+export function extractFileDiffSections(diff: string, filePath: string): string[] {
+  const normalizedPath = normalizeDiffPath(filePath);
+  if (!diff.trim() || !normalizedPath) {
+    return [];
+  }
+  return splitDiffSections(diff).filter((section) => diffSectionMatchesPath(section, normalizedPath));
+}
+
+export function findFirstChangedNewLine(diff: string): number | undefined {
+  for (const section of splitDiffSections(diff)) {
+    const line = firstChangedLineInSection(section);
+    if (line != null) {
+      return line;
+    }
+  }
+  return undefined;
 }
 
 export function filePathToneClass(file?: GitTreeFileLike): string {
@@ -167,4 +181,63 @@ export function filePathToneClass(file?: GitTreeFileLike): string {
     return 'git-file-path-modified';
   }
   return '';
+}
+
+function normalizeDiffPath(filePath: string): string {
+  return String(filePath || '').trim().replace(/\\/g, '/').replace(/^\/+/, '');
+}
+
+function splitDiffSections(diff: string): string[] {
+  return diff
+    .split(/^diff --git /gm)
+    .filter(Boolean)
+    .map((section) => `diff --git ${section}`);
+}
+
+function diffSectionMatchesPath(section: string, filePath: string): boolean {
+  return (
+    section.includes(` a/${filePath} `) ||
+    section.includes(` b/${filePath}`) ||
+    section.includes(`--- a/${filePath}`) ||
+    section.includes(`+++ b/${filePath}`) ||
+    section.includes(`rename from ${filePath}`) ||
+    section.includes(`rename to ${filePath}`)
+  );
+}
+
+function firstChangedLineInSection(section: string): number | undefined {
+  let currentNewLine = 0;
+  let fallbackLine: number | undefined;
+  let sawDeletion = false;
+
+  for (const line of section.split('\n')) {
+    const hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    if (hunk) {
+      currentNewLine = Number(hunk[1]);
+      fallbackLine = currentNewLine;
+      sawDeletion = false;
+      continue;
+    }
+    if (!fallbackLine) {
+      continue;
+    }
+    if (line.startsWith('+++')) {
+      continue;
+    }
+    if (line.startsWith('+')) {
+      return currentNewLine;
+    }
+    if (line.startsWith('-') && !line.startsWith('---')) {
+      sawDeletion = true;
+      continue;
+    }
+    if (line.startsWith(' ')) {
+      if (sawDeletion) {
+        return currentNewLine;
+      }
+      currentNewLine += 1;
+    }
+  }
+
+  return fallbackLine;
 }

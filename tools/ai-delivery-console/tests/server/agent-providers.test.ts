@@ -12,6 +12,7 @@ import {
   listAgentProviders,
   refreshTerminalRunStatuses,
   retryWorkflowCenterRunStatuses,
+  startAgentInTerminal,
   startAgentProcess,
   terminalCommandLine
 } from '../../server/services/agent-providers';
@@ -435,6 +436,48 @@ describe('agent-providers', () => {
     expect(script).toContain("EXECUTION_MODE='INTERACTIVE_TERMINAL'");
     expect(script).toContain("EXECUTION_MODE_LABEL='交互终端'");
     expect(script).toContain('script -q -a "$TRANSCRIPT_FILE" zsh -lc "setopt pipefail; $COMMAND_PREVIEW"');
+  });
+
+  it('终端 launcher 长时间不退出时仍返回 TERMINAL_OPENED', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-terminal-launch-'));
+    const originalCommand = process.env.AI_DELIVERY_TERMINAL_COMMAND;
+    const originalGraceMs = process.env.AI_DELIVERY_TERMINAL_LAUNCH_GRACE_MS;
+    process.env.AI_DELIVERY_TERMINAL_COMMAND = `${process.execPath} -e "setTimeout(() => {}, 300)"`;
+    process.env.AI_DELIVERY_TERMINAL_LAUNCH_GRACE_MS = '20';
+    const provider: AgentProvider = {
+      id: 'interactive-agent',
+      name: 'Interactive Agent',
+      inputMode: 'PROMPT_FILE',
+      command: ['background-agent'],
+      interactiveCommand: ['interactive-agent', '--prompt', '{prompt}'],
+      available: true,
+      supportsStreaming: true,
+      supportsInteractive: true
+    };
+    const run = {
+      ...runRecord('run-interactive-opened'),
+      executionMode: 'INTERACTIVE_TERMINAL' as const
+    };
+
+    try {
+      const startedAt = Date.now();
+      const result = await startAgentInTerminal(root, workflow(), run, provider, '/coding-prd-analyzer id=172014');
+      const elapsedMs = Date.now() - startedAt;
+
+      expect(result.status).toBe('TERMINAL_OPENED');
+      expect(elapsedMs).toBeLessThan(250);
+    } finally {
+      if (originalCommand === undefined) {
+        delete process.env.AI_DELIVERY_TERMINAL_COMMAND;
+      } else {
+        process.env.AI_DELIVERY_TERMINAL_COMMAND = originalCommand;
+      }
+      if (originalGraceMs === undefined) {
+        delete process.env.AI_DELIVERY_TERMINAL_LAUNCH_GRACE_MS;
+      } else {
+        process.env.AI_DELIVERY_TERMINAL_LAUNCH_GRACE_MS = originalGraceMs;
+      }
+    }
   });
 
   it('CodeBuddy 交互终端脚本通过 prompt 参数进入 TUI', async () => {
