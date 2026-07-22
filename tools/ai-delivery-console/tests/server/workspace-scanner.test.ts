@@ -7,20 +7,32 @@ import { scanRequirementArtifacts } from '../../server/services/workspace-scanne
 async function makeFixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-delivery-scan-'));
   await fs.mkdir(path.join(root, 'docs', '172014', 'prd'), { recursive: true });
+  await fs.mkdir(path.join(root, 'docs', '172014', 'prd', 'inputs', 'supplements'), { recursive: true });
   await fs.mkdir(path.join(root, 'docs', '172014', 'technical-design', 'file'), { recursive: true });
+  await fs.mkdir(path.join(root, 'docs', '172014', 'technical-design', 'inputs', 'supplements'), { recursive: true });
   await fs.mkdir(path.join(root, 'docs', '172014', 'technical-design', 'questions'), { recursive: true });
+  await fs.mkdir(path.join(root, 'docs', '172014', 'implementation', 'artifact-review', 'inputs', 'supplements'), { recursive: true });
   await fs.mkdir(path.join(root, 'docs', '172014', 'junit', 'req-172014'), { recursive: true });
   await fs.mkdir(path.join(root, 'openspec', 'changes', 'req-172014'), { recursive: true });
   await fs.mkdir(path.join(root, 'docs', '172014', 'code-review', 'commit'), { recursive: true });
   await fs.mkdir(path.join(root, 'docs', '172014', 'code-review', 'staged'), { recursive: true });
   await fs.mkdir(path.join(root, 'docs', 'code_review', 'code_review_feature_opp_172014'), { recursive: true });
   await fs.writeFile(path.join(root, 'docs', '172014', 'prd', 'analysis.md'), '# PRD');
+  await fs.writeFile(path.join(root, 'docs', '172014', 'prd', 'inputs', 'supplements', '20260717090000-prd_analyze-run-1.md'), '# PRD Supplement');
   await fs.writeFile(path.join(root, 'docs', '172014', 'technical-design', 'design_review.md'), '# Design');
   await fs.writeFile(path.join(root, 'docs', '172014', 'technical-design', 'questions.md'), '# Questions');
   await fs.writeFile(path.join(root, 'docs', '172014', 'technical-design', 'input-ledger.json'), '{"version":1,"entries":[]}');
+  await fs.writeFile(
+    path.join(root, 'docs', '172014', 'technical-design', 'inputs', 'supplements', '20260717090100-design_generate-run-2.md'),
+    '# Design Supplement'
+  );
   await fs.writeFile(path.join(root, 'docs', '172014', 'technical-design', 'questions', '20260604-173000-question.md'), '# Question');
   await fs.writeFile(path.join(root, 'docs', '172014', 'technical-design', 'file', 'old-design.md'), '# Old Design');
   await fs.writeFile(path.join(root, 'docs', '172014', 'technical-design', 'file', 'screenshot.png'), 'png');
+  await fs.writeFile(
+    path.join(root, 'docs', '172014', 'implementation', 'artifact-review', 'inputs', 'supplements', '20260717090200-openspec_ff-run-3.md'),
+    '# OpenSpec Supplement'
+  );
   await fs.writeFile(path.join(root, 'docs', '172014', 'junit', 'req-172014', 'report.md'), '# JUnit');
   await fs.writeFile(path.join(root, 'docs', '172014', 'code-review', 'summary.md'), '# Review Index');
   await fs.writeFile(path.join(root, 'docs', '172014', 'code-review', 'commit', 'summary.md'), '# Commit Review');
@@ -36,13 +48,16 @@ describe('workspace-scanner', () => {
     expect(artifacts.filter((item) => item.exists).map((item) => item.path)).toEqual(
       expect.arrayContaining([
         'docs/172014/prd/analysis.md',
+        'docs/172014/prd/inputs/supplements/20260717090000-prd_analyze-run-1.md',
         'docs/172014/technical-design/design_review.md',
         'docs/172014/technical-design/input-ledger.json',
+        'docs/172014/technical-design/inputs/supplements/20260717090100-design_generate-run-2.md',
         'docs/172014/technical-design/questions/20260604-173000-question.md',
         'docs/172014/technical-design/questions.md',
         'docs/172014/technical-design/file/old-design.md',
         'docs/172014/technical-design/file/screenshot.png',
         'openspec/changes/req-172014',
+        'docs/172014/implementation/artifact-review/inputs/supplements/20260717090200-openspec_ff-run-3.md',
         'docs/172014/junit/req-172014/report.md',
         'docs/172014/code-review/summary.md',
         'docs/172014/code-review/commit/summary.md',
@@ -76,6 +91,27 @@ describe('workspace-scanner', () => {
       stage: 'TECH_DESIGN',
       label: '技术方案输入消费台账',
       kind: 'json',
+      exists: true
+    });
+    const prdSupplement = artifacts.find((item) => item.path === 'docs/172014/prd/inputs/supplements/20260717090000-prd_analyze-run-1.md');
+    expect(prdSupplement).toMatchObject({
+      stage: 'PRD',
+      label: 'PRD 补充输入 20260717090000-prd_analyze-run-1',
+      kind: 'markdown',
+      exists: true
+    });
+    const designSupplement = artifacts.find((item) => item.path === 'docs/172014/technical-design/inputs/supplements/20260717090100-design_generate-run-2.md');
+    expect(designSupplement).toMatchObject({
+      stage: 'TECH_DESIGN',
+      label: '技术方案补充输入 20260717090100-design_generate-run-2',
+      kind: 'markdown',
+      exists: true
+    });
+    const openSpecSupplement = artifacts.find((item) => item.path === 'docs/172014/implementation/artifact-review/inputs/supplements/20260717090200-openspec_ff-run-3.md');
+    expect(openSpecSupplement).toMatchObject({
+      stage: 'IMPLEMENTATION',
+      label: 'OpenSpec 工件输入 20260717090200-openspec_ff-run-3',
+      kind: 'markdown',
       exists: true
     });
   });

@@ -22,7 +22,7 @@
         </span>
       </el-option>
     </el-select>
-    <el-button size="small" :disabled="versions.length < 2 || !modelValue" @click="$emit('compare')">对比版本</el-button>
+    <el-button v-if="showCompare" size="small" :disabled="versions.length < 2 || !modelValue" @click="$emit('compare')">对比版本</el-button>
   </div>
 </template>
 
@@ -34,9 +34,11 @@ withDefaults(
     modelValue: string;
     versions: TechDesignVersion[];
     loading?: boolean;
+    showCompare?: boolean;
   }>(),
   {
-    loading: false
+    loading: false,
+    showCompare: true
   }
 );
 

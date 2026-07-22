@@ -23,6 +23,8 @@ vi.mock('@/api/client', () => ({
     listProjectHistory: vi.fn(),
     listProjects: vi.fn(),
     createRequirement: vi.fn(),
+    getAiCodeCompleteness: vi.fn(),
+    calculateAiCodeCompleteness: vi.fn(),
     listProjectTokenUsageSummaries: vi.fn()
   }
 }));
@@ -109,6 +111,10 @@ function componentStubs() {
       emits: ['update:currentPage', 'update:pageSize'],
       template: '<nav>{{ total }}</nav>'
     },
+    ElAlert: {
+      props: ['title'],
+      template: '<div>{{ title }}</div>'
+    },
     ElTable: { template: '<div><slot /></div>' },
     ElTableColumn: { template: '<div />' },
     ElTag: { template: '<span><slot /></span>' },
@@ -164,6 +170,55 @@ async function mountList(current: RequirementWorkflow | RequirementWorkflow[] = 
         path: 'opp-diy'
       }
     ]
+  });
+  vi.mocked(apiClient.getAiCodeCompleteness).mockResolvedValue({
+    status: 'NOT_READY',
+    projects: workflows[0].projects?.map((project) => ({
+      projectName: project.name,
+      projectPath: project.path
+    })) || []
+  });
+  vi.mocked(apiClient.calculateAiCodeCompleteness).mockResolvedValue({
+    result: {
+      requirementId: workflows[0].requirementId,
+      status: 'CALCULATED',
+      projects: [],
+      summary: {
+        aiAdditions: 10,
+        aiDeletions: 0,
+        aiChangeLines: 10,
+        aiChangedFiles: 1,
+        followUpAdditions: 2,
+        followUpDeletions: 0,
+        followUpChangeLines: 2,
+        followUpChangedFiles: 1,
+        stableAiFiles: 0,
+        completenessRate: 83.333,
+        followUpAdjustmentRate: 20,
+        aiFileStabilityRate: 0
+      }
+    },
+    workflow: {
+      ...workflows[0],
+      aiCodeCompleteness: {
+        status: 'CALCULATED',
+        projects: [],
+        summary: {
+          aiAdditions: 10,
+          aiDeletions: 0,
+          aiChangeLines: 10,
+          aiChangedFiles: 1,
+          followUpAdditions: 2,
+          followUpDeletions: 0,
+          followUpChangeLines: 2,
+          followUpChangedFiles: 1,
+          stableAiFiles: 0,
+          completenessRate: 83.333,
+          followUpAdjustmentRate: 20,
+          aiFileStabilityRate: 0
+        }
+      }
+    }
   });
   vi.mocked(apiClient.listProjectTokenUsageSummaries).mockResolvedValue([]);
 
@@ -306,6 +361,34 @@ describe('RequirementList', () => {
 
     expect((wrapper.vm as any).tokenUsageFor(current).summary.totalTokens).toBe(61129);
     expect((wrapper.vm as any).formatTokenCount(61129)).toBe('61.1K');
+  });
+
+  it('支持打开 AI 完整度弹窗维护 commit 并计算当前需求', async () => {
+    const current = workflow();
+    const wrapper = await mountList(current);
+
+    await (wrapper.vm as any).openAiCompletenessDialog(current);
+    await flushPromises();
+
+    expect(apiClient.getAiCodeCompleteness).toHaveBeenCalledWith('172014');
+    expect((wrapper.vm as any).aiCompletenessProjects[0].projectPath).toBe('opp-api');
+    (wrapper.vm as any).aiCompletenessProjects[0].baseCommit = 'base';
+    (wrapper.vm as any).aiCompletenessProjects[0].aiCommit = 'ai';
+
+    await (wrapper.vm as any).calculateAiCompleteness();
+    await flushPromises();
+
+    expect(apiClient.calculateAiCodeCompleteness).toHaveBeenCalledWith('172014', {
+      projects: [
+        {
+          projectPath: 'opp-api',
+          projectName: 'opp-api',
+          baseCommit: 'base',
+          aiCommit: 'ai'
+        }
+      ]
+    });
+    expect((wrapper.vm as any).aiCompletenessText((wrapper.vm as any).store.requirements[0])).toBe('83.3%');
   });
 
   it('支持按标题或需求号、需求类型、阶段和涉及工程过滤并清空', async () => {

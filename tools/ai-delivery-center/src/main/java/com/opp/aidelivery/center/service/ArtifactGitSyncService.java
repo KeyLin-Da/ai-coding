@@ -242,6 +242,9 @@ public class ArtifactGitSyncService {
         if (filePath.contains("/code-review/") || filePath.contains("/code_review/")) {
             return "CODE_REVIEW";
         }
+        if (filePath.contains("/retrospective/")) {
+            return "RETROSPECTIVE";
+        }
         if (filePath.startsWith("openspec/")) {
             return "OPENSPEC";
         }

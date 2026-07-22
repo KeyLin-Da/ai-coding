@@ -1,0 +1,1094 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>164946_20260626155830_PRD_分析文档</title>
+  <style>
+    body {
+      margin: 0;
+      color: #1f2d2a;
+      background: #ffffff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      line-height: 1.68;
+    }
+    .artifact-markdown {
+      box-sizing: border-box;
+      width: 100%;
+      max-width: none;
+      min-height: 100vh;
+      margin: 0;
+      padding: 32px;
+      background: #ffffff;
+    }
+    h1, h2, h3, h4 {
+      color: #17231f;
+      line-height: 1.35;
+    }
+    code {
+      padding: 1px 4px;
+      border-radius: 3px;
+      background: #eef2f0;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    }
+    pre {
+      overflow: auto;
+      padding: 14px;
+      border-radius: 6px;
+      background: #f6f8fb;
+      white-space: pre-wrap;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th, td {
+      padding: 8px;
+      border: 1px solid #d7dee8;
+      vertical-align: top;
+    }
+    img, svg {
+      max-width: 100%;
+      height: auto;
+    }
+    .mermaid-diagram {
+      width: 100%;
+      margin: 24px 0 28px;
+      overflow-x: auto;
+      overflow-y: hidden;
+    }
+    .mermaid-diagram svg {
+      display: block;
+    }
+    @media print {
+      body {
+        background: #ffffff;
+      }
+      .artifact-markdown {
+        padding: 18mm 14mm;
+      }
+      .mermaid-diagram {
+        overflow: visible;
+        break-inside: avoid;
+      }
+      pre, table {
+        break-inside: avoid;
+      }
+    }
+  </style>
+</head>
+<body>
+  <article class="artifact-markdown"><h1 id="prd-功能点分析">PRD 功能点分析</h1>
+<hr>
+<p>需求编号: 164946<br>
+需求来源:</p>
+<ul>
+<li><a href="https://www.figma.com/design/SXmBPsnkTzxbM3APIoRKXM/%E5%AD%A6%E4%B9%A0%E6%88%90%E9%95%BF%E6%8E%92%E8%A1%8C%E6%A6%9C?node-id=292-563&amp;t=NO7RJ4awOT9wrV0l-0">https://www.figma.com/design/SXmBPsnkTzxbM3APIoRKXM/学习成长排行榜?node-id=292-563&amp;t=NO7RJ4awOT9wrV0l-0</a><br>
+分析时间: 2026-06-11 11:30:12 CST<br>
+澄清描述: 1.页面标题和指标名称最终使用学习成长排行榜 2.时间周期只有季度、年度，默认当前年度和季度 3.成长值来源是现有的会员积分明细，后续会改成成长值 4.同成长值用户的排序规则是最先达到的先展示 5.全国、区域、分公司维度当前季度使用实时组织关系，历史的还是统计时组织快照 6.本人已在 TOP50 中时，底部本人固定栏仍固定展示 7.“冲榜仅差 y 成长值”的 y 是差第 50 名 8.排行榜规则说明、成长值说明、上榜有礼、推荐学习的装修页地址会放到naocs上 9.上榜有礼、推荐学习的人群包 ID 还没有提供 10.分享海报底部操作按钮的正式文案和行为是保存海报到相册<br>
+状态: 待审查<br>
+运行ID: run-20260611032559-23f00c<br>
+关联工程: /Users/key.lin/work/Projects/opp/opp-learn</li>
+</ul>
+<hr>
+<h2 id="1-需求概述">1. 需求概述</h2>
+<p>本需求面向极易学/学习场景新增“学习成长排行榜”能力，页面标题和指标名称均统一使用“学习成长排行榜/成长值”。用户进入榜单页后，可按季度或年度以及地区维度查看全国、区域、分公司排行，页面展示 TOP3、TOP50 列表、本人固定信息、空状态和少量上榜状态；同时提供规则说明、成长值说明、悬浮入口、分享榜单海报、上榜有礼、推荐学习和行为埋点能力。成长值本期来源为现有会员积分明细，后续业务会将其正式迁移为成长值口径；内容渠道装修页地址将通过 Nacos 配置，人群包 ID 和埋点事件名仍待补充。</p>
+<h3 id="范围边界">范围边界</h3>
+<p><strong>本期必须交付 (P0)</strong>:</p>
+<ul>
+<li>学习成长排行榜主页面，包含默认榜单、数据更新时间、规则说明入口和成长值说明入口。</li>
+<li>年度/季度时间周期选择，默认当前年度和当前季度，以及全国、区域、分公司维度切换。</li>
+<li>TOP3、TOP50 列表、本人固定信息栏、无人上榜和 1 到 3 人少量上榜状态。</li>
+<li>悬浮入口展示、关闭、恢复和滚动收起逻辑。</li>
+<li>分享榜单入口，生成个人上榜海报和分公司、区域、全国 TOP10 海报，并支持“保存海报到相册”。</li>
+<li>上榜有礼、推荐学习入口按会员中心人群包控制展示。</li>
+<li>页面曝光、筛选、入口点击、分享、海报、去学习等关键行为埋点。</li>
+</ul>
+<p><strong>本期应该交付 (P1)</strong>:</p>
+<ul>
+<li>内容渠道跳转地址配置兜底和未配置提示策略。</li>
+<li>海报二维码识别后恢复榜单周期和地区维度上下文。</li>
+<li>榜单数据加载失败、海报生成失败、人群包判断失败的重试或降级提示。</li>
+<li>本人排名 51 到 100、100 名以后、成长值为 0 的差异化激励文案。</li>
+</ul>
+<p><strong>本期不做 (Won't)</strong>:</p>
+<ul>
+<li>不在本 PRD 分析中定义后端表结构、缓存 Key、接口路径或技术实现方案。</li>
+<li>不在缺少数据侧规范的情况下臆定正式埋点事件名。</li>
+<li>不覆盖运营后台装修页搭建本身，仅要求前台入口可按配置跳转。</li>
+<li>不扩展 Figma 未体现的好友分享、社交裂变或榜单评论能力。</li>
+</ul>
+<h2 id="2-页面一-学习成长排行榜主页面">2. 页面一：学习成长排行榜主页面</h2>
+<blockquote data-rich-preview="true">
+<p><strong>页面用途</strong>: 让用户查看指定周期和地区维度下的学习成长值排行，并了解本人当前排行状态。<br>
+<strong>参考截图</strong>: <img src="/runner-api/api/artifacts/read?path=docs%2F164946%2Fprd%2Ffiles%2Fscreenshots%2Franking_main_20260610.png&amp;projectId=5&amp;clientSessionId=16&amp;userId=1&amp;centerBaseUrl=http%3A%2F%2F127.0.0.1%3A8728" alt="排行榜主页面"></p>
+</blockquote>
+<h3 id="2-1-页面初始化与默认榜单展示">2.1 页面初始化与默认榜单展示</h3>
+<ul>
+<li><strong>类型</strong>: 页面</li>
+<li><strong>角色</strong>: C 端学习用户</li>
+<li><strong>用户故事</strong>: 作为学习用户，我想进入页面后直接看到与我组织相关的学习成长排行，以便了解自己的学习表现和追赶目标。</li>
+<li><strong>优先级</strong>: P0</li>
+<li><strong>描述</strong>: 页面初始化展示“学习成长排行榜”标题、激励文案、数据更新时间、时间周期、地区维度、榜单字段、TOP3、列表和本人信息。默认周期为当前年度和当前季度。</li>
+<li><strong>交互步骤</strong>:
+<ol>
+<li>用户从学习入口或二维码进入排行榜页面。</li>
+<li>页面读取登录用户身份、所属分公司和所属区域。</li>
+<li>页面按默认周期和默认地区维度加载榜单。</li>
+<li>页面展示数据更新时间和榜单内容。</li>
+</ol>
+</li>
+<li><strong>输入数据</strong>:
+<ul>
+<li>登录用户: 用户 ID、卡号、姓名、头像、所属分公司、所属区域（必填）。</li>
+<li>默认周期: 当前年度、当前季度（必填）。</li>
+<li>默认地区维度: 全国、区域、分公司（必填）。</li>
+<li>成长值来源: 本期取现有会员积分明细，后续迁移为正式成长值口径（必填）。</li>
+<li>榜单更新时间: 用于页面文案展示（必填）。</li>
+</ul>
+</li>
+<li><strong>状态变化</strong>: 初始加载中 -&gt; 榜单展示 | 空状态 | 加载失败提示。</li>
+<li><strong>异常场景</strong>:
+<ul>
+<li>未登录或登录失效 -&gt; 引导登录或展示业务错误。</li>
+<li>用户组织信息缺失 -&gt; 默认全国维度或提示无法定位组织。</li>
+<li>更新时间缺失 -&gt; 隐藏更新时间或展示兜底文案，不能展示错误时间。</li>
+</ul>
+</li>
+<li><strong>验收条件</strong>:
+<ul>
+<li>Given 用户已登录且存在榜单数据 When 进入排行榜页面 Then 默认展示当前年度、当前季度、地区维度、TOP3/列表、本人信息和更新时间。</li>
+<li>Given 榜单查询失败 When 页面初始化 Then 页面展示失败提示或重试入口，且不展示旧榜单数据。</li>
+</ul>
+</li>
+<li><strong>关联功能</strong>: 2.2, 2.3, 2.4, 2.5, 2.6, 5.1, 5.3</li>
+</ul>
+<h3 id="2-2-时间周期选择">2.2 时间周期选择</h3>
+<ul>
+<li><strong>类型</strong>: 弹窗</li>
+<li><strong>角色</strong>: C 端学习用户</li>
+<li><strong>用户故事</strong>: 作为学习用户，我想切换榜单统计周期，以便查看不同时间范围内的排行表现。</li>
+<li><strong>优先级</strong>: P0</li>
+<li><strong>描述</strong>: 用户通过周期选择器切换年度或季度；时间周期仅支持季度、年度两类，默认当前年度和当前季度。季度榜需选择年份和季度，年度榜仅选择年份。</li>
+<li><strong>参考截图</strong>:<br>
+<img src="/runner-api/api/artifacts/read?path=docs%2F164946%2Fprd%2Ffiles%2Fscreenshots%2Fselect_quarter_modal_20260610.png&amp;projectId=5&amp;clientSessionId=16&amp;userId=1&amp;centerBaseUrl=http%3A%2F%2F127.0.0.1%3A8728" alt="选择季度弹窗"><br>
+<img src="/runner-api/api/artifacts/read?path=docs%2F164946%2Fprd%2Ffiles%2Fscreenshots%2Fselect_year_modal_20260610.png&amp;projectId=5&amp;clientSessionId=16&amp;userId=1&amp;centerBaseUrl=http%3A%2F%2F127.0.0.1%3A8728" alt="选择年份弹窗"></li>
+<li><strong>交互步骤</strong>:
+<ol>
+<li>用户点击当前周期选择器。</li>
+<li>页面按当前周期类型打开年份或季度弹窗。</li>
+<li>用户点选目标年份、季度或年度口径。</li>
+<li>用户点击确认，页面刷新榜单、本人固定栏和分享上下文。</li>
+<li>用户点击取消或关闭弹窗，保持原周期。</li>
+</ol>
+</li>
+<li><strong>输入数据</strong>:
+<ul>
+<li>周期类型: 季度、年度（必填）。</li>
+<li>年份列表: 可选年份，至少包含当前业务年份（必填）。</li>
+<li>季度列表: 第一季度至第四季度或业务侧启用季度（季度榜必填）。</li>
+<li>当前已选周期: 用于回显选中态（必填）。</li>
+</ul>
+</li>
+<li><strong>状态变化</strong>: 原周期 -&gt; 临时选中 -&gt; 确认生效；临时选中 -&gt; 取消还原。</li>
+<li><strong>异常场景</strong>:
+<ul>
+<li>选中周期无数据 -&gt; 刷新后展示空状态。</li>
+<li>某周期未开放 -&gt; 禁用或不展示该选项。</li>
+<li>设计稿若存在“月度”命名 -&gt; 按本次澄清统一为季度/年度，不展示月度入口。</li>
+</ul>
+</li>
+<li><strong>验收条件</strong>:
+<ul>
+<li>Given 用户打开周期弹窗 When 选择新季度或年度并确认 Then 榜单、本人信息、海报上下文均使用新周期。</li>
+<li>Given 用户打开周期弹窗 When 点击取消 Then 页面仍使用原周期展示。</li>
+</ul>
+</li>
+<li><strong>关联功能</strong>: 2.1, 2.4, 2.5, 4.1, 5.1, 5.3</li>
+</ul>
+<h3 id="2-3-地区维度切换与地区选择">2.3 地区维度切换与地区选择</h3>
+<ul>
+<li><strong>类型</strong>: 弹窗</li>
+<li><strong>角色</strong>: C 端学习用户</li>
+<li><strong>用户故事</strong>: 作为学习用户，我想切换全国、区域或分公司榜单，以便比较不同组织范围内的学习成长排名。</li>
+<li><strong>优先级</strong>: P0</li>
+<li><strong>描述</strong>: 用户可在全国、区域、分公司之间切换；选择区域或分公司时打开弹窗，确认后刷新榜单。当前季度的全国、区域、分公司维度使用实时组织关系，历史周期使用统计时组织快照。设计稿说明分公司列表优先展示登录用户所在分公司，其余按首字母正序排序。</li>
+<li><strong>参考截图</strong>:<br>
+<img src="/runner-api/api/artifacts/read?path=docs%2F164946%2Fprd%2Ffiles%2Fscreenshots%2Fselect_company_modal_20260610.png&amp;projectId=5&amp;clientSessionId=16&amp;userId=1&amp;centerBaseUrl=http%3A%2F%2F127.0.0.1%3A8728" alt="选择分公司弹窗"><br>
+<img src="/runner-api/api/artifacts/read?path=docs%2F164946%2Fprd%2Ffiles%2Fscreenshots%2Fselect_region_modal_20260610.png&amp;projectId=5&amp;clientSessionId=16&amp;userId=1&amp;centerBaseUrl=http%3A%2F%2F127.0.0.1%3A8728" alt="选择区域弹窗"></li>
+<li><strong>交互步骤</strong>:
+<ol>
+<li>用户点击分公司、区域或全国维度。</li>
+<li>选择全国时直接刷新全国榜单。</li>
+<li>选择分公司或区域时打开对应弹窗。</li>
+<li>用户点选地区后点击确认。</li>
+<li>页面刷新榜单和本人固定栏。</li>
+</ol>
+</li>
+<li><strong>输入数据</strong>:
+<ul>
+<li>地区维度: 全国、区域、分公司（必填）。</li>
+<li>分公司列表: 分公司编码、名称、排序字段、是否当前用户所属分公司（必填）。</li>
+<li>区域列表: 区域编码、名称、排序字段、是否当前用户所属区域（必填）。</li>
+<li>当前地区编码: 用于回显选中态（选填，全国可为空）。</li>
+<li>组织关系口径: 当前季度实时组织关系；历史周期统计时组织快照（必填）。</li>
+</ul>
+</li>
+<li><strong>状态变化</strong>: 分公司榜 -&gt; 区域榜 -&gt; 全国榜；地区未选 -&gt; 临时选中 -&gt; 确认生效。</li>
+<li><strong>异常场景</strong>:
+<ul>
+<li>分公司/区域列表为空 -&gt; 隐藏对应选择入口或展示空提示。</li>
+<li>用户所属实时组织不在当前季度列表内 -&gt; 默认全国或列表首项，需产品确认。</li>
+<li>历史周期组织快照缺失 -&gt; 降级展示全国或提示暂无历史组织数据。</li>
+<li>全国维度无需二级弹窗，避免空弹窗。</li>
+</ul>
+</li>
+<li><strong>验收条件</strong>:
+<ul>
+<li>Given 用户选择分公司并确认 When 刷新完成 Then 页面展示该分公司的榜单、本人排名和更新时间。</li>
+<li>Given 用户点击全国维度 When 切换完成 Then 不出现选择弹窗并展示全国榜。</li>
+</ul>
+</li>
+<li><strong>关联功能</strong>: 2.1, 2.4, 2.5, 4.1, 5.1, 5.3</li>
+</ul>
+<h3 id="2-4-top3-与-top50-榜单展示">2.4 TOP3 与 TOP50 榜单展示</h3>
+<ul>
+<li><strong>类型</strong>: 组件</li>
+<li><strong>角色</strong>: C 端学习用户</li>
+<li><strong>用户故事</strong>: 作为学习用户，我想清晰看到榜单排名、用户信息和成长值，以便知道自己与优秀用户的差距。</li>
+<li><strong>优先级</strong>: P0</li>
+<li><strong>描述</strong>: 当前筛选条件下按成长值展示 TOP3 和第 4 至 50 名列表；底部提示榜单仅展示前 50 名。同成长值用户按最先达到该成长值的用户优先展示。</li>
+<li><strong>交互步骤</strong>:
+<ol>
+<li>页面获取当前筛选条件下的榜单数据。</li>
+<li>上榜人数大于 3 时，展示 TOP3 卡片和后续列表。</li>
+<li>用户向下滚动查看第 4 至 50 名。</li>
+<li>列表到底后展示“榜单仅显示前50名”类提示。</li>
+</ol>
+</li>
+<li><strong>输入数据</strong>:
+<ul>
+<li>榜单用户: 排名、姓名、头像、组织名称、成长值、是否当前用户（必填）。</li>
+<li>排序结果: 按成长值倒序；同成长值按最先达到该成长值时间升序（必填）。</li>
+<li>成长值达成时间: 用户达到当前成长值的业务时间，用于同分排序（必填）。</li>
+<li>列表上限: 页面榜单展示前 50 名（必填）。</li>
+</ul>
+</li>
+<li><strong>状态变化</strong>: 有数据 -&gt; TOP3/列表展示；超过 50 名 -&gt; 列表截断并展示到底提示。</li>
+<li><strong>异常场景</strong>:
+<ul>
+<li>头像为空 -&gt; 使用默认头像。</li>
+<li>姓名或组织名称过长 -&gt; 省略或换行，不得遮挡成长值。</li>
+<li>成长值达成时间缺失 -&gt; 需用会员积分明细补算或将该用户排在同分组末尾，避免排名争议。</li>
+</ul>
+</li>
+<li><strong>验收条件</strong>:
+<ul>
+<li>Given 当前维度上榜人数超过 50 When 榜单加载完成 Then 页面只展示前 50 名，并显示到底提示。</li>
+<li>Given 两名用户成长值相同 When 榜单排序 Then 最先达到该成长值的用户排名靠前。</li>
+<li>Given 用户姓名过长 When 展示榜单行 Then 文本不遮挡排名、头像和成长值。</li>
+</ul>
+</li>
+<li><strong>关联功能</strong>: 2.1, 2.5, 2.6, 4.2, 4.3</li>
+</ul>
+<h3 id="2-5-本人固定信息栏">2.5 本人固定信息栏</h3>
+<ul>
+<li><strong>类型</strong>: 组件</li>
+<li><strong>角色</strong>: C 端学习用户</li>
+<li><strong>用户故事</strong>: 作为学习用户，我想随时看到自己的排名和成长值，以便判断是否需要继续学习冲榜。</li>
+<li><strong>优先级</strong>: P0</li>
+<li><strong>描述</strong>: 页面底部固定展示本人头像、姓名、分公司、成长值、名次和激励文案。设计稿包含成长值为 0、排名 51 到 100、排名大于 100 的状态；本人已在 TOP50 中时，底部本人固定栏仍固定展示。</li>
+<li><strong>参考截图</strong>:<br>
+<img src="/runner-api/api/artifacts/read?path=docs%2F164946%2Fprd%2Ffiles%2Fscreenshots%2Fself_fixed_zero_growth_20260610.png&amp;projectId=5&amp;clientSessionId=16&amp;userId=1&amp;centerBaseUrl=http%3A%2F%2F127.0.0.1%3A8728" alt="本人成长值为0"></li>
+<li><strong>交互步骤</strong>:
+<ol>
+<li>页面加载本人排名信息。</li>
+<li>根据成长值和排名范围选择展示文案。</li>
+<li>成长值为 0 时展示“暂无 去学习获得”类文案。</li>
+<li>排名 51 到 100 时展示“冲榜仅差 y 成长值”类文案，y 为本人距离第 50 名成长值的差值。</li>
+<li>排名大于 100 时展示鼓励文案。</li>
+<li>本人已在 TOP50 中时，仍在底部固定栏展示本人信息。</li>
+</ol>
+</li>
+<li><strong>输入数据</strong>:
+<ul>
+<li>本人排名、成长值、姓名、头像、分公司（必填）。</li>
+<li>距离冲榜差值 y: 第 50 名成长值 - 本人成长值；小于等于 0 时不展示冲榜差值（选填）。</li>
+<li>本人是否已进入 TOP50（必填）。</li>
+</ul>
+</li>
+<li><strong>状态变化</strong>: TOP50 内/未上榜/51 名以后 -&gt; 固定栏展示；成长值为 0 -&gt; 去学习引导态。</li>
+<li><strong>异常场景</strong>:
+<ul>
+<li>无本人排名 -&gt; 展示未上榜或 99+。</li>
+<li>差值 y 无法计算 -&gt; 隐藏差值，展示通用鼓励文案。</li>
+<li>第 50 名不存在或成长值缺失 -&gt; 隐藏差值，展示通用鼓励文案。</li>
+</ul>
+</li>
+<li><strong>验收条件</strong>:
+<ul>
+<li>Given 本人成长值为 0 When 页面加载完成 Then 固定栏展示暂无成长值和去学习引导文案。</li>
+<li>Given 本人排名 51 到 100 When 页面加载完成 Then 固定栏展示本人名次、成长值和冲榜差值文案。</li>
+<li>Given 本人已在 TOP50 中 When 页面加载完成 Then 底部本人固定栏仍固定展示本人信息。</li>
+</ul>
+</li>
+<li><strong>关联功能</strong>: 2.1, 2.4, 2.6, 5.2</li>
+</ul>
+<h3 id="2-6-无人-少量上榜状态">2.6 无人/少量上榜状态</h3>
+<ul>
+<li><strong>类型</strong>: 页面</li>
+<li><strong>角色</strong>: C 端学习用户</li>
+<li><strong>用户故事</strong>: 作为学习用户，我想在榜单人数不足时看到清晰状态，以便理解当前没有完整榜单并继续学习。</li>
+<li><strong>优先级</strong>: P0</li>
+<li><strong>描述</strong>: 当前筛选条件下无人上榜时展示空状态和“去学习，抢占榜单”入口；仅 1 到 3 人上榜时只展示实际上榜席位，不补空位。</li>
+<li><strong>参考截图</strong>:<br>
+<img src="/runner-api/api/artifacts/read?path=docs%2F164946%2Fprd%2Ffiles%2Fscreenshots%2Fempty_rank_state_20260610.png&amp;projectId=5&amp;clientSessionId=16&amp;userId=1&amp;centerBaseUrl=http%3A%2F%2F127.0.0.1%3A8728" alt="无人上榜空状态"><br>
+<img src="/runner-api/api/artifacts/read?path=docs%2F164946%2Fprd%2Ffiles%2Fscreenshots%2Fone_user_state_20260610.png&amp;projectId=5&amp;clientSessionId=16&amp;userId=1&amp;centerBaseUrl=http%3A%2F%2F127.0.0.1%3A8728" alt="仅1人上榜状态"><br>
+<img src="/runner-api/api/artifacts/read?path=docs%2F164946%2Fprd%2Ffiles%2Fscreenshots%2Ftwo_users_state_20260610.png&amp;projectId=5&amp;clientSessionId=16&amp;userId=1&amp;centerBaseUrl=http%3A%2F%2F127.0.0.1%3A8728" alt="仅2人上榜状态"><br>
+<img src="/runner-api/api/artifacts/read?path=docs%2F164946%2Fprd%2Ffiles%2Fscreenshots%2Fthree_users_state_20260610.png&amp;projectId=5&amp;clientSessionId=16&amp;userId=1&amp;centerBaseUrl=http%3A%2F%2F127.0.0.1%3A8728" alt="仅3人上榜状态"></li>
+<li><strong>交互步骤</strong>:
+<ol>
+<li>页面获取当前筛选条件下上榜人数。</li>
+<li>0 人时隐藏榜单名次与本人固定栏，展示空状态。</li>
+<li>1 到 3 人时只展示实际上榜席位。</li>
+<li>用户点击“去学习，抢占榜单”，跳转路径与“推荐学习”一致。</li>
+</ol>
+</li>
+<li><strong>输入数据</strong>:
+<ul>
+<li>当前筛选条件下的上榜人数（必填）。</li>
+<li>去学习跳转地址或推荐学习装修页地址（必填，上线前需补充）。</li>
+</ul>
+</li>
+<li><strong>状态变化</strong>: 0 人 -&gt; 空状态；1/2/3 人 -&gt; 少量上榜状态；点击去学习 -&gt; 跳转学习内容。</li>
+<li><strong>异常场景</strong>:
+<ul>
+<li>去学习地址缺失 -&gt; 隐藏按钮或提示配置缺失。</li>
+<li>切换筛选后需重新计算状态，不能复用旧状态。</li>
+</ul>
+</li>
+<li><strong>验收条件</strong>:
+<ul>
+<li>Given 当前筛选条件无人上榜 When 页面加载完成 Then 展示空状态、隐藏榜单名次和本人固定栏。</li>
+<li>Given 当前筛选条件仅 2 人上榜 When 页面加载完成 Then 页面只展示两个上榜席位且不补第三个空位。</li>
+</ul>
+</li>
+<li><strong>关联功能</strong>: 2.1, 2.4, 2.5, 5.2, 5.3</li>
+</ul>
+<h3 id="2-7-规则说明与成长值说明入口">2.7 规则说明与成长值说明入口</h3>
+<ul>
+<li><strong>类型</strong>: 组件</li>
+<li><strong>角色</strong>: C 端学习用户</li>
+<li><strong>用户故事</strong>: 作为学习用户，我想查看排行榜规则和成长值说明，以便理解榜单计算方式。</li>
+<li><strong>优先级</strong>: P0</li>
+<li><strong>描述</strong>: 页面提供“排行榜规则说明”和“成长值”说明入口，默认所有用户可见，点击后跳转 APP 内容渠道的自定义装修页面；装修页地址通过 Nacos 配置。</li>
+<li><strong>交互步骤</strong>:
+<ol>
+<li>用户点击排行榜规则说明。</li>
+<li>页面跳转规则说明装修页。</li>
+<li>用户点击成长值说明图标。</li>
+<li>页面跳转成长值说明装修页。</li>
+</ol>
+</li>
+<li><strong>输入数据</strong>:
+<ul>
+<li>排行榜规则说明页面地址: 从 Nacos 配置读取（必填，配置值待补充）。</li>
+<li>成长值说明页面地址: 从 Nacos 配置读取（必填，配置值待补充）。</li>
+<li>当前页面上下文: 周期、地区维度、来源入口（选填，用于埋点）。</li>
+</ul>
+</li>
+<li><strong>状态变化</strong>: 入口曝光 -&gt; 点击 -&gt; 跳转。</li>
+<li><strong>异常场景</strong>:
+<ul>
+<li>Nacos 未配置装修页地址 -&gt; 隐藏入口或点击后提示暂未配置。</li>
+<li>跳转失败 -&gt; 保留当前榜单筛选状态。</li>
+</ul>
+</li>
+<li><strong>验收条件</strong>:
+<ul>
+<li>Given 说明页地址已配置 When 用户点击规则说明 Then 打开对应装修页。</li>
+<li>Given 说明页地址未配置 When 页面加载 Then 不出现无效跳转。</li>
+</ul>
+</li>
+<li><strong>关联功能</strong>: 3.3, 5.3</li>
+</ul>
+<h2 id="3-页面二-排行榜悬浮操作区">3. 页面二：排行榜悬浮操作区</h2>
+<blockquote data-rich-preview="true">
+<p><strong>页面用途</strong>: 在排行榜页面内提供分享、福利、推荐学习等快捷入口。<br>
+<strong>参考截图</strong>: <img src="/runner-api/api/artifacts/read?path=docs%2F164946%2Fprd%2Ffiles%2Fscreenshots%2Ffloating_actions_20260610.png&amp;projectId=5&amp;clientSessionId=16&amp;userId=1&amp;centerBaseUrl=http%3A%2F%2F127.0.0.1%3A8728" alt="悬浮操作入口"></p>
+</blockquote>
+<h3 id="3-1-悬浮入口展示-收起与恢复">3.1 悬浮入口展示、收起与恢复</h3>
+<ul>
+<li><strong>类型</strong>: 组件</li>
+<li><strong>角色</strong>: C 端学习用户</li>
+<li><strong>用户故事</strong>: 作为学习用户，我想在榜单页快速使用分享、福利和推荐学习入口，同时可在不需要时收起，以便减少页面遮挡。</li>
+<li><strong>优先级</strong>: P0</li>
+<li><strong>描述</strong>: 悬浮入口默认展示分享榜单、上榜有礼、推荐学习和关闭按钮；点击关闭后收起，收起状态下可恢复；上下滑动页面时自动收起。</li>
+<li><strong>交互步骤</strong>:
+<ol>
+<li>用户进入页面，悬浮入口默认展示。</li>
+<li>用户点击关闭按钮，整个悬浮入口收起。</li>
+<li>收起状态下用户点击恢复入口，悬浮入口重新展示。</li>
+<li>用户上下滑动页面时，悬浮入口自动收起。</li>
+<li>若收起状态来自用户点击关闭，停止滑动后不自动展开。</li>
+</ol>
+</li>
+<li><strong>输入数据</strong>:
+<ul>
+<li>悬浮入口当前配置（必填）。</li>
+<li>用户是否主动关闭（必填）。</li>
+<li>页面滚动状态（必填）。</li>
+</ul>
+</li>
+<li><strong>状态变化</strong>: 展开 -&gt; 手动收起 | 滚动收起；收起 -&gt; 点击恢复 -&gt; 展开。</li>
+<li><strong>异常场景</strong>:
+<ul>
+<li>底部安全区遮挡 -&gt; 悬浮入口上移。</li>
+<li>部分入口隐藏 -&gt; 剩余入口保持稳定排列。</li>
+<li>快速滚动和点击关闭并发 -&gt; 以用户主动关闭状态优先。</li>
+</ul>
+</li>
+<li><strong>验收条件</strong>:
+<ul>
+<li>Given 悬浮入口展开 When 用户点击关闭 Then 入口收起且停止滚动后不自动展开。</li>
+<li>Given 悬浮入口因滚动收起 When 用户停止滚动 Then 按产品确认策略恢复或保持收起。</li>
+</ul>
+</li>
+<li><strong>关联功能</strong>: 3.2, 3.3, 4.1, 5.3</li>
+</ul>
+<h3 id="3-2-上榜有礼与推荐学习展示控制">3.2 上榜有礼与推荐学习展示控制</h3>
+<ul>
+<li><strong>类型</strong>: 组件</li>
+<li><strong>角色</strong>: C 端学习用户</li>
+<li><strong>用户故事</strong>: 作为被运营命中的学习用户，我想看到上榜有礼和推荐学习入口，以便参与活动或继续学习。</li>
+<li><strong>优先级</strong>: P0</li>
+<li><strong>描述</strong>: “上榜有礼”“推荐学习”通过会员中心人群包控制是否显示；支持配置多个人群包。当前人群包 ID 尚未提供，未命中或配置缺失时不展示对应入口。</li>
+<li><strong>交互步骤</strong>:
+<ol>
+<li>页面初始化读取当前用户卡号或会员编码。</li>
+<li>系统判断用户是否命中上榜有礼人群包。</li>
+<li>系统判断用户是否命中推荐学习人群包。</li>
+<li>页面按命中结果展示入口。</li>
+</ol>
+</li>
+<li><strong>输入数据</strong>:
+<ul>
+<li>用户卡号或会员编码（必填）。</li>
+<li>上榜有礼人群包 ID 列表（必填，待补充）。</li>
+<li>推荐学习人群包 ID 列表（必填，待补充）。</li>
+<li>入口启用状态（必填）。</li>
+</ul>
+</li>
+<li><strong>状态变化</strong>: 命中 -&gt; 展示入口；未命中/配置缺失 -&gt; 隐藏入口。</li>
+<li><strong>异常场景</strong>:
+<ul>
+<li>人群包判断失败 -&gt; 建议默认隐藏受控入口并记录错误。</li>
+<li>多个人群包的并集/交集规则未定义 -&gt; 默认按并集需产品确认。</li>
+<li>人群包 ID 未配置 -&gt; 入口隐藏。</li>
+</ul>
+</li>
+<li><strong>验收条件</strong>:
+<ul>
+<li>Given 用户命中上榜有礼人群包 When 页面加载 Then 悬浮区展示上榜有礼入口。</li>
+<li>Given 用户未命中推荐学习人群包 When 页面加载 Then 悬浮区不展示推荐学习入口。</li>
+</ul>
+</li>
+<li><strong>关联功能</strong>: 3.1, 3.3, 5.2, 5.3</li>
+</ul>
+<h3 id="3-3-内容渠道跳转入口">3.3 内容渠道跳转入口</h3>
+<ul>
+<li><strong>类型</strong>: 组件</li>
+<li><strong>角色</strong>: C 端学习用户</li>
+<li><strong>用户故事</strong>: 作为学习用户，我想点击规则、成长值、上榜有礼、推荐学习入口跳转到对应内容页，以便获得说明、福利或学习内容。</li>
+<li><strong>优先级</strong>: P0</li>
+<li><strong>描述</strong>: 排行榜规则说明、成长值说明、上榜有礼、推荐学习均跳转 APP 内容渠道不同的自定义装修页面；四类装修页地址统一通过 Nacos 配置，其中规则说明和成长值说明默认所有用户可见。</li>
+<li><strong>交互步骤</strong>:
+<ol>
+<li>页面读取 Nacos 中四类入口的装修页地址和启用状态。</li>
+<li>用户点击对应入口。</li>
+<li>页面跳转到内容渠道自定义装修页面。</li>
+<li>跳转失败时回到排行榜并保持筛选状态。</li>
+</ol>
+</li>
+<li><strong>输入数据</strong>:
+<ul>
+<li>入口编码: 规则说明、成长值说明、上榜有礼、推荐学习（必填）。</li>
+<li>入口名称和跳转地址（必填，从 Nacos 配置读取，配置值待补充）。</li>
+<li>是否启用、适用人群包（选填）。</li>
+</ul>
+</li>
+<li><strong>状态变化</strong>: 已配置 -&gt; 可点击跳转；未配置/未启用 -&gt; 隐藏或禁用。</li>
+<li><strong>异常场景</strong>:
+<ul>
+<li>设计稿存在“推荐课程”和“推荐学习”命名不一致 -&gt; 需统一文案。</li>
+<li>Nacos 配置缺失或装修页地址为空 -&gt; 不应上线为可点击入口。</li>
+</ul>
+</li>
+<li><strong>验收条件</strong>:
+<ul>
+<li>Given 推荐学习地址已配置且用户命中人群包 When 用户点击推荐学习 Then 打开对应装修页。</li>
+<li>Given 上榜有礼地址未配置 When 页面加载 Then 不出现可点击的无效入口。</li>
+</ul>
+</li>
+<li><strong>关联功能</strong>: 2.7, 3.2, 5.2, 5.3</li>
+</ul>
+<h2 id="4-页面三-分享榜单海报页">4. 页面三：分享榜单海报页</h2>
+<blockquote data-rich-preview="true">
+<p><strong>页面用途</strong>: 让用户基于当前榜单上下文生成、浏览并保存个人及地区榜单海报。<br>
+<strong>参考截图</strong>: <img src="/runner-api/api/artifacts/read?path=docs%2F164946%2Fprd%2Ffiles%2Fscreenshots%2Fshare_posters_20260610.png&amp;projectId=5&amp;clientSessionId=16&amp;userId=1&amp;centerBaseUrl=http%3A%2F%2F127.0.0.1%3A8728" alt="分享榜单海报"></p>
+</blockquote>
+<h3 id="4-1-分享榜单入口与海报集合生成">4.1 分享榜单入口与海报集合生成</h3>
+<ul>
+<li><strong>类型</strong>: 页面</li>
+<li><strong>角色</strong>: C 端学习用户</li>
+<li><strong>用户故事</strong>: 作为学习用户，我想分享自己的上榜表现或榜单 TOP10，以便传播学习成果。</li>
+<li><strong>优先级</strong>: P0</li>
+<li><strong>描述</strong>: 分享榜单入口默认展示。点击后根据当前所选时间维度和登录用户上榜情况，生成个人上榜海报与各地区维度 TOP10 海报；海报底部操作按钮正式文案和行为为“保存海报到相册”。</li>
+<li><strong>交互步骤</strong>:
+<ol>
+<li>用户点击悬浮区“分享榜单”。</li>
+<li>系统读取当前时间周期和地区维度。</li>
+<li>系统判断当前登录用户是否在全国、区域、分公司三个维度上榜。</li>
+<li>系统生成可展示的海报集合。</li>
+<li>页面展示海报容器，用户可关闭、浏览或点击“保存海报到相册”。</li>
+</ol>
+</li>
+<li><strong>输入数据</strong>:
+<ul>
+<li>当前时间周期（必填）。</li>
+<li>当前地区维度和地区编码（必填）。</li>
+<li>登录用户 ID/卡号（必填）。</li>
+<li>海报操作按钮文案和行为: “保存海报到相册”（必填）。</li>
+</ul>
+</li>
+<li><strong>状态变化</strong>: 点击分享 -&gt; 海报生成中 -&gt; 海报展示 | 暂无可分享内容 | 生成失败。</li>
+<li><strong>异常场景</strong>:
+<ul>
+<li>用户没有任何个人上榜维度 -&gt; 不展示个人上榜海报。</li>
+<li>所有 TOP10 数据为空 -&gt; 展示暂无可分享内容。</li>
+<li>海报生成失败 -&gt; 提供重试或返回排行榜。</li>
+<li>保存到相册失败 -&gt; 提示保存失败，用户可重试。</li>
+</ul>
+</li>
+<li><strong>验收条件</strong>:
+<ul>
+<li>Given 用户点击分享榜单 When 海报生成成功 Then 页面展示与当前周期一致的海报集合。</li>
+<li>Given 用户未在任何维度上榜 When 点击分享榜单 Then 不展示个人上榜海报，但仍按规则展示 TOP10 海报。</li>
+<li>Given 海报已生成 When 用户点击“保存海报到相册”且授权成功 Then 当前海报保存到系统相册。</li>
+</ul>
+</li>
+<li><strong>关联功能</strong>: 2.2, 2.3, 3.1, 4.2, 4.3, 4.4, 5.3</li>
+</ul>
+<h3 id="4-2-个人上榜海报">4.2 个人上榜海报</h3>
+<ul>
+<li><strong>类型</strong>: 组件</li>
+<li><strong>角色</strong>: C 端学习用户</li>
+<li><strong>用户故事</strong>: 作为已上榜用户，我想生成个人上榜海报，以便展示自己的学习成长成绩。</li>
+<li><strong>优先级</strong>: P0</li>
+<li><strong>描述</strong>: 若当前登录用户在全国、区域或分公司维度有上榜，则生成个人上榜海报。个人海报显示头像、姓名、维度、名次、统计周期、成长值、二维码和更新时间。</li>
+<li><strong>交互步骤</strong>:
+<ol>
+<li>系统查询登录用户在全国、区域、分公司三个维度的排名。</li>
+<li>仅对有上榜记录的维度生成个人海报。</li>
+<li>个人海报展示顺序为全国、区域、分公司。</li>
+<li>用户点击“保存海报到相册”保存当前海报。</li>
+</ol>
+</li>
+<li><strong>输入数据</strong>:
+<ul>
+<li>用户姓名、头像（必填）。</li>
+<li>全国/区域/分公司排名与成长值（选填，有上榜才展示）。</li>
+<li>当前统计周期、更新时间（必填）。</li>
+<li>二维码内容（必填）。</li>
+</ul>
+</li>
+<li><strong>状态变化</strong>: 有上榜维度 -&gt; 生成对应个人海报；无上榜维度 -&gt; 不生成个人海报。</li>
+<li><strong>异常场景</strong>:
+<ul>
+<li>用户头像为空 -&gt; 使用默认头像。</li>
+<li>姓名或组织名称过长 -&gt; 自动换行或省略。</li>
+<li>同一用户多组织归属 -&gt; 需确认采用当前组织还是统计组织。</li>
+</ul>
+</li>
+<li><strong>验收条件</strong>:
+<ul>
+<li>Given 用户在全国和分公司维度上榜 When 点击分享榜单 Then 个人海报按全国、分公司顺序展示。</li>
+<li>Given 用户未在区域维度上榜 When 点击分享榜单 Then 不展示区域个人上榜海报。</li>
+</ul>
+</li>
+<li><strong>关联功能</strong>: 2.4, 2.5, 4.1, 4.4, 5.3</li>
+</ul>
+<h3 id="4-3-地区维度-top10-海报">4.3 地区维度 TOP10 海报</h3>
+<ul>
+<li><strong>类型</strong>: 组件</li>
+<li><strong>角色</strong>: C 端学习用户</li>
+<li><strong>用户故事</strong>: 作为学习用户，我想分享分公司、区域和全国 TOP10 榜单，以便展示组织学习氛围。</li>
+<li><strong>优先级</strong>: P0</li>
+<li><strong>描述</strong>: 分享榜单同时生成分公司、区域、全国三个地区维度的 TOP10 海报，展示顺序为分公司、区域、全国。</li>
+<li><strong>交互步骤</strong>:
+<ol>
+<li>系统按当前时间周期查询分公司 TOP10。</li>
+<li>系统按当前时间周期查询区域 TOP10。</li>
+<li>系统按当前时间周期查询全国 TOP10。</li>
+<li>页面按分公司、区域、全国顺序展示 TOP10 海报。</li>
+</ol>
+</li>
+<li><strong>输入数据</strong>:
+<ul>
+<li>维度类型: 分公司、区域、全国（必填）。</li>
+<li>TOP10 用户列表: 排名、姓名、组织、成长值、头像（必填）。</li>
+<li>当前统计周期和更新时间（必填）。</li>
+<li>二维码内容（必填）。</li>
+</ul>
+</li>
+<li><strong>状态变化</strong>: 有 TOP10 数据 -&gt; 展示海报；无数据 -&gt; 不展示该维度海报或展示空态海报，需确认。</li>
+<li><strong>异常场景</strong>:
+<ul>
+<li>某维度无数据 -&gt; 不影响其他维度海报生成。</li>
+<li>TOP10 海报图片过长 -&gt; 保存到相册时需保持完整和清晰。</li>
+<li>TOP10 榜单与页面 TOP50 排序口径不一致 -&gt; 需阻断上线并修正。</li>
+</ul>
+</li>
+<li><strong>验收条件</strong>:
+<ul>
+<li>Given 三个维度均有 TOP10 数据 When 用户点击分享榜单 Then 海报按分公司、区域、全国顺序展示。</li>
+<li>Given 区域 TOP10 无数据 When 用户点击分享榜单 Then 分公司和全国海报仍可展示。</li>
+</ul>
+</li>
+<li><strong>关联功能</strong>: 2.4, 4.1, 4.4, 5.3</li>
+</ul>
+<h3 id="4-4-海报二维码与榜单回流">4.4 海报二维码与榜单回流</h3>
+<ul>
+<li><strong>类型</strong>: 流程</li>
+<li><strong>角色</strong>: 被分享用户</li>
+<li><strong>用户故事</strong>: 作为看到海报的用户，我想通过二维码进入完整榜单，以便查看榜单详情并继续学习。</li>
+<li><strong>优先级</strong>: P1</li>
+<li><strong>描述</strong>: 海报二维码用于长按识别并打开完整榜单；打开后应尽量恢复海报对应的统计周期和地区维度。</li>
+<li><strong>流程步骤</strong>:
+<ol>
+<li>生成海报时同步生成二维码。</li>
+<li>二维码携带周期、维度、地区编码、海报类型和来源参数。</li>
+<li>被分享用户识别二维码。</li>
+<li>页面打开排行榜并恢复对应上下文。</li>
+</ol>
+</li>
+<li><strong>输入数据</strong>:
+<ul>
+<li>周期参数、地区维度、地区编码（必填）。</li>
+<li>海报类型和分享来源（选填，用于埋点归因）。</li>
+<li>二维码有效期策略（必填，待确认）。</li>
+</ul>
+</li>
+<li><strong>状态变化</strong>: 二维码生成成功 -&gt; 可分享；二维码识别成功 -&gt; 打开榜单。</li>
+<li><strong>异常场景</strong>:
+<ul>
+<li>二维码过期 -&gt; 降级打开默认榜单。</li>
+<li>被分享用户无登录态 -&gt; 先登录再回到榜单。</li>
+<li>回流参数非法 -&gt; 打开默认榜单并记录异常。</li>
+</ul>
+</li>
+<li><strong>验收条件</strong>:
+<ul>
+<li>Given 用户保存的海报二维码有效 When 被分享用户识别二维码 Then 打开对应周期和维度的排行榜。</li>
+<li>Given 二维码参数非法 When 识别进入页面 Then 页面降级展示默认榜单。</li>
+</ul>
+</li>
+<li><strong>关联功能</strong>: 4.1, 4.2, 4.3, 5.3</li>
+</ul>
+<h2 id="5-跨页面流程">5. 跨页面流程</h2>
+<h3 id="5-1-筛选变更联动流程">5.1 筛选变更联动流程</h3>
+<ul>
+<li><strong>类型</strong>: 流程</li>
+<li><strong>角色</strong>: C 端学习用户</li>
+<li><strong>用户故事</strong>: 作为学习用户，我想切换周期或地区后页面整体同步刷新，以便看到一致的榜单与分享内容。</li>
+<li><strong>优先级</strong>: P0</li>
+<li><strong>描述</strong>: 年度/季度周期、地区维度或地区编码变化后，需要同步刷新榜单、本人固定栏、空状态和分享海报上下文。</li>
+<li><strong>流程步骤</strong>:
+<ol>
+<li>用户在主页面选择新的年度/季度周期或地区维度。</li>
+<li>页面确认筛选条件生效。</li>
+<li>页面重新查询榜单和本人排名。</li>
+<li>页面按结果展示榜单、空状态或少量上榜状态。</li>
+<li>分享榜单后使用最新筛选上下文生成海报。</li>
+</ol>
+</li>
+<li><strong>异常场景</strong>:
+<ul>
+<li>切换过程中重复点击 -&gt; 只保留最后一次确认条件。</li>
+<li>查询失败 -&gt; 保留筛选条件并展示失败提示。</li>
+</ul>
+</li>
+<li><strong>验收条件</strong>:
+<ul>
+<li>Given 用户切换到区域榜并确认 When 分享榜单 Then 海报使用区域榜上下文。</li>
+</ul>
+</li>
+<li><strong>关联功能</strong>: 2.2, 2.3, 2.4, 2.5, 4.1</li>
+</ul>
+<h3 id="5-2-学习引导跳转流程">5.2 学习引导跳转流程</h3>
+<ul>
+<li><strong>类型</strong>: 流程</li>
+<li><strong>角色</strong>: C 端学习用户</li>
+<li><strong>用户故事</strong>: 作为暂无成长值或榜单靠后的用户，我想通过去学习入口进入推荐学习内容，以便获得成长值并提升排名。</li>
+<li><strong>优先级</strong>: P0</li>
+<li><strong>描述</strong>: 空状态按钮、本人成长值为 0 的引导和推荐学习入口应跳转到同一推荐学习路径或同一内容渠道装修页，地址从 Nacos 配置读取。</li>
+<li><strong>流程步骤</strong>:
+<ol>
+<li>页面判断用户处于空状态、成长值为 0 或点击推荐学习。</li>
+<li>用户点击去学习或推荐学习入口。</li>
+<li>页面打开推荐学习装修页。</li>
+<li>用户完成学习后再次进入排行榜，榜单按最新统计结果展示。</li>
+</ol>
+</li>
+<li><strong>异常场景</strong>:
+<ul>
+<li>推荐学习地址未在 Nacos 配置 -&gt; 隐藏入口或提示暂未开放。</li>
+<li>用户未命中推荐学习人群包但处于空状态 -&gt; 空状态按钮是否仍展示需确认。</li>
+</ul>
+</li>
+<li><strong>验收条件</strong>:
+<ul>
+<li>Given 当前榜单无人上榜 When 用户点击“去学习，抢占榜单” Then 打开推荐学习页面。</li>
+</ul>
+</li>
+<li><strong>关联功能</strong>: 2.5, 2.6, 3.2, 3.3</li>
+</ul>
+<h3 id="5-3-埋点上报流程">5.3 埋点上报流程</h3>
+<ul>
+<li><strong>类型</strong>: 流程</li>
+<li><strong>角色</strong>: 数据分析人员</li>
+<li><strong>用户故事</strong>: 作为数据分析人员，我想采集排行榜曝光、筛选、点击和分享行为，以便评估榜单对学习转化的影响。</li>
+<li><strong>优先级</strong>: P0</li>
+<li><strong>描述</strong>: 需求标题明确包含“含埋点”。需覆盖页面曝光、筛选切换、入口点击、悬浮收起/恢复、分享榜单、海报展示、保存海报到相册、二维码回流、去学习等行为。正式事件名和字段口径待数据侧确认。</li>
+<li><strong>流程步骤</strong>:
+<ol>
+<li>页面曝光时上报页面曝光事件。</li>
+<li>用户切换周期、地区维度、分公司或区域时上报筛选事件。</li>
+<li>用户点击规则说明、成长值说明、上榜有礼、推荐学习、去学习时上报入口点击事件。</li>
+<li>用户点击分享榜单、查看海报、保存海报到相册、关闭海报时上报分享链路事件。</li>
+<li>用户关闭或恢复悬浮入口时上报悬浮入口行为。</li>
+</ol>
+</li>
+<li><strong>输入数据</strong>:
+<ul>
+<li>用户 ID、卡号、所属分公司、所属区域（必填）。</li>
+<li>页面名称、入口名称、行为类型（必填）。</li>
+<li>时间周期、地区维度、地区编码（必填）。</li>
+<li>榜单排名、成长值、海报类型、目标 URL（按事件选填）。</li>
+<li>来源渠道、会话 ID、事件发生时间（必填）。</li>
+</ul>
+</li>
+<li><strong>异常场景</strong>:
+<ul>
+<li>快速切换筛选 -&gt; 需要防抖或只上报确认后的有效筛选。</li>
+<li>保存海报到相册失败 -&gt; 区分点击事件、成功事件和失败事件。</li>
+<li>用户未登录 -&gt; 是否上报匿名曝光需数据侧确认。</li>
+</ul>
+</li>
+<li><strong>验收条件</strong>:
+<ul>
+<li>Given 用户进入排行榜页面 When 页面首屏渲染完成 Then 产生一次页面曝光埋点。</li>
+<li>Given 用户切换分公司并确认 When 榜单刷新 Then 产生一次包含新分公司编码的筛选埋点。</li>
+<li>Given 用户保存海报成功 When 保存完成 Then 产生一次海报保存成功埋点。</li>
+</ul>
+</li>
+<li><strong>关联功能</strong>: 2.1 至 4.4</li>
+</ul>
+<h2 id="6-业务规则目录">6. 业务规则目录</h2>
+<table data-rich-preview="true">
+<thead>
+<tr>
+<th>规则ID</th>
+<th>规则描述</th>
+<th>来源</th>
+<th>关联功能点</th>
+<th>优先级</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>BR-01</td>
+<td>页面标题和指标名称统一使用“学习成长排行榜/成长值”。</td>
+<td>本次澄清</td>
+<td>2.1, 2.4, 4.2, 5.3</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>BR-02</td>
+<td>分公司列表优先展示登录用户所在分公司，其余按首字母正序排序。</td>
+<td>Figma 隐藏选项文案</td>
+<td>2.3</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>BR-03</td>
+<td>全国维度直接切换，不需要二级选择弹窗。</td>
+<td>Figma 地区维度组件</td>
+<td>2.3</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>BR-04</td>
+<td>榜单页面只展示前 50 名，底部提示“榜单仅显示前50名”。</td>
+<td>Figma 页面文案</td>
+<td>2.4</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>BR-05</td>
+<td>TOP3 用突出样式展示，第 4 至 50 名用列表展示。</td>
+<td>Figma 主页面</td>
+<td>2.4</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>BR-06</td>
+<td>0 人上榜时隐藏榜单名次与本人固定栏，展示空状态。</td>
+<td>Figma 设计规则</td>
+<td>2.6</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>BR-07</td>
+<td>1 到 3 人上榜时只展示实际上榜席位，不补空位。</td>
+<td>Figma 设计规则</td>
+<td>2.6</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>BR-08</td>
+<td>空状态按钮文案统一为“去学习，抢占榜单”，跳转路径与“推荐学习”一致。</td>
+<td>Figma 设计规则</td>
+<td>2.6, 5.2</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>BR-09</td>
+<td>分享榜单和关闭入口默认展示。</td>
+<td>Figma 需求说明节点</td>
+<td>3.1, 4.1</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>BR-10</td>
+<td>点击关闭后收起整个悬浮入口；收起状态下点击恢复显示。</td>
+<td>Figma 需求说明节点</td>
+<td>3.1</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>BR-11</td>
+<td>上下滑动页面时悬浮入口收起；若因点击关闭进入收起态，停止滑动后不自动展开。</td>
+<td>Figma 需求说明节点</td>
+<td>3.1</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>BR-12</td>
+<td>上榜有礼、推荐学习由会员中心人群包控制是否展示，支持配置多个；人群包 ID 尚未提供。</td>
+<td>Figma 需求说明节点/本次澄清</td>
+<td>3.2</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>BR-13</td>
+<td>排行榜规则说明、成长值说明、上榜有礼、推荐学习分别跳转 APP 内容渠道不同装修页，地址从 Nacos 配置读取。</td>
+<td>Figma 需求说明节点/本次澄清</td>
+<td>2.7, 3.3</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>BR-14</td>
+<td>个人上榜海报展示顺序为全国、区域、分公司；未上榜维度不展示。</td>
+<td>Figma 需求说明节点</td>
+<td>4.2</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>BR-15</td>
+<td>TOP10 海报展示顺序为分公司、区域、全国。</td>
+<td>Figma 需求说明节点</td>
+<td>4.3</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>BR-16</td>
+<td>页面、筛选、入口点击、分享和海报链路需要埋点，正式事件名待补充。</td>
+<td>需求标题/设计说明</td>
+<td>5.3</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>BR-17</td>
+<td>时间周期仅支持季度、年度，默认当前年度和当前季度。</td>
+<td>本次澄清</td>
+<td>2.1, 2.2, 5.1</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>BR-18</td>
+<td>成长值本期来源为现有会员积分明细，后续改为正式成长值口径。</td>
+<td>本次澄清/代码缓存摘要</td>
+<td>2.1, 2.4, 5.3</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>BR-19</td>
+<td>同成长值用户按最先达到该成长值的用户优先展示。</td>
+<td>本次澄清</td>
+<td>2.4, 4.3</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>BR-20</td>
+<td>全国、区域、分公司维度当前季度使用实时组织关系，历史周期使用统计时组织快照。</td>
+<td>本次澄清</td>
+<td>2.3, 5.1</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>BR-21</td>
+<td>本人已在 TOP50 中时，底部本人固定栏仍固定展示。</td>
+<td>本次澄清</td>
+<td>2.5</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>BR-22</td>
+<td>“冲榜仅差 y 成长值”的 y 为本人距离第 50 名成长值的差值。</td>
+<td>本次澄清</td>
+<td>2.5</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>BR-23</td>
+<td>分享海报底部操作按钮正式文案和行为为“保存海报到相册”。</td>
+<td>本次澄清</td>
+<td>4.1, 4.2, 5.3</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>BR-24</td>
+<td>页面默认展示当前用户所在组织相关榜单，默认组织缺失时需降级到全国或提示。</td>
+<td>Figma 主页面/推断</td>
+<td>2.1, 2.3</td>
+<td>P0</td>
+</tr>
+</tbody>
+</table>
+<h2 id="7-非功能性要求">7. 非功能性要求</h2>
+<ul>
+<li><strong>兼容性</strong>: 页面为移动端 APP 内使用场景，需适配常见 iOS/Android 视口、状态栏、安全区和长姓名显示；二维码回流需兼容未登录和已登录场景。</li>
+<li><strong>安全性</strong>: 榜单和海报只能展示业务允许公开的用户信息；二维码参数不得泄露敏感身份信息；人群包命中结果仅用于入口展示控制。</li>
+<li><strong>可用性</strong>: 切换筛选、弹窗确认/取消、悬浮收起/恢复、海报关闭等操作必须保留用户当前上下文；空状态和失败态需要有明确下一步。</li>
+<li><strong>性能期望</strong>: 首屏榜单、筛选刷新和悬浮入口判断应快速反馈；海报生成应有加载态，生成失败可重试；埋点上报不得阻塞用户主流程。</li>
+<li><strong>数据一致性</strong>: 页面 TOP50、本人固定栏、个人海报、TOP10 海报必须使用同一统计周期、组织口径和同分排序规则；当前季度使用实时组织关系，历史周期使用统计时组织快照；同成长值按最先达到该成长值的用户优先展示。</li>
+</ul>
+<h2 id="8-假设与风险">8. 假设与风险</h2>
+<h3 id="假设">假设</h3>
+<ol>
+<li>“学习成长排行榜/成长值”是本需求最终页面标题和指标名称。</li>
+<li>排行榜仅支持季度、年度两类周期，默认当前年度和当前季度。</li>
+<li>成长值本期来源为现有会员积分明细，后续业务会将其迁移为正式成长值口径。</li>
+<li>全国、区域、分公司三个维度均可基于同一成长值统计口径生成榜单。</li>
+<li>上榜有礼、推荐学习入口的人群包由会员中心提供命中判断，但具体人群包 ID 尚未提供。</li>
+<li>内容渠道装修页地址由 Nacos 配置，前台只负责读取配置并跳转。</li>
+</ol>
+<h3 id="风险">风险</h3>
+<table data-rich-preview="true">
+<thead>
+<tr>
+<th>风险</th>
+<th>影响</th>
+<th>缓解措施</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>成长值口径后续迁移</td>
+<td>后续从会员积分明细迁移到正式成长值时，榜单和历史数据可能需要重算或兼容</td>
+<td>在技术方案中保留成长值口径抽象和历史数据校验机制</td>
+</tr>
+<tr>
+<td>内容渠道 Nacos 配置值待补充</td>
+<td>规则说明、成长值说明、福利和推荐学习入口无法跳转</td>
+<td>上线前补齐四类装修页地址，未配置时隐藏或提示</td>
+</tr>
+<tr>
+<td>人群包 ID 待补充</td>
+<td>上榜有礼、推荐学习展示控制无法验收</td>
+<td>产品提供人群包 ID、多个包的合并规则和失败降级策略</td>
+</tr>
+<tr>
+<td>埋点规范缺失</td>
+<td>数据无法核算需求效果</td>
+<td>数据侧补齐事件名、触发时机、字段字典和成功/失败口径</td>
+</tr>
+<tr>
+<td>组织口径混用</td>
+<td>当前季度实时组织关系与历史周期组织快照并存，用户组织变化时可能产生理解差异</td>
+<td>页面文案、测试用例和技术方案明确当前季度/历史周期口径</td>
+</tr>
+</tbody>
+</table>
+<h2 id="9-待澄清问题">9. 待澄清问题</h2>
+<ol>
+<li>排行榜规则说明、成长值说明、上榜有礼、推荐学习四类装修页的 Nacos 配置 key 和正式地址分别是什么？</li>
+<li>上榜有礼、推荐学习的人群包 ID 是哪些？多个人群包按并集还是交集判断？</li>
+<li>海报二维码有效期、回流参数和分享归因字段如何定义？</li>
+<li>埋点事件名、字段字典、触发时机、失败重试策略由谁提供并验收？</li>
+</ol>
+<h2 id="10-验收要点汇总">10. 验收要点汇总</h2>
+<ol>
+<li>默认进入页面可展示当前年度、当前季度和当前用户默认组织维度下的榜单。</li>
+<li>切换年度/季度、分公司、区域、全国后，榜单、本人固定栏和分享海报上下文同步刷新。</li>
+<li>分公司选择弹窗优先展示用户所在分公司，其余按约定排序。</li>
+<li>TOP3、4 至 50 名列表、到底提示展示符合设计稿。</li>
+<li>同成长值用户按最先达到该成长值的用户优先展示。</li>
+<li>0 人、1 人、2 人、3 人、超过 3 人、超过 50 人的页面状态均符合设计规则。</li>
+<li>本人成长值为 0、排名 51 到 100、排名大于 100、本人已在 TOP50 的固定栏文案和固定展示逻辑正确。</li>
+<li>“冲榜仅差 y 成长值”的 y 按本人距离第 50 名成长值计算。</li>
+<li>悬浮入口默认展示，点击关闭、滚动收起、点击恢复逻辑正确。</li>
+<li>上榜有礼、推荐学习按人群包命中结果展示，未配置或未命中时隐藏。</li>
+<li>点击规则说明、成长值说明、上榜有礼、推荐学习均按 Nacos 配置跳转，未配置时无无效入口。</li>
+<li>分享榜单按当前周期生成个人上榜海报和三个维度 TOP10 海报，展示顺序符合业务规则，底部按钮保存海报到相册。</li>
+<li>海报二维码识别后可回到对应榜单上下文，非法或过期参数可降级到默认榜单。</li>
+<li>页面曝光、筛选、入口点击、悬浮操作、分享、海报保存、去学习和二维码回流均有可验证埋点。</li>
+</ol>
+<h2 id="11-澄清历史">11. 澄清历史</h2>
+<table data-rich-preview="true">
+<thead>
+<tr>
+<th>版本</th>
+<th>时间</th>
+<th>类型</th>
+<th>澄清描述</th>
+<th>影响范围</th>
+<th>处理结果</th>
+<th>运行记录</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>v1</td>
+<td>2026-06-10 19:16:26 CST</td>
+<td>初始生成</td>
+<td>重新生成一下</td>
+<td>全量 PRD</td>
+<td>生成初版 PRD 功能点分析，引用 Figma 来源和本地截图缓存</td>
+<td>run-20260610111047-429c1c</td>
+</tr>
+<tr>
+<td>v2</td>
+<td>2026-06-11 11:30:12 CST</td>
+<td>需求澄清</td>
+<td>页面标题/指标、周期、成长值来源、同分排序、组织口径、本人固定栏、冲榜差值、Nacos 地址配置、人群包 ID、海报保存行为</td>
+<td>需求概述、页面功能点、跨页面流程、业务规则、风险、待澄清问题、验收要点</td>
+<td>将已确认内容转为正式业务规则；保留 Nacos 配置值、人群包 ID、二维码和埋点规范为待澄清项</td>
+<td>run-20260611032559-23f00c</td>
+</tr>
+</tbody>
+</table>
+</article>
+</body>
+</html>

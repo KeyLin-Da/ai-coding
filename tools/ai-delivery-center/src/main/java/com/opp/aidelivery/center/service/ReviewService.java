@@ -24,7 +24,7 @@ import org.springframework.util.StringUtils;
 @RequiredArgsConstructor
 public class ReviewService {
 
-    private static final List<String> STAGES = Arrays.asList("PRD", "TECH_DESIGN", "IMPLEMENTATION", "CODE_REVIEW");
+    private static final List<String> STAGES = Arrays.asList("PRD", "TECH_DESIGN", "IMPLEMENTATION", "CODE_REVIEW", "RETROSPECTIVE");
     private static final List<String> IMPLEMENTATION_STEPS = Arrays.asList("START_CHANGE", "ARTIFACT_REVIEW", "APPLY", "CHANGE_INSPECTION");
 
     private final PermissionService permissionService;
@@ -40,12 +40,12 @@ public class ReviewService {
             throw new BusinessException(AiDeliveryErrorCode.RESOURCE_NOT_FOUND, "需求不存在");
         }
         permissionService.assertProjectMember(userId, requirement.getProjectId());
-        WorkflowStageEntity stage = workflowStageMapper.selectOne(new LambdaQueryWrapper<WorkflowStageEntity>()
-            .eq(WorkflowStageEntity::getRequirementPk, requirement.getId())
-            .eq(WorkflowStageEntity::getStage, request.getStage())
-            .last("LIMIT 1"));
-        if (stage == null) {
+        if (!STAGES.contains(request.getStage())) {
             throw new BusinessException(AiDeliveryErrorCode.RESOURCE_NOT_FOUND, "阶段不存在");
+        }
+        WorkflowStageEntity stage = findStage(requirement.getId(), request.getStage());
+        if (stage == null) {
+            stage = createStage(requirement, request.getStage(), "DRAFT");
         }
 
         ReviewEntity review = new ReviewEntity();
@@ -157,14 +157,30 @@ public class ReviewService {
         requirement.setCurrentStage(next);
         requirement.setStatus("DONE".equals(next) ? "DONE" : "IN_PROGRESS");
         if (!"DONE".equals(next)) {
-            WorkflowStageEntity nextStage = workflowStageMapper.selectOne(new LambdaQueryWrapper<WorkflowStageEntity>()
-                .eq(WorkflowStageEntity::getRequirementPk, requirement.getId())
-                .eq(WorkflowStageEntity::getStage, next)
-                .last("LIMIT 1"));
-            if (nextStage != null && "NOT_STARTED".equals(nextStage.getStatus())) {
+            WorkflowStageEntity nextStage = findStage(requirement.getId(), next);
+            if (nextStage == null) {
+                createStage(requirement, next, "DRAFT");
+            } else if ("NOT_STARTED".equals(nextStage.getStatus())) {
                 nextStage.setStatus("DRAFT");
                 workflowStageMapper.updateById(nextStage);
             }
         }
+    }
+
+    private WorkflowStageEntity findStage(Long requirementPk, String stageName) {
+        return workflowStageMapper.selectOne(new LambdaQueryWrapper<WorkflowStageEntity>()
+            .eq(WorkflowStageEntity::getRequirementPk, requirementPk)
+            .eq(WorkflowStageEntity::getStage, stageName)
+            .last("LIMIT 1"));
+    }
+
+    private WorkflowStageEntity createStage(RequirementEntity requirement, String stageName, String status) {
+        WorkflowStageEntity stage = new WorkflowStageEntity();
+        stage.setRequirementPk(requirement.getId());
+        stage.setStage(stageName);
+        stage.setStatus(status);
+        stage.setVersion(0L);
+        workflowStageMapper.insert(stage);
+        return stage;
     }
 }

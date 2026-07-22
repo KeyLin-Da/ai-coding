@@ -164,6 +164,39 @@ describe('shared artifact preview', () => {
     expect(frame.attributes('src')).toContain('/docs/159145/junit/index.html');
   });
 
+  it('JUnit Surefire HTML 报告缺少静态资源时注入兜底样式', async () => {
+    const wrapper = mount(ArtifactPreviewShell, {
+      props: {
+        artifact: {
+          id: 'junit-surefire-report',
+          label: '单元测试报告',
+          path: 'docs/159145/junit/index.html',
+          stage: 'IMPLEMENTATION',
+          kind: 'html',
+          exists: true
+        },
+        content: ''
+      }
+    });
+    const frame = wrapper.find<HTMLIFrameElement>('iframe.artifact-frame').element;
+    const frameDocument = document.implementation.createHTMLDocument('Surefire Report');
+    frameDocument.body.innerHTML = `
+      <h1>Surefire Report</h1>
+      <table><tr><th>Tests</th><th>Errors</th><th>Failures</th><th>Skipped</th><th>Success Rate</th></tr><tr><td>29</td><td>0</td><td>0</td><td>0</td><td>100%</td></tr></table>
+      <img src="images/icon_success_sml.gif" />
+    `;
+    Object.defineProperty(frame, 'contentDocument', {
+      configurable: true,
+      value: frameDocument
+    });
+
+    await wrapper.find('iframe.artifact-frame').trigger('load');
+
+    const fallbackStyle = frameDocument.getElementById('ai-delivery-junit-report-fallback-style');
+    expect(fallbackStyle?.textContent).toContain('border-collapse');
+    expect(fallbackStyle?.textContent).toContain('img[src*="icon_"]');
+  });
+
   it('打开新产物重置 HTML 预览，同一路径内容变化保留当前模式', async () => {
     // 中文说明：技术方案版本内容变化不应重置选择，但真正切换产物必须恢复默认精排。
     const baseArtifact: ArtifactRef = {
@@ -690,6 +723,136 @@ describe('shared artifact preview', () => {
     wrapper.unmount();
   });
 
+  it('预览缩放后按选区视觉位置展示批注浮层', async () => {
+    vi.mocked(apiClient.listPublicTechDesignAnnotations).mockResolvedValue({
+      annotations: [],
+      hash: 'annotation-list-hash',
+      summaryPath: ''
+    });
+    const wrapper = mount(ArtifactPreviewShell, {
+      attachTo: document.body,
+      props: {
+        artifact: {
+          id: 'technical-design',
+          label: '技术方案',
+          path: 'docs/172014/technical-design/design_review.md',
+          stage: 'TECH_DESIGN',
+          kind: 'markdown',
+          exists: true,
+          hash: 'current-hash'
+        },
+        content: '# 技术方案\n\n需要缓存策略说明。',
+        publicToken: 'share-token',
+        canCreateAnnotation: true,
+        currentUserId: 1
+      }
+    });
+    await flushPromises();
+    await wrapper.find('.zoom-in-button').trigger('click');
+    await wrapper.find('.zoom-in-button').trigger('click');
+    await nextTick();
+    expect(wrapper.find('.zoom-percent').text()).toBe('120%');
+
+    const text = wrapper.find('.artifact-markdown p').element.firstChild as Text;
+    const range = document.createRange();
+    range.setStart(text, 2);
+    range.setEnd(text, 6);
+    Object.defineProperty(range, 'getBoundingClientRect', {
+      value: () =>
+        ({
+          top: 200,
+          left: 180,
+          width: 80,
+          height: 20,
+          right: 260,
+          bottom: 220,
+          x: 180,
+          y: 200,
+          toJSON: () => ({})
+        }) as DOMRect
+    });
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: 220, clientY: 300 }));
+    await nextTick();
+
+    const menu = wrapper.find('.selection-annotation-menu').element as HTMLElement;
+    expect(menu.style.left).toBe('220px');
+    expect(menu.style.top).toBe('252px');
+    window.getSelection()?.removeAllRanges();
+    wrapper.unmount();
+  });
+
+  it('点击正文批注高亮会定位右侧批注卡片并闪烁', async () => {
+    vi.mocked(apiClient.listPublicTechDesignAnnotations).mockResolvedValue({
+      annotations: [annotation({ id: 'annotation-current', contentHash: 'current-hash', selectedText: '当前内容', comment: '当前版本批注' })],
+      hash: 'annotation-list-hash',
+      summaryPath: ''
+    });
+    const originalScrollIntoView = Element.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    const wrapper = mount(ArtifactPreviewShell, {
+      props: {
+        artifact: {
+          id: 'technical-design',
+          label: '技术方案',
+          path: 'docs/172014/technical-design/design_review.md',
+          stage: 'TECH_DESIGN',
+          kind: 'markdown',
+          exists: true,
+          hash: 'current-hash'
+        },
+        content: '# 技术方案\n\n当前内容',
+        publicToken: 'share-token'
+      }
+    });
+    await flushPromises();
+
+    await wrapper.find('.tech-design-annotation-highlight').trigger('click');
+    await nextTick();
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center', behavior: 'smooth' });
+    const panelItem = wrapper.find('.annotation-item[data-annotation-id="annotation-current"]');
+    expect(panelItem.classes()).toContain('annotation-item--flash');
+    wrapper.unmount();
+    if (originalScrollIntoView) {
+      Element.prototype.scrollIntoView = originalScrollIntoView;
+    } else {
+      delete (Element.prototype as any).scrollIntoView;
+    }
+  });
+
+  it('右侧定位批注会滚动正文并闪烁对应高亮', async () => {
+    vi.mocked(apiClient.listPublicTechDesignAnnotations).mockResolvedValue({
+      annotations: [annotation({ id: 'annotation-current', contentHash: 'current-hash', selectedText: '当前内容', comment: '当前版本批注' })],
+      hash: 'annotation-list-hash',
+      summaryPath: ''
+    });
+    const wrapper = mount(ArtifactPreviewShell, {
+      props: {
+        artifact: {
+          id: 'technical-design',
+          label: '技术方案',
+          path: 'docs/172014/technical-design/design_review.md',
+          stage: 'TECH_DESIGN',
+          kind: 'markdown',
+          exists: true,
+          hash: 'current-hash'
+        },
+        content: '# 技术方案\n\n当前内容',
+        publicToken: 'share-token'
+      }
+    });
+    await flushPromises();
+
+    await wrapper.find('button[title="定位批注"]').trigger('click');
+    await nextTick();
+
+    expect(wrapper.find('.tech-design-annotation-highlight').classes()).toContain('tech-design-annotation-highlight--flash');
+    wrapper.unmount();
+  });
+
   it('选择正文后可从浮层菜单创建批注', async () => {
     vi.mocked(apiClient.listPublicTechDesignAnnotations).mockResolvedValue({
       annotations: [],
@@ -701,7 +864,7 @@ describe('shared artifact preview', () => {
       hash: 'annotation-list-after-create',
       summaryPath: ''
     });
-    vi.spyOn(ElMessageBox, 'prompt').mockResolvedValue({ value: '新增意见' } as any);
+    const promptSpy = vi.spyOn(ElMessageBox, 'prompt').mockResolvedValue({ value: '新增意见' } as any);
     const wrapper = mount(ArtifactPreviewShell, {
       attachTo: document.body,
       props: {
@@ -734,6 +897,11 @@ describe('shared artifact preview', () => {
     await wrapper.find('.selection-annotation-menu__button').trigger('click');
     await flushPromises();
 
+    expect(promptSpy).toHaveBeenCalledWith(
+      '记录针对所选文案的批注意见',
+      '新增技术方案批注',
+      expect.objectContaining({ zIndex: 3300 })
+    );
     expect(apiClient.createPublicTechDesignAnnotation).toHaveBeenCalledWith(
       'share-token',
       expect.objectContaining({
@@ -743,6 +911,98 @@ describe('shared artifact preview', () => {
       })
     );
     expect(wrapper.find('.selection-annotation-menu').exists()).toBe(false);
+    window.getSelection()?.removeAllRanges();
+    wrapper.unmount();
+  });
+
+  it('流程图全屏后仍可通过选区浮层创建批注', async () => {
+    vi.mocked(mermaid.run).mockImplementation(async (options?: { nodes?: HTMLElement[] }) => {
+      (options?.nodes || []).forEach((node) => {
+        if (!node.querySelector('svg')) {
+          node.innerHTML = '<svg viewBox="0 0 800 400"><text x="20" y="40">缓存策略</text></svg>';
+        }
+      });
+    });
+    vi.mocked(apiClient.listPublicTechDesignAnnotations).mockResolvedValue({
+      annotations: [],
+      hash: 'annotation-list-hash',
+      summaryPath: ''
+    });
+    vi.mocked(apiClient.createPublicTechDesignAnnotation).mockResolvedValue({
+      annotations: [
+        annotation({
+          id: 'annotation-fullscreen',
+          contentHash: 'current-hash',
+          selectedText: '缓存策略',
+          comment: '全屏批注'
+        })
+      ],
+      hash: 'annotation-list-after-create',
+      summaryPath: ''
+    });
+    const promptSpy = vi.spyOn(ElMessageBox, 'prompt').mockResolvedValue({ value: '全屏批注' } as any);
+    const wrapper = mount(ArtifactPreviewShell, {
+      attachTo: document.body,
+      props: {
+        artifact: {
+          id: 'technical-design',
+          label: '技术方案',
+          path: 'docs/172014/technical-design/design_review.md',
+          stage: 'TECH_DESIGN',
+          kind: 'markdown',
+          exists: true,
+          hash: 'current-hash'
+        },
+        content: '# 技术方案\n\n```mermaid\nsequenceDiagram\n    A->>B: 缓存策略\n```',
+        publicToken: 'share-token',
+        canCreateAnnotation: true,
+        currentUserId: 1
+      }
+    });
+    await flushPromises();
+
+    const diagram = wrapper.find('.mermaid-sequence-diagram');
+    await diagram.find('[data-sequence-zoom-action="fullscreen"]').trigger('click');
+    await nextTick();
+    expect(diagram.classes()).toContain('sequence-diagram-fullscreen');
+
+    const textElement = wrapper.find('.mermaid-sequence-diagram svg text').element as SVGTextContentElement;
+    Object.defineProperty(textElement, 'getNumberOfChars', {
+      configurable: true,
+      value: () => 4
+    });
+    Object.defineProperty(textElement, 'getExtentOfChar', {
+      configurable: true,
+      value: (index: number) => ({ x: index * 18, y: 20, width: 18, height: 20 })
+    });
+    const text = textElement.firstChild as Text;
+    const range = document.createRange();
+    range.setStart(text, 0);
+    range.setEnd(text, 4);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: 220, clientY: 180 }));
+    await nextTick();
+
+    expect(wrapper.find('.selection-annotation-menu').text()).toContain('批注');
+    expect(artifactPreviewShellSource).toContain('z-index: 3200');
+
+    await wrapper.find('.selection-annotation-menu__button').trigger('click');
+    await flushPromises();
+
+    expect(promptSpy).toHaveBeenCalledWith(
+      '记录针对所选文案的批注意见',
+      '新增技术方案批注',
+      expect.objectContaining({ zIndex: 3300 })
+    );
+    expect(apiClient.createPublicTechDesignAnnotation).toHaveBeenCalledWith(
+      'share-token',
+      expect.objectContaining({
+        selectedText: '缓存策略',
+        comment: '全屏批注'
+      })
+    );
+    expect(wrapper.find('.tech-design-annotation-svg-highlight').exists()).toBe(true);
     window.getSelection()?.removeAllRanges();
     wrapper.unmount();
   });

@@ -402,8 +402,9 @@ export async function createTechDesignDraftSnapshot(workspaceRoot: string, requi
   await fs.mkdir(dir, { recursive: true });
   const contentHash = hashContent(content);
   const existing = await listDraftSnapshots(workspaceRoot, requirementId);
-  if (existing.some((version) => version.contentHash === contentHash)) {
-    return undefined;
+  const existingVersion = existing.find((version) => version.contentHash === contentHash);
+  if (existingVersion) {
+    return existingVersion;
   }
   const stamp = `${new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)}-${contentHash.slice(0, 8)}`;
   const snapshotPath = path.join(dir, `${stamp}.md`);

@@ -32,6 +32,16 @@ function workflow(): RequirementWorkflow {
   };
 }
 
+function legacyWorkflowWithoutRetrospective(): RequirementWorkflow {
+  const item = workflow();
+  const legacyStages = { ...item.stages };
+  delete (legacyStages as Partial<typeof legacyStages>).RETROSPECTIVE;
+  return {
+    ...item,
+    stages: legacyStages as RequirementWorkflow['stages']
+  };
+}
+
 function centerRequirement() {
   return {
     id: 100,
@@ -114,12 +124,13 @@ describe('apiClient Runner docs endpoints', () => {
   });
 
   it('需求详情优先从 Runner 合并接口读取，保留本地扫描产物', async () => {
-    const fetchMock = vi.fn().mockImplementation(() => okResponse(workflow()));
+    const fetchMock = vi.fn().mockImplementation(() => okResponse(legacyWorkflowWithoutRetrospective()));
     vi.stubGlobal('fetch', fetchMock);
 
     const result = await apiClient.getRequirement('172014');
 
     expect(result.currentStage).toBe('TECH_DESIGN');
+    expect(result.stages.RETROSPECTIVE.status).toBe('NOT_STARTED');
     expect(result.artifacts[0].path).toBe('docs/172014/technical-design/design_review.md');
     expect(fetchMock).toHaveBeenCalledWith(
       '/runner-api/api/ai-delivery/requirements/172014?projectId=10',
@@ -250,7 +261,7 @@ describe('apiClient Runner docs endpoints', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    await apiClient.runAction('172014', { actionType: 'DESIGN_GENERATE' });
+    const result = await apiClient.runAction('172014', { actionType: 'DESIGN_GENERATE' });
 
     expect(fetchMock).toHaveBeenCalledWith(
       '/runner-api/api/ai-delivery/requirements/172014/actions',
@@ -258,6 +269,7 @@ describe('apiClient Runner docs endpoints', () => {
         method: 'POST'
       })
     );
+    expect(result.workflow.stages.RETROSPECTIVE.status).toBe('NOT_STARTED');
   });
 
   it('命令预览提交到本地 Runner', async () => {

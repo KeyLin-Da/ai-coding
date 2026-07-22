@@ -45,10 +45,18 @@ describe('ArtifactSidebar', () => {
     });
 
     expect(wrapper.text()).toContain('产物');
+    expect(wrapper.text()).toContain('评审问题');
     expect(wrapper.text()).toContain('PRD 分析文档');
     expect(wrapper.text()).toContain('Proposal');
     expect(wrapper.text()).not.toContain('OpenSpec Change');
+    expect(wrapper.text()).not.toContain('阻断问题');
+
+    await wrapper.findAll('.sidebar-tab')[1].trigger('click');
+
     expect(wrapper.text()).toContain('阻断问题');
+    expect(wrapper.text()).not.toContain('PRD 分析文档');
+
+    await wrapper.findAll('.sidebar-tab')[0].trigger('click');
     await wrapper.find('.artifact-row').trigger('click');
     expect(wrapper.emitted('select')?.[0][0]).toMatchObject({ path: 'docs/172014/prd/analysis.md' });
   });

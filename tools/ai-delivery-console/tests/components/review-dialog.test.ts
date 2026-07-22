@@ -172,6 +172,29 @@ describe('ReviewDialog', () => {
     });
   });
 
+  it('交付复盘审核直接提交普通审核且不生成 Git 同步计划', async () => {
+    const wrapper = mount(ReviewDialog, {
+      global: {
+        stubs: stubs()
+      }
+    });
+    (wrapper.vm as any).open('RETROSPECTIVE', 'docs/159145/retrospective/summary.md', undefined, '159145', 300);
+    await flushPromises();
+
+    await wrapper.findAll('button').find((button) => button.text() === '提交')?.trigger('click');
+    await flushPromises();
+
+    expect(apiClient.planArtifactGitSync).not.toHaveBeenCalled();
+    expect(apiClient.confirmArtifactGitSync).not.toHaveBeenCalled();
+    expect(wrapper.emitted('submit')?.[0]?.[0]).toEqual({
+      stage: 'RETROSPECTIVE',
+      implementationStep: undefined,
+      decision: 'APPROVED',
+      comment: '',
+      artifactPath: 'docs/159145/retrospective/summary.md'
+    });
+  });
+
   it('审核同步计划为空时允许直接提交审核结论', async () => {
     vi.mocked(apiClient.planArtifactGitSync).mockResolvedValue({
       requirementId: '141846',

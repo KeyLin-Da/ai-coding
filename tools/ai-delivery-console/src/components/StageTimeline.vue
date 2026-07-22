@@ -4,14 +4,14 @@
       v-for="stage in applicableStages"
       :key="stage"
       class="stage-step"
-      :class="{ active: modelValue === stage, approved: workflow.stages[stage].status === 'APPROVED' }"
+      :class="{ active: modelValue === stage, approved: stageStatus(stage) === 'APPROVED' }"
       type="button"
       @click="$emit('update:modelValue', stage)"
     >
-      <span class="step-index">{{ workflow.stages[stage].status === 'APPROVED' ? '✓' : stageIndex(stage) }}</span>
+      <span class="step-index">{{ stageStatus(stage) === 'APPROVED' ? '✓' : stageIndex(stage) }}</span>
       <span class="step-main">
         <strong>{{ stageLabels[stage] }}</strong>
-        <small>{{ statusLabels[workflow.stages[stage].status] }}</small>
+        <small>{{ statusLabels[stageStatus(stage)] }}</small>
       </span>
     </button>
   </div>
@@ -33,6 +33,10 @@ defineEmits<{
 
 function stageIndex(stage: WorkflowStage) {
   return applicableStages.value.indexOf(stage) + 1;
+}
+
+function stageStatus(stage: WorkflowStage) {
+  return props.workflow.stages[stage]?.status || 'NOT_STARTED';
 }
 
 const applicableStages = computed(() => workflowStagesForWorkflow(props.workflow));

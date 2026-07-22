@@ -173,6 +173,79 @@ describe('tech design versioned annotation UI', () => {
     expect(highlight?.textContent).toBe('F1‑学习积');
   });
 
+  it('SVG 文本批注使用背景层高亮且不改写 Mermaid 文案', () => {
+    const text = 'PageVO<CourseComponentOptionVO>';
+    const selectedText = 'CourseComponentOptionVO';
+    const start = text.indexOf(selectedText);
+    document.body.innerHTML = `
+      <article>
+        <svg viewBox="0 0 320 80">
+          <g>
+            <text x="10" y="32">PageVO&lt;CourseComponentOptionVO&gt;</text>
+          </g>
+        </svg>
+      </article>
+    `;
+    const root = document.querySelector('article') as HTMLElement;
+    const textElement = root.querySelector('text') as SVGTextContentElement;
+    Object.defineProperty(textElement, 'getNumberOfChars', {
+      value: () => text.length
+    });
+    Object.defineProperty(textElement, 'getExtentOfChar', {
+      value: (index: number) =>
+        ({
+          x: 10 + index * 8,
+          y: 18,
+          width: 8,
+          height: 16
+        }) as DOMRect
+    });
+
+    applyAnnotationHighlights(
+      root,
+      [
+        annotation({
+          id: 'annotation-svg',
+          selectedText,
+          anchor: {
+            plainStart: start,
+            plainEnd: start + selectedText.length,
+            prefixText: 'PageVO<',
+            suffixText: '>',
+            headingPath: ['技术方案'],
+            occurrence: 1
+          }
+        })
+      ],
+      'hash'
+    );
+    applyAnnotationHighlights(
+      root,
+      [
+        annotation({
+          id: 'annotation-svg',
+          selectedText,
+          anchor: {
+            plainStart: start,
+            plainEnd: start + selectedText.length,
+            prefixText: 'PageVO<',
+            suffixText: '>',
+            headingPath: ['技术方案'],
+            occurrence: 1
+          }
+        })
+      ],
+      'hash'
+    );
+
+    const svgHighlights = Array.from(root.querySelectorAll('.tech-design-annotation-svg-highlight'));
+    expect(svgHighlights).toHaveLength(1);
+    expect(svgHighlights[0].getAttribute('data-annotation-id')).toBe('annotation-svg');
+    expect(svgHighlights[0].getAttribute('x')).toBe(String(10 + start * 8 - 2));
+    expect(root.querySelector('svg span.tech-design-annotation-highlight')).toBeNull();
+    expect(root.querySelector('text')?.textContent).toBe(text);
+  });
+
   it('版本选择器展示文档中解析到的评审版本', () => {
     const wrapper = mount(TechDesignVersionSelector, {
       props: {
@@ -184,6 +257,18 @@ describe('tech design versioned annotation UI', () => {
     expect(wrapper.text()).toContain('v2.0 当前草稿');
     expect(wrapper.text()).toContain('v1.9');
     expect(wrapper.text()).toContain('对比版本');
+  });
+
+  it('版本选择器支持隐藏对比按钮', () => {
+    const wrapper = mount(TechDesignVersionSelector, {
+      props: {
+        modelValue: 'current',
+        versions: versions(),
+        showCompare: false
+      }
+    });
+
+    expect(wrapper.text()).not.toContain('对比版本');
   });
 
   it('批注面板支持触发收起、定位、标记已解决和删除事件', async () => {

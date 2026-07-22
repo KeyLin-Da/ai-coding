@@ -236,7 +236,7 @@ describe('requirement-workflow-view', () => {
     expect(centerWorkflow.currentStage).toBe('IMPLEMENTATION');
   });
 
-  it('合并中心 DONE 状态时不按本地阶段缺失回退', () => {
+  it('合并中心 DONE 状态时会按本地未完成阶段回退，避免跳过后续复盘', () => {
     const centerWorkflow = centerRequirementToWorkflow({
       id: 100,
       projectId: 10,
@@ -263,8 +263,8 @@ describe('requirement-workflow-view', () => {
 
     const merged = mergeRequirementWorkflow(centerWorkflow, localRequirementWorkflow());
 
-    expect(merged.currentStage).toBe('DONE');
-    expect(merged.status).toBe('DONE');
+    expect(merged.currentStage).toBe('CODE_REVIEW');
+    expect(merged.status).toBe('IN_PROGRESS');
   });
 
   it('中心详情读取超时时先返回 undefined，并在完成后命中短缓存', async () => {

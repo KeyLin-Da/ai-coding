@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { RequirementWorkflow, ReviewInput, ReviewIssue, WorkflowStage } from '../../shared/workflow';
 import { areAllImplementationStepsApproved, ensureImplementationSteps, isImplementationStep, nextImplementationStep } from '../../shared/workflow';
-import { nextStage, statusAfterReview } from '../../shared/stage-rules';
+import { canApproveStage, nextStage, statusAfterReview } from '../../shared/stage-rules';
 import { createId, hashContent, normalizeRequirementId, sanitizeBranchName } from './workspace';
 import { parseCodeReviewSummary } from './code-review-parser';
 
@@ -100,6 +100,29 @@ export async function applyReview(workspaceRoot: string, workflow: RequirementWo
     return workflow;
   }
 
+  const reviewWorkflow = {
+    ...workflow,
+    retrospective:
+      input.stage === 'RETROSPECTIVE' && input.decision === 'RISK_ACCEPTED'
+        ? {
+            ...(workflow.retrospective || {}),
+            riskAcceptedAt: review.createdAt,
+            riskAcceptedBy: input.actor || 'local-user'
+          }
+        : workflow.retrospective,
+    stages: {
+      ...workflow.stages,
+      [input.stage]: {
+        ...workflow.stages[input.stage],
+        artifactPath
+      }
+    }
+  };
+  if (positiveDecision && !canApproveStage(reviewWorkflow, input.stage)) {
+    throw new Error(input.stage === 'RETROSPECTIVE' ? '复盘产物、候选经验或未关闭风险尚未满足审核条件' : '当前阶段尚未满足审核通过条件');
+  }
+
+  workflow.retrospective = reviewWorkflow.retrospective;
   workflow.stages[input.stage] = {
     ...workflow.stages[input.stage],
     status: input.decision === 'RISK_ACCEPTED' ? 'APPROVED' : statusAfterReview(input.decision),
@@ -153,6 +176,19 @@ export function returnToImplementation(workflow: RequirementWorkflow, issues: Re
   workflow.stages.IMPLEMENTATION.status = 'REJECTED';
   workflow.stages.IMPLEMENTATION.comment = `代码评审打回，待修复 ${openBlockers.length} 个阻断问题`;
   workflow.stages.CODE_REVIEW.status = 'REJECTED';
+  workflow.stages.RETROSPECTIVE = {
+    ...workflow.stages.RETROSPECTIVE,
+    status: 'NOT_STARTED',
+    artifactPath: workflow.stages.RETROSPECTIVE?.artifactPath,
+    comment: '代码评审打回实施，复盘需重新生成或重新确认',
+    approvedAt: undefined
+  };
+  workflow.retrospective = {
+    ...(workflow.retrospective || {}),
+    pendingCandidateCount: 0,
+    invalidatedAt: new Date().toISOString(),
+    invalidatedReason: '代码评审打回实施'
+  };
   return workflow;
 }
 
@@ -165,6 +201,9 @@ export function stageFromArtifactPath(filePath: string): WorkflowStage {
   }
   if (filePath.includes('/code-review/') || filePath.includes('/code_review/')) {
     return 'CODE_REVIEW';
+  }
+  if (filePath.includes('/retrospective/')) {
+    return 'RETROSPECTIVE';
   }
   return 'PRD';
 }

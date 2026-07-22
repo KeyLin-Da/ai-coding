@@ -33,13 +33,15 @@ function defectWorkflow(): RequirementWorkflow {
 describe('stage-rules', () => {
   it('按固定顺序推进阶段', () => {
     expect(nextStage('PRD')).toBe('TECH_DESIGN');
-    expect(nextStage('CODE_REVIEW')).toBe('DONE');
+    expect(nextStage('CODE_REVIEW')).toBe('RETROSPECTIVE');
+    expect(nextStage('RETROSPECTIVE')).toBe('DONE');
   });
 
   it('缺陷按适用阶段推进', () => {
     const item = defectWorkflow();
     expect(nextStage('TECH_DESIGN', item)).toBe('IMPLEMENTATION');
-    expect(nextStage('CODE_REVIEW', item)).toBe('DONE');
+    expect(nextStage('CODE_REVIEW', item)).toBe('RETROSPECTIVE');
+    expect(nextStage('RETROSPECTIVE', item)).toBe('DONE');
   });
 
   it('PRD 未通过时禁止进入技术方案', () => {

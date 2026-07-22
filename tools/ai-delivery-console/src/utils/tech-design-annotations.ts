@@ -1,6 +1,8 @@
 import type { TechDesignAnnotation, TechDesignAnnotationAnchor } from '@shared/workflow';
 
 const highlightClass = 'tech-design-annotation-highlight';
+const svgHighlightClass = 'tech-design-annotation-svg-highlight';
+const svgNamespace = 'http://www.w3.org/2000/svg';
 const dashVariants = /[\u2010-\u2015\u2212]/g;
 const zeroWidthChars = /[\u200B-\u200D\uFEFF]/g;
 
@@ -8,6 +10,13 @@ interface NormalizedContent {
   text: string;
   starts: number[];
   ends: number[];
+}
+
+interface SvgBounds {
+  x: number;
+  y: number;
+  right: number;
+  bottom: number;
 }
 
 function normalizeSearchText(value: string): string {
@@ -187,6 +196,7 @@ export function locateAnnotation(root: HTMLElement, annotation: TechDesignAnnota
 }
 
 export function clearAnnotationHighlights(root: HTMLElement): void {
+  root.querySelectorAll(`.${svgHighlightClass}`).forEach((highlight) => highlight.remove());
   const highlights = Array.from(root.querySelectorAll(`span.${highlightClass}`));
   for (const highlight of highlights) {
     const parent = highlight.parentNode;
@@ -221,6 +231,127 @@ function wrapTextRange(node: Text, start: number, end: number, annotation: TechD
   node.parentNode?.replaceChild(fragment, node);
 }
 
+function isSvgElement(element: Element | null | undefined): element is SVGElement {
+  return Boolean(element && element.namespaceURI === svgNamespace);
+}
+
+function isSvgTextElement(element: Element | null | undefined): element is SVGTextContentElement {
+  if (!isSvgElement(element)) {
+    return false;
+  }
+  return ['text', 'tspan', 'textPath'].includes(element.localName);
+}
+
+function findSvgTextElement(node: Text): SVGTextContentElement | undefined {
+  let element: Element | null = node.parentElement;
+  while (isSvgElement(element)) {
+    if (isSvgTextElement(element)) {
+      return element;
+    }
+    element = element.parentElement;
+  }
+  return undefined;
+}
+
+function findSvgTextContainer(element: SVGTextContentElement): SVGTextContentElement {
+  let current: Element | null = element;
+  let container: SVGTextContentElement = element;
+  while (isSvgElement(current)) {
+    if (current.localName === 'text' && isSvgTextElement(current)) {
+      container = current;
+    }
+    current = current.parentElement;
+  }
+  return container;
+}
+
+function textOffsetWithin(root: Element, target: Text): number {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let cursor = 0;
+  let node = walker.nextNode();
+  while (node) {
+    if (node === target) {
+      return cursor;
+    }
+    cursor += node.textContent?.length || 0;
+    node = walker.nextNode();
+  }
+  return cursor;
+}
+
+function mergeSvgBounds(bounds: SvgBounds | undefined, rect: DOMRect): SvgBounds | undefined {
+  const x = Number(rect.x);
+  const y = Number(rect.y);
+  const width = Number(rect.width);
+  const height = Number(rect.height);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(width) || !Number.isFinite(height)) {
+    return bounds;
+  }
+  const right = x + Math.max(0, width);
+  const bottom = y + Math.max(0, height);
+  if (!bounds) {
+    return { x, y, right, bottom };
+  }
+  return {
+    x: Math.min(bounds.x, x),
+    y: Math.min(bounds.y, y),
+    right: Math.max(bounds.right, right),
+    bottom: Math.max(bounds.bottom, bottom)
+  };
+}
+
+function drawSvgTextHighlight(node: Text, start: number, end: number, annotation: TechDesignAnnotation): void {
+  const textElement = findSvgTextElement(node);
+  if (!textElement || typeof textElement.getExtentOfChar !== 'function') {
+    return;
+  }
+  const localStart = textOffsetWithin(textElement, node) + start;
+  const localEnd = textOffsetWithin(textElement, node) + end;
+  const charCount =
+    typeof textElement.getNumberOfChars === 'function'
+      ? textElement.getNumberOfChars()
+      : textElement.textContent?.length || 0;
+  let bounds: SvgBounds | undefined;
+  for (let index = Math.max(0, localStart); index < Math.min(localEnd, charCount); index += 1) {
+    try {
+      bounds = mergeSvgBounds(bounds, textElement.getExtentOfChar(index));
+    } catch {
+      // Some SVG renderers throw for whitespace or collapsed glyphs; keep measuring the rest.
+    }
+  }
+  if (!bounds) {
+    return;
+  }
+  const container = findSvgTextContainer(textElement);
+  const parent = container.parentNode;
+  if (!parent) {
+    return;
+  }
+  const paddingX = 2;
+  const paddingY = 1;
+  const rect = document.createElementNS(svgNamespace, 'rect');
+  rect.setAttribute('class', svgHighlightClass);
+  rect.setAttribute('data-annotation-id', annotation.id);
+  rect.setAttribute('x', String(bounds.x - paddingX));
+  rect.setAttribute('y', String(bounds.y - paddingY));
+  rect.setAttribute('width', String(bounds.right - bounds.x + paddingX * 2));
+  rect.setAttribute('height', String(bounds.bottom - bounds.y + paddingY * 2));
+  rect.setAttribute('rx', '3');
+  rect.setAttribute('ry', '3');
+  rect.setAttribute('fill', '#fef08a');
+  rect.setAttribute('opacity', '0.88');
+  rect.setAttribute('pointer-events', 'none');
+  parent.insertBefore(rect, container);
+}
+
+function highlightTextRange(node: Text, start: number, end: number, annotation: TechDesignAnnotation): void {
+  if (findSvgTextElement(node)) {
+    drawSvgTextHighlight(node, start, end, annotation);
+    return;
+  }
+  wrapTextRange(node, start, end, annotation);
+}
+
 function containsVisibleText(value: string): boolean {
   return /\S/.test(value.replace(zeroWidthChars, ''));
 }
@@ -242,7 +373,7 @@ function applyHighlight(root: HTMLElement, annotation: TechDesignAnnotation, ran
     cursor = nodeEnd;
   }
   for (const segment of segments.reverse()) {
-    wrapTextRange(segment.node, segment.start, segment.end, annotation);
+    highlightTextRange(segment.node, segment.start, segment.end, annotation);
   }
 }
 

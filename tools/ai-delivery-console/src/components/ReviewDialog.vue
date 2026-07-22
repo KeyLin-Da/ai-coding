@@ -96,7 +96,11 @@ const emit = defineEmits<{
   (event: 'synced', value: ArtifactGitSyncConfirmResult): void;
 }>();
 
-const requiresGitSync = computed(() => !implementationStep.value && (decision.value === 'APPROVED' || decision.value === 'RISK_ACCEPTED'));
+const requiresGitSync = computed(() => (
+  stage.value !== 'RETROSPECTIVE'
+  && !implementationStep.value
+  && (decision.value === 'APPROVED' || decision.value === 'RISK_ACCEPTED')
+));
 
 const hasSyncFiles = computed(() => Boolean(syncPlan.value?.files.length));
 const canContinueToConfirm = computed(() => Boolean(syncPlan.value && !syncPlan.value.blocked && (!hasSyncFiles.value || selectedFiles.value.length)));
